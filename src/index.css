@@ -1,0 +1,188 @@
+@import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@layer base {
+  :root {
+    --hud-bg: #050811;
+    --hud-panel: rgba(8, 15, 29, 0.88);
+    --hud-border: rgba(34, 211, 238, 0.24);
+    --hud-cyan: #22d3ee;
+    --hud-red: #f43f5e;
+    --hud-blue: #38bdf8;
+    --hud-amber: #f59e0b;
+    --hud-emerald: #10b981;
+  }
+
+  * {
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(34, 211, 238, 0.35) rgba(8, 15, 29, 0.6);
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #050811;
+    color: #e2e8f0;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    user-select: none;
+  }
+
+  code, pre, .font-mono {
+    font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  }
+}
+
+/* AEGIS C4ISR Tactical Scanline & Grid Overlay */
+.tactical-scanlines {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 240, 255, 0.025) 50%,
+    rgba(0, 240, 255, 0.025)
+  );
+  background-size: 100% 4px;
+}
+
+.tactical-panel {
+  background: linear-gradient(180deg, rgba(9, 17, 34, 0.92) 0%, rgba(5, 10, 22, 0.95) 100%);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(34, 211, 238, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.tactical-corner {
+  position: relative;
+}
+.tactical-corner::before,
+.tactical-corner::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: #22d3ee;
+  pointer-events: none;
+}
+.tactical-corner::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid #22d3ee;
+  border-left: 2px solid #22d3ee;
+}
+.tactical-corner::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid #22d3ee;
+  border-right: 2px solid #22d3ee;
+}
+
+/* MapLibre popup override for tactical style */
+.maplibregl-popup-content {
+  background: rgba(6, 12, 26, 0.95) !important;
+  border: 1px solid rgba(34, 211, 238, 0.45) !important;
+  color: #e2e8f0 !important;
+  padding: 8px 10px !important;
+  border-radius: 4px !important;
+  font-family: ui-monospace, monospace !important;
+  font-size: 11px !important;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.2) !important;
+}
+.maplibregl-popup-tip {
+  border-top-color: rgba(34, 211, 238, 0.45) !important;
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(5, 8, 17, 0.7) !important;
+  color: #64748b !important;
+  font-size: 10px !important;
+}
+
+/* The command rows own their height; controls never shrink into stacked text. */
+.app-shell { width: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+button, summary, select { touch-action: manipulation; }
+button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid #22d3ee; outline-offset: 3px;
+}
+button svg, summary svg { flex-shrink: 0; }
+.command-header, .workspace-pane > aside, .combat-dock { backdrop-filter: none; }
+.command-header { position: relative; z-index: 30; flex: none; width: 100%; }
+.command-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 10px 16px; }
+.command-primary { border-bottom: 1px solid #1e293b; }
+.command-secondary { background: rgba(2, 6, 23, .48); padding-block: 8px; }
+.scenario-controls { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 400px; }
+.brand-mark { display: flex; align-items: center; gap: 8px; flex: none; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: #67e8f9; white-space: nowrap; }
+.brand-mark i { width: 7px; height: 7px; border-radius: 50%; background: #22d3ee; box-shadow: 0 0 10px #22d3ee66; }
+.scenario-select { width: 100%; max-width: 430px; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid #334155; border-radius: 6px; background: #0b1425; color: #e2e8f0; font-size: 12px; text-overflow: ellipsis; cursor: pointer; }
+.utility-controls, .simulation-controls, .playback-controls, .view-controls, .panel-controls { display: flex; align-items: center; gap: 8px; }
+.utility-controls, .view-controls { flex-wrap: wrap; }
+.toolbar-button { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid #263449; border-radius: 6px; background: #0c1525; color: #cbd5e1; font-size: 12px; line-height: 20px; white-space: nowrap; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.toolbar-button:hover { background: #15243a; border-color: #3a647a; }
+.toolbar-button svg, .perspective-controls svg { width: 15px; height: 15px; flex: none; }
+.icon-button { padding-inline: 8px; }
+.mission-clock { display: flex; flex-direction: column; flex: none; padding-right: 14px; margin-right: 4px; border-right: 1px solid #263449; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mission-clock span { font-size: 10px; color: #94a3b8; }
+.mission-clock time { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: #67e8f9; }
+.playback-toggle { min-width: 100px; }
+.playback-toggle.is-paused { background: #78350f38; color: #fcd34d; border-color: #92400e; }
+.playback-toggle.is-running { background: #064e3b66; color: #6ee7b7; border-color: #047857; }
+.speed-controls, .perspective-controls { display: flex; align-items: center; flex: none; gap: 3px; padding: 3px; border: 1px solid #263449; border-radius: 6px; background: #02061780; }
+.speed-controls button, .perspective-controls button { min-width: 36px; min-height: 28px; padding: 3px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.speed-controls button { color: #94a3b8; font-variant-numeric: tabular-nums; }
+.speed-controls button:hover { color: #e2e8f0; }
+.speed-controls .is-active { background: #22d3ee; color: #020617; }
+.perspective-controls > svg { margin-inline: 5px; }
+.panel-controls { padding-left: 8px; border-left: 1px solid #263449; }
+.toolbar-button.panel-active { color: #67e8f9; border-color: #155e75; background: #08334466; }
+.utility-controls { position: relative; }
+.pause-settings { position: static; }
+.pause-settings summary { list-style: none; }
+.pause-settings summary::-webkit-details-marker { display: none; }
+.pause-popover { position: absolute; top: calc(100% + 10px); right: 0; width: 230px; padding: 16px; border-radius: 8px; z-index: 40; font-size: 12px; }
+.pause-popover label { display: flex; align-items: center; gap: 10px; padding-block: 6px; cursor: pointer; }
+.pause-popover input { accent-color: #22d3ee; }
+.auto-pause-banner { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #451a03; color: #fde68a; font-size: 12px; border-top: 1px solid #92400e; }
+.auto-pause-banner span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.workspace { position: relative; flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.workspace-pane { flex: none; min-height: 0; }
+.order-pane { width: clamp(264px, 21vw, 304px); }
+.inspector-pane { width: clamp(320px, 25vw, 356px); }
+.workspace-pane > aside { width: 100%; box-shadow: none; }
+.workspace-pane > aside > * { flex-shrink: 0; }
+.inspector-content { font-family: inherit; }
+.inspector-content > div { padding: 14px; border-radius: 7px; }
+.inspector-content > .unit-actions { padding: 0; }
+.inspector-content button { white-space: nowrap; }
+.inspector-content .telemetry-heading { gap: 8px; flex-wrap: wrap; }
+.inspector-content .stat-line { gap: 8px; flex-wrap: wrap; }
+.inspector-content select { min-width: 0; max-width: 100%; }
+.unit-roster-row { width: 100%; display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; padding: 12px 10px; text-align: left; cursor: pointer; border-left: 2px solid transparent; }
+.unit-roster-row > svg { margin-top: 3px; }
+.unit-roster-row.is-selected { border-left-color: #22d3ee; background: #06b6d41c; }
+.unit-roster-row:hover { background: #0f172acc; }
+.unit-roster-name { font-size: 12px; color: #e2e8f0; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.unit-roster-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 10px; color: #94a3b8; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.unit-roster-meta span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.combat-dock { z-index: 20; flex: none; display: flex; flex-direction: column; min-height: 42px; max-height: 40dvh; border-top: 1px solid #164e63; }
+.combat-dock.is-expanded { height: 230px; }
+.combat-dock-header { min-height: 42px; flex: none; display: flex; align-items: center; gap: 16px; padding: 6px 14px; background: #020617d9; }
+.combat-dock-toggle { display: flex; align-items: center; gap: 8px; flex: none; color: #67e8f9; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.latest-event { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #94a3b8; }
+.dock-summary { display: flex; align-items: center; gap: 16px; margin-left: auto; font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.log-filters { display: flex; flex: 1; align-items: center; gap: 6px; }
+.log-filters button { padding: 4px 10px; border-radius: 4px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.log-content { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.log-list { flex: 1; min-width: 0; overflow-y: auto; padding: 8px; }
+.log-entry { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 8px; margin-bottom: 4px; border-radius: 4px; background: #02061799; color: #cbd5e1; text-align: left; font-size: 11px; }
+button.log-entry { cursor: pointer; }
+button.log-entry:hover { background: #0f172a; }
+.log-entry time { flex: none; color: #64748b; font-variant-numeric: tabular-nums; }
+.log-entry .log-badge { flex: none; padding: 0 5px; border: 1px solid #334155; border-radius: 3px; font-size: 10px; color: #94a3b8; }
+.log-entry .log-copy { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.log-entry .log-description { display: block; margin: 3px 0 0; color: #64748b; line-height: 1.5; }
+.scorecards { width: 328px; flex: none; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px; border-left: 1px solid #1e293b; background: #02061799; font-size: 11px; }
+.scorecards article { padding: 10px; border: 1px solid #334155; border-radius: 6px; }
+.scorecards dl { display: grid; grid-template-columns: 1fr auto; gap: 5px 8px; margin-block: 10px; color: #94a3b8; }
+.scorecards dd { color: #e2e8f0; font-variant-numeric: tabular-nums; }
+.map-status { position: absolute; bottom: 12px; left: 12px; z-index: 10; max-width: calc(100% - 24px); pointer-events: none; padding: 8px 10px; border-radius: 6px; font-size: 10px; color: #94a3b8; }
+.map-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; }
+.map-legend > span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
