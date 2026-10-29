@@ -5,7 +5,9 @@ import maplibregl from 'maplibre-gl';
 import ms from 'milsymbol';
 import * as turf from '@turf/turf';
 import { useWargameStore } from '../store/useWargameStore';
-import { buildProceduralTheaterGeoJSON } from './proceduralTheaterGeo';
+import { createOfflineBasemap } from './offlineBasemap';
+import { installTacticalLayers } from './tacticalLayers';
+import { BasemapLoader, BASEMAP_PRESETS, initialBasemapState, basemapFallbackImage, type BasemapMode, type BasemapState } from './basemaps';
 import { calculateRadarHorizonKm } from '../engine/simulationEngine';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 
@@ -17,6 +19,10 @@ import { resolveUnitConfiguration } from '../db/unitConfiguration';
 export const TacticalMapCanvas: React.FC = () => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const basemapLoaderRef = useRef<BasemapLoader | null>(null);
+  const basemapMode = useWargameStore((s) => s.basemapMode);
+  const setBasemapMode = useWargameStore((s) => s.setBasemapMode);
+  const [basemapState, setBasemapState] = useState<BasemapState>(() => initialBasemapState(basemapMode));
   const [cursorCoord, setCursorCoord] = useState<[number, number]>([124.2, 26.2]);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
@@ -29,111 +35,39 @@ export const TacticalMapCanvas: React.FC = () => {
     if (!mapContainerRef.current || mapRef.current) return;
 
     const initialScenario = useWargameStore.getState().currentScenario;
-    const proceduralGeo = buildProceduralTheaterGeoJSON();
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       center: initialScenario.initialCamera.center,
       zoom: initialScenario.initialCamera.zoom,
-      minZoom: 3.5,
-      maxZoom: 13,
-      attributionControl: false,
-      style: {
-        version: 8,
-        sources: {
-          'carto-dark': {
-            type: 'raster',
-            tiles: [
-              'https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png',
-              'https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png',
-            ],
-            tileSize: 256,
-          },
-          'procedural-land': {
-            type: 'geojson',
-            data: proceduralGeo.landPolygons,
-          },
-          'procedural-grid': {
-            type: 'geojson',
-            data: proceduralGeo.gridLines,
-          },
-          'procedural-zones': {
-            type: 'geojson',
-            data: proceduralGeo.tacticalZones,
-          },
-        },
-        layers: [
-          {
-            id: 'background-ocean',
-            type: 'background',
-            paint: {
-              'background-color': '#040914',
-            },
-          },
-          {
-            id: 'carto-dark-layer',
-            type: 'raster',
-            source: 'carto-dark',
-            layout: { visibility: useWargameStore.getState().mapLayers.showSatelliteDarkTiles ? 'visible' : 'none' },
-            paint: {
-              'raster-opacity': 0.55,
-              'raster-contrast': 0.25,
-              'raster-brightness-max': 0.65,
-            },
-          },
-          {
-            id: 'procedural-land-fill',
-            type: 'fill',
-            source: 'procedural-land',
-            paint: {
-              'fill-color': '#0c192c',
-              'fill-opacity': 0.55,
-            },
-          },
-          {
-            id: 'procedural-land-outline',
-            type: 'line',
-            source: 'procedural-land',
-            paint: {
-              'line-color': '#1e4268',
-              'line-width': 1.4,
-              'line-opacity': 0.85,
-            },
-          },
-          {
-            id: 'procedural-grid-lines',
-            type: 'line',
-            source: 'procedural-grid',
-            paint: {
-              'line-color': [
-                'case',
-                ['boolean', ['get', 'isMajor'], false],
-                'rgba(34, 211, 238, 0.16)',
-                'rgba(34, 211, 238, 0.06)',
-              ],
-              'line-width': [
-                'case',
-                ['boolean', ['get', 'isMajor'], false],
-                1.0,
-                0.5,
-              ],
-            },
-          },
-          {
-            id: 'procedural-island-chain-line',
-            type: 'line',
-            source: 'procedural-zones',
-            paint: {
-              'line-color': 'rgba(245, 158, 11, 0.28)',
-              'line-width': 1.5,
-              'line-dasharray': [6, 4],
-            },
-          },
-        ],
-      },
+      pitch: initialScenario.initialCamera.pitch ?? 0,
+      bearing: initialScenario.initialCamera.bearing ?? 0,
+      minZoom: 2,
+      maxZoom: 18,
+      attributionControl: { compact: false },
+      style: createOfflineBasemap(),
     });
 
     mapRef.current = map;
+    setCursorCoord(initialScenario.initialCamera.center);
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+    const basemapLoader = new BasemapLoader({
+      applyStyle: (style) => { map.setStyle(style, { diff: false }); },
+      onState: setBasemapState,
+    });
+    basemapLoaderRef.current = basemapLoader;
+    map.on('error', (event) => {
+      const sourceId = 'sourceId' in event && typeof event.sourceId === 'string' ? event.sourceId : undefined;
+      basemapLoader.reportResourceError(sourceId);
+    });
+    map.on('idle', () => {
+      if (basemapLoader.baseSourceIds.some((id) => map.getSource(id) && map.isSourceLoaded(id))) basemapLoader.markReady();
+    });
+    map.on('sourcedata', (event) => {
+      // Continuous panning or live tactical updates may prevent idle; a loaded base tile is enough.
+      if (basemapLoader.baseSourceIds.includes(event.sourceId) && event.sourceDataType === 'content' &&
+          'tile' in event && event.tile) basemapLoader.markReady();
+    });
 
     // ------------------------------------------------------------------------
     // 动态注册北约 MIL-STD-2525C / APP-6 军标雪碧图与专用战术图标
@@ -273,7 +207,12 @@ export const TacticalMapCanvas: React.FC = () => {
     };
 
     map.on('styleimagemissing', (e) => {
-      registerSpriteIcon(e.id);
+      if (e.id.startsWith('MISSILE_') || e.id.startsWith('RP_MARKER_') ||
+          /^S[A-Z0-9-]+__(SELECTED|NORMAL|CONTACT)$/.test(e.id)) registerSpriteIcon(e.id);
+      else {
+        const image = basemapFallbackImage(e.id);
+        if (image && !map.hasImage(e.id)) map.addImage(e.id, image);
+      }
     });
 
     // ------------------------------------------------------------------------
@@ -297,15 +236,6 @@ export const TacticalMapCanvas: React.FC = () => {
         mapLayers,
         catalog,
       } = state;
-
-      // 控制底图可见性
-      if (map.getLayer('carto-dark-layer')) {
-        map.setLayoutProperty(
-          'carto-dark-layer',
-          'visibility',
-          mapLayers.showSatelliteDarkTiles ? 'visible' : 'none'
-        );
-      }
 
       // 1. 当前视角可见的真实单位 (Friendly / GOD)
       const visibleUnits = Object.values(units).filter(
@@ -711,324 +641,8 @@ export const TacticalMapCanvas: React.FC = () => {
       });
     };
 
-    map.on('load', () => {
-      // 注册所有战术数据源
-      const emptyFC: GeoJSON.FeatureCollection = {
-        type: 'FeatureCollection',
-        features: [],
-      };
-      map.addSource('missions-source', { type: 'geojson', data: emptyFC });
-      map.addSource('envelopes-source', { type: 'geojson', data: emptyFC });
-      map.addSource('aou-source', { type: 'geojson', data: emptyFC });
-      map.addSource('waypoints-line-source', { type: 'geojson', data: emptyFC });
-      map.addSource('waypoints-node-source', { type: 'geojson', data: emptyFC });
-      map.addSource('missiles-trail-source', { type: 'geojson', data: emptyFC });
-      map.addSource('missiles-point-source', { type: 'geojson', data: emptyFC });
-      map.addSource('rp-source', { type: 'geojson', data: emptyFC });
-      map.addSource('explosions-source', { type: 'geojson', data: emptyFC });
-      map.addSource('units-source', { type: 'geojson', data: emptyFC });
-
-      // 1. 巡逻区多边形图层
-      map.addLayer({
-        id: 'missions-fill-layer',
-        type: 'fill',
-        source: 'missions-source',
-        paint: {
-          'fill-color': [
-            'match',
-            ['get', 'side'],
-            'RED',
-            'rgba(244, 63, 94, 0.08)',
-            'rgba(56, 189, 248, 0.08)',
-          ],
-        },
-      });
-      map.addLayer({
-        id: 'missions-line-layer',
-        type: 'line',
-        source: 'missions-source',
-        paint: {
-          'line-color': [
-            'match',
-            ['get', 'side'],
-            'RED',
-            'rgba(244, 63, 94, 0.5)',
-            'rgba(56, 189, 248, 0.5)',
-          ],
-          'line-width': 1.5,
-          'line-dasharray': [4, 3],
-        },
-      });
-
-      // 2. 传感器与武器射程包线图层
-      map.addLayer({
-        id: 'envelopes-fill-layer',
-        type: 'fill',
-        source: 'envelopes-source',
-        paint: {
-          'fill-color': [
-            'match',
-            ['get', 'ringKind'],
-            'radar',
-            'rgba(34, 211, 238, 0.035)',
-            'weapon',
-            'rgba(244, 63, 94, 0.04)',
-            'sonar',
-            'rgba(16, 185, 129, 0.05)',
-            'horizon',
-            'rgba(245, 158, 11, 0.06)',
-            'rgba(34, 211, 238, 0.02)',
-          ],
-        },
-      });
-      map.addLayer({
-        id: 'envelopes-line-layer',
-        type: 'line',
-        source: 'envelopes-source',
-        paint: {
-          'line-color': [
-            'match',
-            ['get', 'ringKind'],
-            'radar',
-            'rgba(34, 211, 238, 0.45)',
-            'weapon',
-            'rgba(244, 63, 94, 0.58)',
-            'sonar',
-            'rgba(16, 185, 129, 0.55)',
-            'horizon',
-            'rgba(245, 158, 11, 0.75)',
-            '#22d3ee',
-          ],
-          'line-width': [
-            'case',
-            ['boolean', ['get', 'isSelected'], false],
-            1.6,
-            0.9,
-          ],
-          'line-dasharray': [
-            'match',
-            ['get', 'ringKind'],
-            'weapon',
-            ['literal', [6, 3]],
-            'horizon',
-            ['literal', [2, 2]],
-            ['literal', [1, 0]],
-          ],
-        },
-      });
-
-      // 3. AOU 不确定性多边形图层
-      map.addLayer({
-        id: 'aou-fill-layer',
-        type: 'fill',
-        source: 'aou-source',
-        paint: {
-          'fill-color': 'rgba(245, 158, 11, 0.14)',
-        },
-      });
-      map.addLayer({
-        id: 'aou-line-layer',
-        type: 'line',
-        source: 'aou-source',
-        paint: {
-          'line-color': 'rgba(245, 158, 11, 0.78)',
-          'line-width': 1.4,
-          'line-dasharray': [3, 2],
-        },
-      });
-
-      // 4. 机动航路点与航向矢量线图层
-      map.addLayer({
-        id: 'waypoints-line-layer',
-        type: 'line',
-        source: 'waypoints-line-source',
-        paint: {
-          'line-color': [
-            'case',
-            ['boolean', ['get', 'isVector'], false],
-            'rgba(226, 232, 240, 0.55)',
-            ['boolean', ['get', 'isSelected'], false],
-            '#22d3ee',
-            'rgba(34, 211, 238, 0.45)',
-          ],
-          'line-width': [
-            'case',
-            ['boolean', ['get', 'isVector'], false],
-            1.2,
-            ['boolean', ['get', 'isSelected'], false],
-            2.2,
-            1.3,
-          ],
-          'line-dasharray': [
-            'case',
-            ['boolean', ['get', 'isVector'], false],
-            ['literal', [1, 0]],
-            ['literal', [4, 3]],
-          ],
-        },
-      });
-      map.addLayer({
-        id: 'waypoints-node-layer',
-        type: 'circle',
-        source: 'waypoints-node-source',
-        paint: {
-          'circle-radius': 4,
-          'circle-color': '#050811',
-          'circle-stroke-color': '#22d3ee',
-          'circle-stroke-width': 2,
-        },
-      });
-
-      // 5. 导弹尾迹与导弹本体图层
-      map.addLayer({
-        id: 'missiles-trail-layer',
-        type: 'line',
-        source: 'missiles-trail-source',
-        paint: {
-          'line-color': [
-            'case',
-            ['boolean', ['get', 'isInterceptor'], false],
-            '#22d3ee',
-            ['==', ['get', 'side'], 'RED'],
-            '#fb7185',
-            '#38bdf8',
-          ],
-          'line-width': 2.2,
-          'line-opacity': 0.85,
-        },
-      });
-      map.addLayer({
-        id: 'missiles-point-layer',
-        type: 'symbol',
-        source: 'missiles-point-source',
-        layout: {
-          'icon-image': ['get', 'icon'],
-          'icon-rotate': ['get', 'heading'],
-          'icon-rotation-alignment': 'map',
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-          'text-field': ['concat', ['get', 'name'], ' M', ['get', 'speedMach']],
-          'text-size': 9,
-          'text-offset': [0, 1.3],
-          'text-anchor': 'top',
-          'text-allow-overlap': false,
-        },
-        paint: {
-          'text-color': '#fde047',
-          'text-halo-color': '#020617',
-          'text-halo-width': 1.5,
-        },
-      });
-
-      // 6. 参考点图层
-      map.addLayer({
-        id: 'rp-symbol-layer',
-        type: 'symbol',
-        source: 'rp-source',
-        layout: {
-          'icon-image': ['get', 'icon'],
-          'icon-allow-overlap': true,
-          'text-field': ['get', 'name'],
-          'text-size': 10,
-          'text-offset': [0, 1.1],
-          'text-anchor': 'top',
-        },
-        paint: {
-          'text-color': '#f59e0b',
-          'text-halo-color': '#020617',
-          'text-halo-width': 1.5,
-        },
-      });
-
-      // 7. 交战爆炸波纹圆环图层
-      map.addLayer({
-        id: 'explosions-circle-layer',
-        type: 'circle',
-        source: 'explosions-source',
-        paint: {
-          'circle-radius': [
-            'match',
-            ['get', 'type'],
-            'destroy',
-            26,
-            'hit',
-            18,
-            'intercept',
-            14,
-            10,
-          ],
-          'circle-color': [
-            'match',
-            ['get', 'type'],
-            'destroy',
-            'rgba(244, 63, 94, 0.45)',
-            'hit',
-            'rgba(245, 158, 11, 0.4)',
-            'intercept',
-            'rgba(34, 211, 238, 0.35)',
-            'rgba(148, 163, 184, 0.25)',
-          ],
-          'circle-stroke-color': [
-            'match',
-            ['get', 'type'],
-            'destroy',
-            '#f43f5e',
-            'hit',
-            '#f59e0b',
-            'intercept',
-            '#22d3ee',
-            '#94a3b8',
-          ],
-          'circle-stroke-width': 2,
-        },
-      });
-      map.addLayer({
-        id: 'explosions-label-layer',
-        type: 'symbol',
-        source: 'explosions-source',
-        layout: {
-          'text-field': ['get', 'label'],
-          'text-size': 11,
-          'text-offset': [0, -1.5],
-          'text-allow-overlap': true,
-        },
-        paint: {
-          'text-color': '#fef08a',
-          'text-halo-color': '#020617',
-          'text-halo-width': 2,
-        },
-      });
-
-      // 8. 顶层北约军标算子与情报接触图层 (Units & Contacts)
-      map.addLayer({
-        id: 'units-symbol-layer',
-        type: 'symbol',
-        source: 'units-source',
-        layout: {
-          'icon-image': ['get', 'icon'],
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-          'text-field': ['get', 'subLabel'],
-          'text-size': 11,
-          'text-offset': [0, 1.85],
-          'text-anchor': 'top',
-          'text-optional': true,
-        },
-        paint: {
-          'text-color': [
-            'case',
-            ['==', ['get', 'entityType'], 'contact'],
-            '#fcd34d',
-            ['==', ['get', 'side'], 'RED'],
-            '#fda4af',
-            '#7dd3fc',
-          ],
-          'text-halo-color': '#020617',
-          'text-halo-width': 1.8,
-        },
-      });
-
-      // 初次同步数据
+    map.on('style.load', () => {
+      installTacticalLayers(map);
       syncStoreToLayers();
     });
 
@@ -1068,6 +682,7 @@ export const TacticalMapCanvas: React.FC = () => {
       }
 
       // 检查是否点击了算子或情报目标
+      if (!map.getLayer('units-symbol-layer')) return;
       const features = map.queryRenderedFeatures(e.point, {
         layers: ['units-symbol-layer'],
       });
@@ -1140,6 +755,12 @@ export const TacticalMapCanvas: React.FC = () => {
       }
     );
 
+    const unsubscribeBasemap = useWargameStore.subscribe(
+      (s) => s.basemapMode,
+      (mode) => { void basemapLoader.select(mode); }
+    );
+    void basemapLoader.select(useWargameStore.getState().basemapMode);
+
     // Panel toggles and the log dock resize the canvas without a window resize.
     const resizeObserver = new ResizeObserver(() => map.resize());
     resizeObserver.observe(mapContainerRef.current);
@@ -1148,6 +769,9 @@ export const TacticalMapCanvas: React.FC = () => {
       resizeObserver.disconnect();
       unsubscribeData();
       unsubscribeCamera();
+      unsubscribeBasemap();
+      basemapLoader.dispose();
+      basemapLoaderRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -1163,8 +787,22 @@ export const TacticalMapCanvas: React.FC = () => {
         }`}
       />
 
-      {/* CRT 军工扫描线微纹理层 (不阻挡鼠标事件) */}
-      <div className="pointer-events-none absolute inset-0 tactical-scanlines opacity-55" />
+      {basemapState.active === 'offline' && <div className="pointer-events-none absolute inset-0 tactical-scanlines opacity-55" />}
+
+      <section className="basemap-controls tactical-panel" style={{ top: interactionMode === 'select' ? 12 : 70 }} aria-label="底图来源与状态">
+        <select aria-label="底图选择" value={basemapMode} onChange={(e) => setBasemapMode(e.target.value as BasemapMode)}>
+          {Object.entries(BASEMAP_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
+        </select>
+        <p role="status" className={basemapState.status === 'error' || basemapState.status === 'degraded' ? 'text-amber-300' : 'text-slate-400'}>
+          {basemapState.message ?? (basemapState.status === 'loading'
+            ? `加载真实底图中 · 当前${BASEMAP_PRESETS[basemapState.active].label}`
+            : basemapState.active === 'offline' ? '本地简化轮廓 · 非真实地理数据' : 'OpenFreeMap / OpenStreetMap · 非卫星影像')}
+        </p>
+        {(basemapState.status === 'error' || basemapState.status === 'degraded') && <div className="flex gap-2 mt-1">
+          <button type="button" className="text-cyan-300 underline" onClick={() => { void basemapLoaderRef.current?.select(basemapMode, true); }}>重试在线地图</button>
+          <button type="button" className="text-slate-300 underline" onClick={() => setBasemapMode('offline')}>使用离线示意</button>
+        </div>}
+      </section>
 
       {/* 顶部模式浮动战术横幅 (当处于 F3 航线标绘 / F1 手动交战 / 算子投放模式时高亮提示) */}
       {interactionMode !== 'select' && (
@@ -1203,7 +841,7 @@ export const TacticalMapCanvas: React.FC = () => {
       {/* 左下角经纬度遥测坐标与图例浮窗 */}
       <div className="map-status tactical-panel">
         <div className="flex items-center gap-1.5">
-          <span className="text-cyan-400 font-semibold">坐标</span>
+          <span className="text-cyan-400 font-semibold">光标</span>
           <span>
             {cursorCoord[1].toFixed(3)}°N, {cursorCoord[0].toFixed(3)}°E
           </span>

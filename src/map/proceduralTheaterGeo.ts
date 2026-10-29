@@ -1,6 +1,6 @@
 // ============================================================================
-// AEGIS-CMO // 离线/程序化西太平洋战略海陆矢量底图与经纬网格生成器
-// 作用：即使在完全断网或瓦片受限环境，也能呈现高清硬核 AEGIS 军用战术海陆轮廓与第1岛链态势
+// Offline schematic only: these hand-authored polygons are not geographic source data.
+// Used explicitly for offline demonstrations and clearly labelled network fallback.
 // ============================================================================
 
 export function buildProceduralTheaterGeoJSON(): {
@@ -8,7 +8,7 @@ export function buildProceduralTheaterGeoJSON(): {
   gridLines: GeoJSON.FeatureCollection;
   tacticalZones: GeoJSON.FeatureCollection;
 } {
-  // 精细化西太平洋核心战区陆地与岛链轮廓 (中国东南沿海、台湾岛、琉球/宫古/石垣岛链、吕宋北部、九州南部)
+  // Approximate theater outlines, not suitable for navigation or terrain collision.
   const landFeatures: GeoJSON.Feature[] = [
     {
       type: 'Feature',

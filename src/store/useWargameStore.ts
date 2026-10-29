@@ -4,6 +4,7 @@ import { evaluateFireControl, type FireControlSolution } from '../engine/fireCon
 import { launchGuidance } from '../engine/guidance';
 import { getUnitCapabilities } from '../engine/unitCapabilities';
 import { effectiveDoctrine } from '../engine/operations';
+import { DEFAULT_BASEMAP, BASEMAP_PRESETS, type BasemapMode } from '../map/basemaps';
 import type { PlayMode, ObjectiveProgress, BattleResult } from '../types/wargame';
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
@@ -56,10 +57,11 @@ export interface MapLayerVisibility {
   showMissions: boolean;
   showAouPolygons: boolean;
   showReferencePoints: boolean;
-  showSatelliteDarkTiles: boolean;
 }
 
 export interface WargameStoreState {
+  basemapMode: BasemapMode;
+  setBasemapMode: (mode: BasemapMode) => void;
   playerSide: SideId;
   playMode: PlayMode;
   seed: number;
@@ -281,6 +283,10 @@ const initialBoot = createInitialStateFromScenario(SCENARIO_EAST_SEA_THUNDER);
 export const useWargameStore = create<WargameStoreState>()(
   subscribeWithSelector((set, get) => {
     const state: WargameStoreState = {
+    basemapMode: DEFAULT_BASEMAP,
+    setBasemapMode: (mode) => {
+      if (Object.hasOwn(BASEMAP_PRESETS, mode)) set({ basemapMode: mode });
+    },
     playerSide: 'RED', playMode: 'command',
     seed: initialBoot.seed, rngState: initialBoot.rngState, tick: 0,
     pendingSimSeconds: 0, commandSequence: 0, commandHistory: [],
@@ -345,7 +351,6 @@ export const useWargameStore = create<WargameStoreState>()(
       showMissions: true,
       showAouPolygons: true,
       showReferencePoints: true,
-      showSatelliteDarkTiles: false, // 默认使用清爽纯粹的军工海陆矢量底图（无第三方水印干扰）
     },
     cameraFlyToRequest: null,
     activeModal: 'none',
