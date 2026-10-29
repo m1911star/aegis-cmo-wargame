@@ -29,6 +29,12 @@ const weapon = object({
   maxRangeKm: positive, minRangeKm: number(0), speedKts: positive, cruiseAltitudeM: number(),
   basePk: number(0, 1), warheadDamage: number(0), salvoDefault: number(1, Number.MAX_SAFE_INTEGER, true),
   requiresDatalinkBeyondHorizon: optional(boolean),
+  guidanceProfile: optional(object({
+    activationRangeKm: optional(positive), seekerRangeKm: optional(positive),
+    seekerFovDeg: optional(number(Number.MIN_VALUE, 360)), searchDurationSec: optional(positive),
+    maxTrackAgeSec: optional(number(0)), maxUncertaintyKm: optional(number(0)),
+    receivesUpdates: optional(boolean), requiresSupport: optional(boolean),
+  })),
 });
 const loadout = object({
   ...metadata, codeName: text,
@@ -66,6 +72,7 @@ const placement = object({
   appearProbability: optional(number(0, 1)), altitudeM: optional(number()), heading: number(),
   speedKts: optional(number(0)), waypoints: optional(array(coordinate)),
   doctrine: optional(doctrine), assignedMissionId: optional(id),
+  recoveryPosition: optional(coordinate),
 });
 const trigger = taggedUnion({
   TIME_ELAPSED: object({ elapsedSec: number(0) }),
@@ -104,6 +111,11 @@ const scenario = object({
     keyTargetBonuses: optional(array(object({ unitId: optional(id), category: optional(category), victimSide: side, bonusPoints: number(), label: text }))),
   })),
   customCatalogOverlay: optional(overlay),
+  objectives: optional(array(object({
+    id, side: oneOf(['RED', 'BLUE']), title: text,
+    type: oneOf(['destroy', 'disable', 'preserve', 'observe', 'withdraw']),
+    unitIds: array(id, 1), required: boolean, points: number(0), criticalFailure: optional(boolean), preserveCapability: optional(boolean),
+  }))),
 });
 
 export function assertCatalogShape(value: unknown): asserts value is EquipmentCatalog {

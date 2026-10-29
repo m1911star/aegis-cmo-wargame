@@ -16,6 +16,7 @@ import {
   validateAndParseScenarioJson,
 } from '../scenarios/builtinScenarios';
 import type { SideId } from '../types/wargame';
+import { captureBattleRecording, replayBattleRecording } from '../store/battleRecording';
 
 export const TacticalModals: React.FC = () => {
   const activeModal = useWargameStore((s) => s.activeModal);
@@ -401,7 +402,7 @@ export const TacticalModals: React.FC = () => {
           4. 想定 JSON 导入导出与自定义扩展编辑器 (Scenario JSON I/O)
          ==================================================================== */}
       {activeModal === 'scenario_io' && (
-        <div className="w-full max-w-3xl tactical-panel rounded-lg border border-cyan-400/50 overflow-hidden">
+        <div className="w-full max-w-3xl max-h-[90dvh] tactical-panel rounded-lg border border-cyan-400/50 overflow-y-auto">
           <div className="px-4 py-3 bg-cyan-950/50 border-b border-cyan-500/30 flex items-center justify-between">
             <div className="flex items-center gap-2 text-cyan-300 font-bold text-sm">
               <FileJson className="w-4 h-4" />
@@ -424,6 +425,7 @@ export const TacticalModals: React.FC = () => {
             </p>
 
             <textarea
+              aria-label="想定或重放 JSON"
               value={displayedJson}
               onChange={(e) => {
                 setJsonText(e.target.value);
@@ -432,6 +434,17 @@ export const TacticalModals: React.FC = () => {
               rows={16}
               className="w-full bg-slate-950 border border-slate-800 rounded p-3 font-mono text-[11px] text-cyan-200 focus:outline-none focus:border-cyan-400"
             />
+
+            <div className="flex flex-wrap gap-2 items-center">
+              <button className="toolbar-button" onClick={() => {
+                setJsonText(JSON.stringify(captureBattleRecording(), null, 2)); setJsonError(null);
+              }}>生成指令重放 JSON</button>
+              <button className="toolbar-button" onClick={() => {
+                try { replayBattleRecording(JSON.parse(displayedJson), 60); setActiveModal('none'); }
+                catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
+              }}>加载重放到记录末尾</button>
+              <span className="text-slate-400">重放将替换当前战场；失败会恢复原状态。需要相同规则与装备版本。</span>
+            </div>
 
             {jsonError && (
               <div className="p-2.5 rounded bg-rose-950/60 border border-rose-500 text-rose-200 flex items-center gap-2">
@@ -457,7 +470,7 @@ export const TacticalModals: React.FC = () => {
                 ) : (
                   <>
                     <Download className="w-3.5 h-3.5" />
-                    <span>复制想定 JSON</span>
+                    <span>复制 JSON</span>
                   </>
                 )}
               </button>

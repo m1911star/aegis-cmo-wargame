@@ -186,3 +186,33 @@ button.log-entry:hover { background: #0f172a; }
 .map-status { position: absolute; bottom: 12px; left: 12px; z-index: 10; max-width: calc(100% - 24px); pointer-events: none; padding: 8px 10px; border-radius: 6px; font-size: 10px; color: #94a3b8; }
 .map-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; }
 .map-legend > span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+/* Narrow screens use one command drawer at a time; the tactical map keeps its viewport. */
+@media (max-width: 900px) {
+  .workspace-pane { position: absolute; inset-block: 0; z-index: 20; }
+  .order-pane { left: 0; width: min(304px, 90vw); }
+  .inspector-pane { right: 0; width: min(356px, 94vw); }
+  .workspace-pane > aside { background: #070e1c; }
+}
+
+@media (max-width: 700px) {
+  .command-row { padding: 8px; gap: 8px; }
+  .scenario-controls { gap: 6px; flex-basis: 100%; }
+  .brand-mark { font-size: 11px; letter-spacing: 0; }
+  .scenario-select { flex: 1; width: 0; }
+  .utility-controls { gap: 5px; }
+  .toolbar-button { min-height: 30px; padding: 4px 7px; font-size: 11px; }
+  .simulation-controls { width: 100%; align-items: flex-start; }
+  .playback-controls { flex: 1; min-width: 0; flex-wrap: wrap; gap: 5px; }
+  .mission-clock { padding-right: 7px; margin-right: 0; }
+  .speed-controls button { min-width: 30px; padding-inline: 5px; }
+  .view-controls { width: 100%; justify-content: space-between; gap: 5px; }
+  .panel-controls { padding-left: 5px; }
+  .combat-dock-header { padding: 6px 8px; gap: 8px; flex-wrap: wrap; }
+  .dock-summary { display: none; }
+  .log-filters { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .log-content { flex-direction: column; }
+  .scorecards { width: 100%; max-height: 100px; padding: 6px; }
+  .pause-popover { right: auto; left: 0; max-width: calc(100vw - 16px); }
+  .auto-pause-banner { padding: 6px 8px; gap: 6px; }
+}

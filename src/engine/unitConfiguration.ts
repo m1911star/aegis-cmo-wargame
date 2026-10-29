@@ -1,5 +1,6 @@
 import type { EquipmentCatalog, RuntimeUnit, RuntimeWeaponMount } from '../types/wargame';
 import type { ResolvedUnitConfiguration } from '../db/unitConfiguration';
+import { getUnitCapabilities } from './unitCapabilities';
 
 export function createRuntimeWeaponMounts(
   configuration: ResolvedUnitConfiguration,
@@ -31,7 +32,7 @@ export function recordWeaponLaunch(
     ...unit.weaponUsage,
     [mount.weaponId]: {
       expended: (previous?.expended ?? 0) + count,
-      cooldownUntil: Math.max(previous?.cooldownUntil ?? 0, simTime + mount.reloadTimeSec * 1000),
+      cooldownUntil: Math.max(previous?.cooldownUntil ?? 0, simTime + mount.reloadTimeSec * getUnitCapabilities(unit).reloadFactor * 1000),
     },
   };
 }

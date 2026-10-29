@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useWargameStore } from './store/useWargameStore';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
@@ -6,14 +6,35 @@ import { RightUnitTelemetryInspector } from './components/RightUnitTelemetryInsp
 import { BottomCombatLogDock } from './components/BottomCombatLogDock';
 import { TacticalModals } from './components/TacticalModals';
 import { TacticalMapCanvas } from './map/TacticalMapCanvas';
+import { RiskEngagementDialog } from './components/FireControlDiagnostics';
 
 export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
+
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 900px)');
+    const collapse = () => { if (narrow.matches) setRightOpen(false); };
+    narrow.addEventListener('change', collapse);
+    return () => narrow.removeEventListener('change', collapse);
+  }, []);
 
   useEffect(() => useWargameStore.subscribe(
     (s) => s.selectedContactId ?? s.selectedUnitId,
-    (selection) => { if (selection) setRightOpen(true); }
+    (selection) => {
+      if (selection) {
+        setRightOpen(true);
+        if (window.matchMedia('(max-width: 900px)').matches) setLeftOpen(false);
+      }
+    }
+  ), []);
+
+  useEffect(() => useWargameStore.subscribe(
+    (s) => s.currentScenario,
+    () => {
+      setLeftOpen(true);
+      setRightOpen(!window.matchMedia('(max-width: 900px)').matches);
+    }
   ), []);
 
   const timeScale = useWargameStore((s) => s.timeScale);
@@ -25,22 +46,18 @@ export default function App() {
   useEffect(() => {
     if (timeScale === 0) return;
 
-    // 根据倍速档位调节触发频率与单步仿真时间跨度 (保持丝滑帧率与准确物理积分)
-    const configMap: Record<number, { intervalMs: number; simStepSec: number }> = {
-      1: { intervalMs: 250, simStepSec: 0.25 },
-      5: { intervalMs: 200, simStepSec: 1.0 },
-      15: { intervalMs: 160, simStepSec: 2.4 },
-      60: { intervalMs: 125, simStepSec: 7.5 },
-    };
-
-    const { intervalMs, simStepSec } = configMap[timeScale] || {
-      intervalMs: 200,
-      simStepSec: 1.0,
-    };
-
+    let last = performance.now();
+    let backlog = 0;
+    // Speed changes the time budget, never the engine's atomic step. Keep lag rather than skip ticks.
     const timer = window.setInterval(() => {
-      stepSingleTick(simStepSec);
-    }, intervalMs);
+      const now = performance.now();
+      backlog += (now - last) * timeScale / 1000;
+      last = now;
+      if (useWargameStore.getState().timeScale !== timeScale) return;
+      const budget = Math.min(15, backlog);
+      backlog -= budget;
+      stepSingleTick(budget);
+    }, 100);
 
     return () => window.clearInterval(timer);
   }, [timeScale, stepSingleTick]);
@@ -110,8 +127,14 @@ export default function App() {
       <TopCommandHeader
         leftOpen={leftOpen}
         rightOpen={rightOpen}
-        onToggleLeft={() => setLeftOpen(!leftOpen)}
-        onToggleRight={() => setRightOpen(!rightOpen)}
+        onToggleLeft={() => {
+          setLeftOpen(!leftOpen);
+          if (!leftOpen && window.matchMedia('(max-width: 900px)').matches) setRightOpen(false);
+        }}
+        onToggleRight={() => {
+          setRightOpen(!rightOpen);
+          if (!rightOpen && window.matchMedia('(max-width: 900px)').matches) setLeftOpen(false);
+        }}
       />
 
       {/* 中间主体区：左侧 ORBAT/情报/任务树 + 中央 WebGL 海陆空战术态势图 + 右侧单元火控与遥测面板 */}
@@ -132,6 +155,7 @@ export default function App() {
 
       {/* 模态框：战役简报、装备数据库、实时兵力投放、想定 JSON 序列化 */}
       <TacticalModals />
+      <RiskEngagementDialog />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import type {
 import { resolveEquipmentCatalog } from '../catalog/equipmentCatalog';
 import { createRuntimeUnitFromPlacement } from '../engine/simulationEngine';
 import { compileScenario } from './compileScenario';
+import { INFORMATION_EXERCISE } from './informationExercise';
 
 // ============================================================================
 // AEGIS-CMO // 内置战役想定剧本库 v2.0
@@ -922,6 +923,7 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
 export const BUILTIN_SCENARIOS: ScenarioDefinition[] = [
   SCENARIO_EAST_SEA_THUNDER,
   SCENARIO_DEEP_SEA_CARRIER_HUNT,
+  INFORMATION_EXERCISE,
 ];
 
 /**
@@ -998,6 +1000,7 @@ export function exportCurrentStateAsScenarioJson(
         waypoints: u.waypoints.map((w) => [...w]),
         doctrine: { ...u.doctrine },
         assignedMissionId: u.assignedMissionId,
+        recoveryPosition: u.recoveryPosition,
       })),
   };
   exported.missions = exported.missions.map(({ assignedUnitIds: _legacy, ...mission }) => mission);
@@ -1033,6 +1036,7 @@ export function exportCurrentStateAsScenarioJson(
       : trigger.type === 'UNIT_DETECTED' ? trigger.targetUnitId : undefined;
     return event.actions.length > 0 && (!targetId || retainedIds.has(targetId));
   });
+  exported.objectives = exported.objectives?.filter((objective) => objective.unitIds.every((id) => retainedIds.has(id)));
   if (exported.victoryConditions?.keyTargetBonuses) {
     exported.victoryConditions.keyTargetBonuses = exported.victoryConditions.keyTargetBonuses.filter(
       (bonus) => !bonus.unitId || retainedIds.has(bonus.unitId)

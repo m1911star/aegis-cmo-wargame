@@ -1,10 +1,12 @@
+import { observeMissile } from '../engine/sensors';
+import { getUnitCapabilities, isActiveUnit } from '../engine/unitCapabilities';
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import ms from 'milsymbol';
 import * as turf from '@turf/turf';
 import { useWargameStore } from '../store/useWargameStore';
 import { buildProceduralTheaterGeoJSON } from './proceduralTheaterGeo';
-import { calculateRadarHorizonKm, getDistanceKm } from '../engine/simulationEngine';
+import { calculateRadarHorizonKm } from '../engine/simulationEngine';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 
 // ============================================================================
@@ -18,7 +20,6 @@ export const TacticalMapCanvas: React.FC = () => {
   const [cursorCoord, setCursorCoord] = useState<[number, number]>([124.2, 26.2]);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
-  const selectedUnitId = useWargameStore((s) => s.selectedUnitId);
   const selectedUnit = useWargameStore((s) =>
     s.selectedUnitId ? s.units[s.selectedUnitId] : null
   );
@@ -309,8 +310,7 @@ export const TacticalMapCanvas: React.FC = () => {
       // 1. 当前视角可见的真实单位 (Friendly / GOD)
       const visibleUnits = Object.values(units).filter(
         (u) =>
-          u.hp > 0 &&
-          u.status !== 'destroyed' &&
+          isActiveUnit(u) &&
           (activePerspective === 'GOD' || u.side === activePerspective)
       );
 
@@ -360,7 +360,7 @@ export const TacticalMapCanvas: React.FC = () => {
         const configuration = resolveUnitConfiguration(catalog, u.platformId, u.activeLoadoutId);
 
         // 雷达包线 (开启全局雷达圈或当前选中该算子)
-        if ((mapLayers.showRadarRings || isSelected) && u.doctrine.emconRadar) {
+        if ((mapLayers.showRadarRings || isSelected) && u.doctrine.emconRadar && getUnitCapabilities(u).radarFactor > 0) {
           for (const sId of configuration.sensorIds) {
             const sensor = catalog.sensors[sId];
             if (
@@ -369,7 +369,7 @@ export const TacticalMapCanvas: React.FC = () => {
             ) {
               // 同时展示最大对空探测包线，以及如果是选中舰艇则额外展示对12m掠海目标的地球曲率视距内圈！
               envelopeFeatures.push(
-                turf.circle(u.position, sensor.maxRangeKm, {
+                turf.circle(u.position, sensor.maxRangeKm * getUnitCapabilities(u).radarFactor, {
                   steps: 64,
                   units: 'kilometers',
                   properties: {
@@ -442,7 +442,7 @@ export const TacticalMapCanvas: React.FC = () => {
             const sensor = catalog.sensors[sId];
             if (sensor && sensor.type === 'sonar_passive') {
               envelopeFeatures.push(
-                turf.circle(u.position, sensor.maxRangeKm, {
+                turf.circle(u.position, sensor.maxRangeKm * getUnitCapabilities(u).radarFactor, {
                   steps: 48,
                   units: 'kilometers',
                   properties: {
@@ -559,9 +559,7 @@ export const TacticalMapCanvas: React.FC = () => {
         const isVisible =
           activePerspective === 'GOD' ||
           msl.side === activePerspective ||
-          visibleUnits.some(
-            (u) => getDistanceKm(u.position, msl.position) <= 320
-          );
+          !!observeMissile(activePerspective, msl, units, catalog, state.simTime);
         if (!isVisible) continue;
 
         const iconKey =
@@ -575,7 +573,7 @@ export const TacticalMapCanvas: React.FC = () => {
           type: 'Feature',
           properties: {
             id: msl.id,
-            name: msl.name,
+            name: activePerspective === 'GOD' || msl.side === activePerspective ? msl.name : '来袭武器',
             side: msl.side,
             heading: msl.heading,
             icon: iconKey,
@@ -587,7 +585,7 @@ export const TacticalMapCanvas: React.FC = () => {
           },
         });
 
-        if (msl.trail.length >= 2) {
+        if (msl.trail.length >= 2 && (activePerspective === 'GOD' || msl.side === activePerspective)) {
           missileTrailFeatures.push({
             type: 'Feature',
             properties: {
@@ -695,7 +693,7 @@ export const TacticalMapCanvas: React.FC = () => {
       });
 
       // 10. 爆炸与拦截波纹特效 (Explosions)
-      const expFeatures: GeoJSON.Feature[] = explosions.map((exp) => ({
+      const expFeatures: GeoJSON.Feature[] = explosions.filter((exp) => activePerspective === 'GOD' || exp.side === activePerspective).map((exp) => ({
         type: 'Feature',
         properties: {
           id: exp.id,

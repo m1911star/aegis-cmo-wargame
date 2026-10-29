@@ -35,6 +35,16 @@ export function compileScenario(
     )),
   ];
   const units = index(placements, 'scenario units and reinforcements');
+  index(scenario.objectives ?? [], 'scenario.objectives');
+  if (scenario.objectives?.length && !scenario.victoryConditions) invalid('scenario.objectives', 'objectives require a time limit');
+  for (const objective of scenario.objectives ?? []) {
+    if (new Set(objective.unitIds).size !== objective.unitIds.length) invalid(`objective.${objective.id}`, 'duplicate target');
+    for (const target of objective.unitIds) {
+      if (!units.has(target)) invalid(`objective.${objective.id}`, `unknown unit ${target}`);
+    }
+    if (objective.criticalFailure && objective.type !== 'preserve') invalid(`objective.${objective.id}`, 'immediate failure requires an explicit preservation objective');
+    if (objective.preserveCapability && objective.type !== 'preserve') invalid(`objective.${objective.id}`, 'preserveCapability only applies to preservation goals');
+  }
 
   // Legacy mission-side lists are migrated once; unit-side assignments are canonical.
   for (const mission of scenario.missions) {

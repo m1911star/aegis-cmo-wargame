@@ -183,7 +183,7 @@ describe('Resolved equipment configuration', () => {
     const switched = store.getState().units.a;
     expect(switched.maxFuelSec).toBe(direct.maxFuelSec);
     expect(switched.targetSpeedKts).toBe(direct.targetSpeedKts);
-    expect(switched.fuelRemainingSec).toBe(direct.maxFuelSec - 2);
+    expect(switched.fuelRemainingSec).toBe(direct.maxFuelSec);
     store.getState().updateUnitKinematics('a', 2000);
     expect(store.getState().units.a.speedKts).toBe(1100);
     store.getState().updateUnitKinematics('a', 0);
@@ -233,17 +233,17 @@ describe('Resolved equipment configuration', () => {
     store.getState().loadScenario(scenario([
       placement('shooter'), placement('target', 'e2d_hawkeye', { side: 'BLUE', position: [0, 0.5] }),
     ]));
-    store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2);
+    store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2, true);
     const afterShot = store.getState();
     expect(afterShot.units.shooter.mounts[0].currentAmmo).toBe(6);
-    store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2);
+    store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2, true);
     expect(store.getState().score.redMissilesFired).toBe(2);
     store.getState().switchUnitLoadout('shooter', 'loadout_j20_awacs_hunter');
     store.getState().switchUnitLoadout('shooter', 'loadout_j20_stealth_cap');
     expect(store.getState().units.shooter.mounts[0].currentAmmo).toBe(6);
     expect(store.getState().units.shooter.mounts[0].cooldownRemainingSec).toBe(6);
     store.getState().stepSingleTick(6);
-    store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2);
+    store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2, true);
     expect(store.getState().score.redMissilesFired).toBe(4);
   });
 
@@ -340,6 +340,8 @@ describe('Mission ownership and event lifecycle', () => {
     const compiled = compileScenario(scenario([], { events: [event] }));
     expect(compiled.scenario.events![0]).not.toHaveProperty('hasFired');
     store.getState().loadScenario(compiled.scenario);
+    store.getState().stepSingleTick(1);
+    expect(store.getState().score.redScore).toBe(0);
     store.getState().stepSingleTick(1);
     expect(store.getState().score.redScore).toBe(10);
   });

@@ -1,3 +1,10 @@
+import { createRandomStream, DEFAULT_SEED, COMMAND_ACTIONS, type RecordedCommand } from '../engine/determinism';
+import { canCommandUnit, contactForUnit } from '../engine/commandPolicy';
+import { evaluateFireControl, type FireControlSolution } from '../engine/fireControl';
+import { launchGuidance } from '../engine/guidance';
+import { getUnitCapabilities } from '../engine/unitCapabilities';
+import { effectiveDoctrine } from '../engine/operations';
+import type { PlayMode, ObjectiveProgress, BattleResult } from '../types/wargame';
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type {
@@ -30,8 +37,8 @@ import {
 import {
   createRuntimeUnitFromPlacement,
   getBearingDeg,
-  getDistanceKm,
-  stepSimulationWorld,
+  advanceSimulation,
+  initializeWorldContacts,
 } from '../engine/simulationEngine';
 
 export type MapInteractionMode =
@@ -53,6 +60,23 @@ export interface MapLayerVisibility {
 }
 
 export interface WargameStoreState {
+  playerSide: SideId;
+  playMode: PlayMode;
+  seed: number;
+  rngState: number;
+  tick: number;
+  pendingSimSeconds: number;
+  commandSequence: number;
+  commandHistory: RecordedCommand[];
+  objectiveProgress: ObjectiveProgress;
+  battleResult?: BattleResult;
+  creditedDamage: Record<string, number>;
+  detectedMissileIds: string[];
+  pendingRiskEngagement: { attackerId: string; contactId: string; weaponId: string; salvoCount: number; solution: FireControlSolution } | null;
+  setPlayerSide: (side: 'RED' | 'BLUE') => void;
+  setPlayMode: (mode: PlayMode) => void;
+  dismissRiskEngagement: () => void;
+  selectLogEntry: (logId: string) => void;
   // --- 想定与装备目录 ---
   currentScenario: ScenarioDefinition;
   availableScenarios: ScenarioDefinition[];
@@ -106,7 +130,7 @@ export interface WargameStoreState {
     | 'unit_spawner';
 
   // --- Actions ---
-  loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean) => void;
+  loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number) => void;
   resetScenario: (randomizeSpawns?: boolean) => void;
   setTimeScale: (scale: TimeScale) => void;
   stepSingleTick: (dtSec?: number) => void;
@@ -154,7 +178,8 @@ export interface WargameStoreState {
     attackerId: string,
     targetId: string,
     weaponId?: string,
-    salvoCount?: number
+    salvoCount?: number,
+    acceptRisk?: boolean
   ) => void;
   addReferencePoint: (coord: [number, number], side?: SideId) => void;
   removeReferencePoint: (rpId: string) => void;
@@ -163,18 +188,27 @@ export interface WargameStoreState {
 
 function createInitialStateFromScenario(
   definition: ScenarioDefinition,
-  randomizeSpawns = false
+  randomizeSpawns = false,
+  requestedSeed?: number
 ) {
   const { scenario, catalog } = compileScenario(definition);
+  const seed = requestedSeed ?? (randomizeSpawns ? crypto.getRandomValues(new Uint32Array(1))[0] : DEFAULT_SEED);
+  if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new Error('Seed must be an unsigned 32-bit integer');
+  const random = createRandomStream(seed);
   const initialUnits = instantiateScenarioUnits(
     scenario,
     catalog,
-    randomizeSpawns ? Math.random : () => 0.5
+    random.next
   );
   const startTime = Date.parse(scenario.startTimeIso);
 
   const initialWorld = {
     startTime,
+    tick: 0,
+    rngState: random.state(),
+    objectives: scenario.objectives,
+    objectiveProgress: {},
+    creditedDamage: {},
     simTime: startTime,
     units: initialUnits,
     contacts: {},
@@ -202,18 +236,7 @@ function createInitialStateFromScenario(
     },
   };
 
-  // 预运行 1 秒以生成开局初始雷达/ESM接触态势
-  const warmup = stepSimulationWorld(
-    initialWorld,
-    catalog,
-    1,
-    {
-      onNewContact: false,
-      onMissileDetected: false,
-      onUnitHitOrDestroyed: false,
-    },
-    'RED'
-  );
+  const warmup = initializeWorldContacts(initialWorld, catalog);
 
   const firstRedUnitId =
     Object.values(warmup.nextState.units).find((u) => u.side === 'RED')?.id ||
@@ -222,6 +245,8 @@ function createInitialStateFromScenario(
   return {
     scenario,
     catalog,
+    seed,
+    rngState: random.state(),
     startTime,
     simTime: warmup.nextState.simTime,
     units: warmup.nextState.units,
@@ -244,9 +269,7 @@ function createInitialStateFromScenario(
         category: 'SYSTEM' as const,
         severity: 'info' as const,
         title: `战役想定已载入: ${scenario.title}`,
-        message: `战区C4ISR综合数据链已接通，初始发现 ${
-          Object.keys(warmup.nextState.contacts).length
-        } 批雷达/ESM接触目标。按 [Space] 启动半实时推演。`,
+        message: '初始感知已生成，尚未移动或发射。请先选择控制席位、查看任务目标，再按 [Space] 开始。',
       },
       ...warmup.newLogs,
     ],
@@ -256,7 +279,33 @@ function createInitialStateFromScenario(
 const initialBoot = createInitialStateFromScenario(SCENARIO_EAST_SEA_THUNDER);
 
 export const useWargameStore = create<WargameStoreState>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set, get) => {
+    const state: WargameStoreState = {
+    playerSide: 'RED', playMode: 'command',
+    seed: initialBoot.seed, rngState: initialBoot.rngState, tick: 0,
+    pendingSimSeconds: 0, commandSequence: 0, commandHistory: [],
+    objectiveProgress: {}, battleResult: undefined, creditedDamage: {}, detectedMissileIds: [], pendingRiskEngagement: null,
+    setPlayerSide: (side) => {
+      const s = get();
+      if (s.tick !== 0 || s.timeScale !== 0) return;
+      set({ playerSide: side, activePerspective: side, selectedContactId: null,
+        selectedUnitId: Object.values(s.units).find((u) => u.side === side)?.id ?? null });
+    },
+    setPlayMode: (mode) => set({ playMode: mode, timeScale: 0, pendingRiskEngagement: null,
+      selectedUnitId: null, selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide }),
+    dismissRiskEngagement: () => set({ pendingRiskEngagement: null }),
+    selectLogEntry: (id) => {
+      const s = get(); const log = s.logs.find((l) => l.id === id);
+      if (!log || (s.playMode !== 'sandbox' && log.side !== s.playerSide && log.side !== 'SYSTEM')) return;
+      if (log.contactId) {
+        const contact = s.contacts[log.contactId];
+        if (contact) { s.selectContact(contact.id); s.flyToPosition(contact.estimatedPosition); }
+      } else if (log.unitId) {
+        const unit = s.units[log.unitId];
+        s.selectUnit(log.unitId);
+        if (unit && (unit.side === s.playerSide || s.playMode === 'sandbox')) s.flyToPosition(unit.position);
+      } else if (log.position) s.flyToPosition(log.position);
+    },
     currentScenario: initialBoot.scenario,
     availableScenarios: BUILTIN_SCENARIOS,
     catalog: initialBoot.catalog,
@@ -301,13 +350,18 @@ export const useWargameStore = create<WargameStoreState>()(
     cameraFlyToRequest: null,
     activeModal: 'none',
 
-    loadScenario: (scenario, randomizeSpawns = false) => {
-      const boot = createInitialStateFromScenario(scenario, randomizeSpawns);
+    loadScenario: (scenario, randomizeSpawns = false, seed) => {
+      const boot = createInitialStateFromScenario(scenario, randomizeSpawns, seed);
       set((state) => {
         const exists = state.availableScenarios.some(
           (s) => s.id === scenario.id
         );
         return {
+          playerSide: 'RED', playMode: 'command', activePerspective: 'RED',
+          seed: boot.seed, rngState: boot.rngState, tick: 0, pendingSimSeconds: 0,
+          commandSequence: 0, commandHistory: [], objectiveProgress: {}, battleResult: undefined,
+          creditedDamage: {}, detectedMissileIds: [], pendingRiskEngagement: null,
+          pendingSpawnConfig: null, pendingWeaponIdForEngage: null,
           currentScenario: boot.scenario,
           availableScenarios: exists
             ? state.availableScenarios
@@ -340,20 +394,24 @@ export const useWargameStore = create<WargameStoreState>()(
 
     resetScenario: (randomizeSpawns = false) => {
       const current = get().currentScenario;
-      get().loadScenario(current, randomizeSpawns);
+      get().loadScenario(current, randomizeSpawns, randomizeSpawns ? undefined : get().seed);
     },
 
     setTimeScale: (scale) =>
       set({
-        timeScale: scale,
+        timeScale: get().battleResult || get().pendingRiskEngagement ? 0 : scale,
         lastAutoPauseBanner: scale > 0 ? null : get().lastAutoPauseBanner,
       }),
 
     stepSingleTick: (dtSec = 2) => {
       const s = get();
-      const result = stepSimulationWorld(
+      if (s.battleResult) return;
+      const result = advanceSimulation(
         {
           startTime: s.startTime,
+          tick: s.tick, rngState: s.rngState, objectives: s.currentScenario.objectives,
+          objectiveProgress: s.objectiveProgress, creditedDamage: s.creditedDamage,
+          detectedMissileIds: s.detectedMissileIds,
           simTime: s.simTime,
           units: s.units,
           contacts: s.contacts,
@@ -365,13 +423,17 @@ export const useWargameStore = create<WargameStoreState>()(
           score: s.score,
         },
         s.catalog,
-        dtSec,
+        dtSec + s.pendingSimSeconds,
         s.autoPause,
-        s.activePerspective
+        s.playerSide
       );
 
       set((prev) => ({
         simTime: result.nextState.simTime,
+        tick: result.nextState.tick ?? s.tick, rngState: result.nextState.rngState ?? s.rngState,
+        pendingSimSeconds: result.remainingSec, objectiveProgress: result.nextState.objectiveProgress ?? {},
+        battleResult: result.nextState.battleResult, creditedDamage: result.nextState.creditedDamage ?? {},
+        detectedMissileIds: result.nextState.detectedMissileIds ?? [],
         units: result.nextState.units,
         contacts: result.nextState.contacts,
         weaponsInFlight: result.nextState.weaponsInFlight,
@@ -393,6 +455,7 @@ export const useWargameStore = create<WargameStoreState>()(
     setActivePerspective: (p) =>
       set({
         activePerspective: p,
+        selectedUnitId: null, selectedContactId: null, pendingRiskEngagement: null,
         interactionMode: 'select',
       }),
 
@@ -403,34 +466,40 @@ export const useWargameStore = create<WargameStoreState>()(
 
     clearAutoPauseBanner: () => set({ lastAutoPauseBanner: null }),
 
-    selectUnit: (unitId) =>
-      set({
-        selectedUnitId: unitId,
-        selectedContactId: null,
-        interactionMode: 'select',
-      }),
-
-    selectContact: (contactId) =>
-      set({
-        selectedContactId: contactId,
-        interactionMode: 'select',
-      }),
+    selectUnit: (unitId) => {
+      const s = get(); const unit = unitId ? s.units[unitId] : undefined;
+      if (unit && unit.side !== s.playerSide && s.playMode !== 'sandbox') {
+        const contact = contactForUnit(s.contacts, s.playerSide, unit.id);
+        set({ selectedUnitId: null, selectedContactId: contact?.id ?? null, interactionMode: 'select' });
+        return;
+      }
+      set({ selectedUnitId: unit?.id ?? null, selectedContactId: null, interactionMode: 'select' });
+    },
+    selectContact: (contactId) => {
+      const s = get(); const contact = contactId ? s.contacts[contactId] : undefined;
+      if (contact && contact.observerSide !== s.playerSide && s.playMode !== 'sandbox') return;
+      set({ selectedContactId: contact?.id ?? null, interactionMode: 'select' });
+    },
 
     setInteractionMode: (mode) => set({ interactionMode: mode }),
 
-    startManualEngage: (weaponId, salvoCount = 2) =>
+    startManualEngage: (weaponId, salvoCount = 2) => {
+      const s = get(); if (!canCommandUnit(s, s.units[s.selectedUnitId ?? ''])) return;
       set({
         interactionMode: 'manual_engage',
         pendingWeaponIdForEngage: weaponId || null,
         pendingSalvoCount: salvoCount,
-      }),
+      });
+    },
 
-    startSpawnUnitOnMap: (config) =>
+    startSpawnUnitOnMap: (config) => {
+      if (get().playMode !== 'sandbox' || get().battleResult) return;
       set({
         interactionMode: 'spawn_unit',
         pendingSpawnConfig: config,
         activeModal: 'none',
-      }),
+      });
+    },
 
     toggleMapLayer: (layer) =>
       set((s) => ({
@@ -447,7 +516,7 @@ export const useWargameStore = create<WargameStoreState>()(
     appendUnitWaypoint: (unitId, coord, replaceAll = false) =>
       set((s) => {
         const unit = s.units[unitId];
-        if (!unit || unit.hp <= 0) return s;
+        if (!canCommandUnit(s, unit)) return s;
         const nextWaypoints: [number, number][] = replaceAll
           ? [[...coord]]
           : [...unit.waypoints, [...coord]];
@@ -462,7 +531,7 @@ export const useWargameStore = create<WargameStoreState>()(
             : unit.speedKts;
 
         const newLog: CombatLogEntry = {
-          id: `log_wp_${Date.now()}_${unitId}`,
+          id: `log_wp_${s.tick}_${s.commandSequence}_${unitId}`,
           simTime: s.simTime,
           side: unit.side,
           category: 'DOCTRINE',
@@ -481,6 +550,7 @@ export const useWargameStore = create<WargameStoreState>()(
             [unitId]: {
               ...unit,
               waypoints: nextWaypoints,
+              navigationMode: 'manual', missionTargetId: undefined,
               heading: nextHeading,
               speedKts: nextSpeed,
               targetSpeedKts: Math.max(unit.targetSpeedKts, nextSpeed),
@@ -493,11 +563,11 @@ export const useWargameStore = create<WargameStoreState>()(
     clearUnitWaypoints: (unitId) =>
       set((s) => {
         const unit = s.units[unitId];
-        if (!unit) return s;
+        if (!canCommandUnit(s, unit)) return s;
         return {
           units: {
             ...s.units,
-            [unitId]: { ...unit, waypoints: [] },
+            [unitId]: { ...unit, waypoints: [], navigationMode: 'manual', missionTargetId: undefined },
           },
         };
       }),
@@ -505,10 +575,10 @@ export const useWargameStore = create<WargameStoreState>()(
     updateUnitDoctrine: (unitId, patch) =>
       set((s) => {
         const unit = s.units[unitId];
-        if (!unit) return s;
+        if (!canCommandUnit(s, unit)) return s;
         const updatedDoctrine = { ...unit.doctrine, ...patch };
         const newLog: CombatLogEntry = {
-          id: `log_doc_${Date.now()}_${unitId}`,
+          id: `log_doc_${s.tick}_${s.commandSequence}_${unitId}`,
           simTime: s.simTime,
           side: unit.side,
           category: 'DOCTRINE',
@@ -535,7 +605,7 @@ export const useWargameStore = create<WargameStoreState>()(
     updateUnitKinematics: (unitId, speedKts, altitudeM) =>
       set((s) => {
         const unit = s.units[unitId];
-        if (!unit) return s;
+        if (!canCommandUnit(s, unit)) return s;
         const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
         const spec = configuration.platform;
         const clampedSpeed =
@@ -568,7 +638,8 @@ export const useWargameStore = create<WargameStoreState>()(
       set((s) => {
         const unit = s.units[unitId];
         const loadout = s.catalog.loadouts[loadoutId];
-        if (!unit || unit.hp <= 0 || !loadout || unit.activeLoadoutId === loadoutId) return s;
+        if (!canCommandUnit(s, unit) || !loadout || unit.activeLoadoutId === loadoutId) return s;
+        if (s.tick > 0 && s.playMode !== 'sandbox') return s;
         if (!loadout.compatiblePlatformIds.includes(unit.platformId)) return s;
         const previous = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
         const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, loadoutId);
@@ -577,7 +648,7 @@ export const useWargameStore = create<WargameStoreState>()(
           ? configuration.cruiseSpeedKts : Math.min(speed, configuration.maxSpeedKts);
 
         const loadoutLog: CombatLogEntry = {
-          id: `log_loadout_${Date.now()}_${unitId}`,
+          id: `log_loadout_${s.tick}_${s.commandSequence}_${unitId}`,
           simTime: s.simTime,
           side: unit.side,
           category: 'DOCTRINE',
@@ -611,7 +682,7 @@ export const useWargameStore = create<WargameStoreState>()(
     launchCarrierAircraft: (carrierUnitId, hangarSlotId, customLoadoutId) =>
       set((s) => {
         const carrier = s.units[carrierUnitId];
-        if (!carrier || carrier.hp <= 0) return s;
+        if (!canCommandUnit(s, carrier) || !getUnitCapabilities(carrier).canFire) return s;
 
         const slotIndex = carrier.hangar.findIndex(
           (h) => h.slotId === hangarSlotId
@@ -629,7 +700,7 @@ export const useWargameStore = create<WargameStoreState>()(
         if (!loadout?.compatiblePlatformIds.includes(slot.platformId)) return s;
         const sortieIndex =
           slot.totalAirframes - slot.readyAirframes - slot.reserveAirframes + 1;
-        const newAirUnitId = `sortie_${carrier.id}_${hangarSlotId}_${Date.now().toString(36)}_${sortieIndex}`;
+        const newAirUnitId = `sortie_${carrier.id}_${hangarSlotId}_${s.tick}_${s.commandSequence}_${sortieIndex}`;
         const callsignPrefix =
           carrier.side === 'RED' ? 'HAIDONG' : 'STRIKE';
 
@@ -665,7 +736,7 @@ export const useWargameStore = create<WargameStoreState>()(
         );
 
         const launchLog: CombatLogEntry = {
-          id: `log_sortie_${Date.now()}_${newAirUnitId}`,
+          id: `log_sortie_${s.tick}_${s.commandSequence}_${newAirUnitId}`,
           simTime: s.simTime,
           side: carrier.side,
           category: 'EVENT',
@@ -699,166 +770,80 @@ export const useWargameStore = create<WargameStoreState>()(
     assignUnitMission: (unitId, missionId) =>
       set((s) => {
         const unit = s.units[unitId];
-        if (!unit) return s;
+        if (!canCommandUnit(s, unit)) return s;
         if (missionId && !s.missions.some((mission) => mission.id === missionId && mission.side === unit.side)) return s;
-        const units = { ...s.units, [unitId]: { ...unit, assignedMissionId: missionId } };
+        const units = { ...s.units, [unitId]: { ...unit, assignedMissionId: missionId, navigationMode: missionId ? 'mission' as const : 'manual' as const, missionTargetId: undefined, waypoints: [] } };
         return {
           missions: deriveMissionAssignments(s.missions, units),
           units,
         };
       }),
 
-    toggleMissionActive: (missionId) =>
-      set((s) => ({
-        missions: s.missions.map((m) =>
-          m.id === missionId ? { ...m, isActive: !m.isActive } : m
-        ),
-      })),
+    toggleMissionActive: (missionId) => set((s) => {
+      const mission = s.missions.find((m) => m.id === missionId);
+      if (s.battleResult || !mission || (s.playMode !== 'sandbox' && mission.side !== s.playerSide)) return s;
+      return { missions: s.missions.map((m) => m.id === missionId &&
+        (s.playMode === 'sandbox' || m.side === s.playerSide) ? { ...m, isActive: !m.isActive } : m) };
+    }),
 
-    executeManualEngage: (
-      attackerId,
-      targetIdOrContactId,
-      weaponId,
-      salvoCount
-    ) =>
-      set((s) => {
-        const attacker = s.units[attackerId];
-        if (!attacker || attacker.hp <= 0) return s;
-
-        const contact = s.contacts[targetIdOrContactId];
-        const actualTargetId = contact
-          ? contact.actualUnitId
-          : targetIdOrContactId;
-        const targetUnit = s.units[actualTargetId];
-        if (
-          !targetUnit ||
-          targetUnit.hp <= 0 ||
-          targetUnit.side === attacker.side
-        ) {
-          return s;
-        }
-
-        const distKm = getDistanceKm(attacker.position, targetUnit.position);
-
-        const candidateMount = attacker.mounts.find((m) => {
-          if (m.currentAmmo <= 0 || m.cooldownRemainingSec > 0) return false;
-          if (weaponId && m.weaponId !== weaponId) return false;
-          const wSpec = s.catalog.weapons[m.weaponId];
-          if (!wSpec) return false;
-          if (!wSpec.targetDomains.includes(targetUnit.domain)) return false;
-          return distKm <= wSpec.maxRangeKm && distKm >= wSpec.minRangeKm;
-        });
-
-        if (!candidateMount) {
-          const rejectLog: CombatLogEntry = {
-            id: `log_err_engage_${Date.now()}`,
-            simTime: s.simTime,
-            side: attacker.side,
-            category: 'DOCTRINE',
-            severity: 'warning',
-            title: `火力分配被拒绝: 武器冷却、超出射程或无匹配弹药`,
-            message: `${attacker.name} 距离目标 ${targetUnit.callsign} 为 ${distKm.toFixed(
-              1
-            )} km，当前选中武器尚未就绪或不满足射程、作战域约束。`,
-            position: [...attacker.position],
-            unitId: attacker.id,
-          };
-          return {
-            interactionMode: 'select',
-            logs: [rejectLog, ...s.logs].slice(0, 250),
-          };
-        }
-
-        const wSpec = s.catalog.weapons[candidateMount.weaponId]!;
-        const requestedSalvo = salvoCount ?? attacker.doctrine.salvoSize ?? wSpec.salvoDefault;
-        if (!Number.isSafeInteger(requestedSalvo) || requestedSalvo <= 0) return s;
-        const actualSalvo = Math.min(
-          requestedSalvo,
-          candidateMount.currentAmmo
-        );
-
-        const nextWeaponsInFlight = { ...s.weaponsInFlight };
-        for (let i = 0; i < actualSalvo; i++) {
-          const mslId = `msl_manual_${s.simTime}_${attacker.id}_${s.score.redMissilesFired + s.score.blueMissilesFired + i}`;
-          nextWeaponsInFlight[mslId] = {
-            id: mslId,
-            weaponId: wSpec.id,
-            name: wSpec.codeName,
-            side: attacker.side,
-            shooterId: attacker.id,
-            shooterName: attacker.callsign,
-            targetId: targetUnit.id,
-            targetType: 'unit',
-            position: [...attacker.position],
-            launchPosition: [...attacker.position],
-            trail: [[...attacker.position]],
-            altitudeM: wSpec.cruiseAltitudeM,
-            heading: getBearingDeg(attacker.position, targetUnit.position),
-            speedKts: wSpec.speedKts,
-            distanceRemainingKm: distKm,
-            maxRangeKm: wSpec.maxRangeKm,
-            traveledKm: 0,
-            basePk: wSpec.basePk,
-            warheadDamage: wSpec.warheadDamage,
-            requiresDatalinkBeyondHorizon: wSpec.requiresDatalinkBeyondHorizon,
-            datalinkSupported: true,
-          };
-        }
-
-        const nextMounts = attacker.mounts.map((m) =>
-          m.mountId === candidateMount.mountId
-            ? {
-                ...m,
-                currentAmmo: m.currentAmmo - actualSalvo,
-                cooldownRemainingSec: m.reloadTimeSec,
-              }
-            : m
-        );
-
-        const nextScore = { ...s.score };
-        const updatedAttacker = { ...attacker };
-        recordWeaponLaunch(updatedAttacker, candidateMount, actualSalvo, s.simTime);
-        if (attacker.side === 'RED') nextScore.redMissilesFired += actualSalvo;
-        else nextScore.blueMissilesFired += actualSalvo;
-
-        const fireLog: CombatLogEntry = {
-          id: `log_man_fire_${Date.now()}`,
-          simTime: s.simTime,
-          side: attacker.side,
-          category: 'LAUNCH',
-          severity: 'warning',
-          title: `[手动齐射指令] ${attacker.callsign} 发射 ${actualSalvo} 枚 ${wSpec.codeName}`,
-          message: `指挥所人工接管火控：${attacker.name} 对 ${targetUnit.name}（距离 ${distKm.toFixed(
-            1
-          )} km）实施 ${actualSalvo} 发精确齐射！`,
-          position: [...attacker.position],
-          unitId: attacker.id,
-        };
-
-        return {
-          weaponsInFlight: nextWeaponsInFlight,
-          score: nextScore,
-          interactionMode: 'select',
-          pendingWeaponIdForEngage: null,
-          units: {
-            ...s.units,
-            [attacker.id]: {
-              ...updatedAttacker,
-              status: 'engaged',
-              mounts: nextMounts,
-            },
-          },
-          logs: [fireLog, ...s.logs].slice(0, 250),
-        };
-      }),
+    executeManualEngage: (attackerId, targetId, weaponId, salvoCount, acceptRisk = false) => set((s) => {
+      const attacker = s.units[attackerId];
+      if (!canCommandUnit(s, attacker)) return s;
+      const contact = s.contacts[targetId] ?? contactForUnit(s.contacts, attacker.side, targetId);
+      const mounts = attacker.mounts.filter((m) => !weaponId || m.weaponId === weaponId);
+      const solutions = mounts.flatMap((mount) => {
+        const weapon = s.catalog.weapons[mount.weaponId];
+        return weapon ? [{ mount, weapon, solution: evaluateFireControl({ ...attacker, doctrine: effectiveDoctrine(attacker, s.missions) }, contact, mount, weapon, s.catalog, s.units, s.simTime) }] : [];
+      });
+      const chosen = solutions.find((entry) => entry.solution.status === 'executable') ??
+        solutions.find((entry) => entry.solution.status === 'risky') ?? solutions[0];
+      const requestedSalvo = salvoCount ?? attacker.doctrine.salvoSize;
+      if (!Number.isSafeInteger(requestedSalvo) || requestedSalvo <= 0) return s;
+      if (!chosen || chosen.solution.status === 'blocked' || !contact) {
+        const log: CombatLogEntry = { id: `fire_rejected_${s.tick}_${s.commandSequence}`, simTime: s.simTime,
+          side: attacker.side, category: 'DOCTRINE', severity: 'warning', title: '火力指令未执行',
+          message: chosen?.solution.hardBlockReasons.join('；') || '无匹配武器或情报接触', unitId: attacker.id };
+        return { pendingRiskEngagement: null, interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
+      }
+      const { mount, weapon, solution } = chosen;
+      if (solution.status === 'risky' && !acceptRisk) return {
+        timeScale: 0, interactionMode: 'select',
+        pendingRiskEngagement: { attackerId, contactId: contact.id, weaponId: weapon.id, salvoCount: requestedSalvo, solution },
+      };
+      const salvo = Math.min(requestedSalvo, mount.currentAmmo);
+      const weaponsInFlight = { ...s.weaponsInFlight };
+      for (let i = 0; i < salvo; i++) {
+        const id = `manual_${s.tick}_${s.commandSequence}_${attacker.id}_${i}`;
+        weaponsInFlight[id] = { id, weaponId: weapon.id, name: weapon.codeName, side: attacker.side,
+          shooterId: attacker.id, shooterName: attacker.callsign, targetId: contact.actualUnitId, targetType: 'unit',
+          position: [...attacker.position], launchPosition: [...attacker.position], trail: [[...attacker.position]],
+          altitudeM: weapon.cruiseAltitudeM, heading: getBearingDeg(attacker.position, contact.estimatedPosition),
+          speedKts: weapon.speedKts, distanceRemainingKm: solution.distanceKm!, maxRangeKm: weapon.maxRangeKm,
+          traveledKm: 0, basePk: weapon.basePk, warheadDamage: weapon.warheadDamage,
+          requiresDatalinkBeyondHorizon: weapon.requiresDatalinkBeyondHorizon,
+          datalinkSupported: solution.supportSourceIds.length > 0, ...launchGuidance(contact) };
+      }
+      const updatedAttacker = { ...attacker, status: 'engaged' as const, mounts: attacker.mounts.map((m) =>
+        m.mountId === mount.mountId ? { ...m, currentAmmo: m.currentAmmo - salvo,
+          cooldownRemainingSec: m.reloadTimeSec * getUnitCapabilities(attacker).reloadFactor } : m) };
+      recordWeaponLaunch(updatedAttacker, mount, salvo, s.simTime);
+      const score = { ...s.score };
+      if (attacker.side === 'RED') score.redMissilesFired += salvo; else score.blueMissilesFired += salvo;
+      const log: CombatLogEntry = { id: `manual_log_${s.tick}_${s.commandSequence}`, simTime: s.simTime,
+        side: attacker.side, category: 'LAUNCH', severity: 'warning', title: `${attacker.callsign} 发射 ${salvo} 枚 ${weapon.codeName}`,
+        message: `瞄准 ${contact.displayName}（估计距离 ${solution.distanceKm!.toFixed(1)} km）。${solution.riskWarnings.join('；')}`,
+        unitId: attacker.id, position: [...attacker.position] };
+      return { units: { ...s.units, [attacker.id]: updatedAttacker }, score, weaponsInFlight,
+        pendingRiskEngagement: null, pendingWeaponIdForEngage: null, interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
+    }),
 
     addReferencePoint: (coord, side) =>
       set((s) => {
         const rpSide: SideId =
-          side || (s.activePerspective === 'BLUE' ? 'BLUE' : 'RED');
+          s.playMode === 'sandbox' ? (side || s.playerSide) : s.playerSide;
         const idx = s.referencePoints.length + 1;
         const newRp: ReferencePoint = {
-          id: `rp_${Date.now()}`,
+          id: `rp_${s.tick}_${s.commandSequence}`,
           name: `RP-${idx} (${coord[0].toFixed(1)}E,${coord[1].toFixed(1)}N)`,
           side: rpSide,
           position: [...coord],
@@ -872,17 +857,17 @@ export const useWargameStore = create<WargameStoreState>()(
 
     removeReferencePoint: (rpId) =>
       set((s) => ({
-        referencePoints: s.referencePoints.filter((r) => r.id !== rpId),
+        referencePoints: s.referencePoints.filter((r) => r.id !== rpId || r.locked || (s.playMode !== 'sandbox' && r.side !== s.playerSide)),
       })),
 
     spawnUnitAtCoordinate: (coord) =>
       set((s) => {
         const cfg = s.pendingSpawnConfig;
-        if (!cfg) return { interactionMode: 'select' };
+        if (!cfg || s.playMode !== 'sandbox' || s.battleResult) return { interactionMode: 'select' };
         const spec = s.catalog.platforms[cfg.platformId];
         if (!spec) return { interactionMode: 'select' };
 
-        const newId = `unit_spawn_${Date.now().toString(36)}`;
+        const newId = `unit_spawn_${s.tick}_${s.commandSequence}`;
         const defaultGroup =
           s.currentScenario.groups.find((g) => g.side === cfg.side)?.id ||
           'custom_group';
@@ -893,7 +878,7 @@ export const useWargameStore = create<WargameStoreState>()(
             name: cfg.name || spec.name,
             callsign:
               cfg.callsign ||
-              `${cfg.side}-${Math.floor(Math.random() * 899 + 100)}`,
+              `${cfg.side}-${s.commandSequence + 100}`,
             side: cfg.side,
             platformId: spec.id,
             loadoutId: cfg.loadoutId || spec.defaultLoadoutId,
@@ -905,7 +890,7 @@ export const useWargameStore = create<WargameStoreState>()(
         );
 
         const spawnLog: CombatLogEntry = {
-          id: `log_spawn_${Date.now()}`,
+          id: `log_spawn_${s.tick}_${s.commandSequence}`,
           simTime: s.simTime,
           side: cfg.side,
           category: 'SYSTEM',
@@ -929,5 +914,17 @@ export const useWargameStore = create<WargameStoreState>()(
           logs: [spawnLog, ...s.logs].slice(0, 250),
         };
       }),
-  }))
+    };
+    for (const name of COMMAND_ACTIONS) {
+      const action = state[name] as (...args: unknown[]) => void;
+      Object.assign(state, { [name]: (...args: unknown[]) => {
+        const before = get();
+        action(...args);
+        if (get() !== before) set({ commandSequence: before.commandSequence + 1,
+          commandHistory: [...get().commandHistory, { tick: before.tick, sequence: before.commandSequence,
+            action: name, args: structuredClone(args) }] });
+      } });
+    }
+    return state;
+  })
 );

@@ -1,3 +1,4 @@
+import { BattleObjectivesPanel } from './BattleObjectivesPanel';
 import React, { useState } from 'react';
 import {
   Radar,
@@ -133,6 +134,7 @@ export const LeftOrbatMissionSidebar: React.FC = () => {
 
       {/* 内容滚动区 */}
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+        <BattleObjectivesPanel />
         {/* TAB 1: ORBAT 战斗序列树 */}
         {activeTab === 'orbat' && (
           <div className="space-y-2">

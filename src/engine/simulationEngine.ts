@@ -1,18 +1,24 @@
+import { createRandomStream, DEFAULT_SEED, FIXED_DT_SEC } from './determinism';
+import { evaluateFireControl } from './fireControl';
+import { advanceGuidance, launchGuidance } from './guidance';
+import { updateUnitOperations, effectiveDoctrine } from './operations';
+import { evaluateObjectives, creditDamage } from './objectives';
+import type { ScenarioObjective, ObjectiveProgress, BattleResult } from '../types/wargame';
+import { calculateRadarHorizonKm, getDistanceKm, getBearingDeg } from './geometry';
+import { computeContactsOnly, evaluateTargetEcmSuppression, observeMissile } from './sensors';
+import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 import * as turf from '@turf/turf';
 import type {
   ActivePerspective,
   AutoPauseSettings,
   BattleAssessmentGrade,
   CombatLogEntry,
-  Domain,
   EquipmentCatalog,
   InitialUnitPlacement,
-  PlatformSpec,
   RuntimeUnit,
   RuntimeScenarioEvent,
   MissionDefinition,
   ScoreLedger,
-  SensorSpec,
   SideId,
   TacticalContact,
   TacticalExplosionEffect,
@@ -36,226 +42,8 @@ import { getEventOccurrences } from './scenarioEvents';
 // ============================================================================
 
 const KTS_TO_KMPH = 1.852;
-const REFERENCE_RCS_M2 = 5.0; // 标准四代机基准 RCS = 5.0 m²
-
-/**
- * 1. 计算地球曲率下的雷达视距上限 (Radar Horizon Formula)
- * R_horizon (km) = 4.12 * (sqrt(h_observer_m) + sqrt(h_target_m))
- */
-export function calculateRadarHorizonKm(
-  observerAltitudeM: number,
-  observerAntennaHeightM: number,
-  targetAltitudeM: number
-): number {
-  const effectiveObserverHeightM = Math.max(
-    2,
-    Math.max(0, observerAltitudeM) + Math.max(0, observerAntennaHeightM)
-  );
-  if (targetAltitudeM < -5) {
-    return 0;
-  }
-  const effectiveTargetHeightM =
-    targetAltitudeM <= 0 ? 14 : Math.max(2, targetAltitudeM);
-
-  return (
-    4.12 *
-    (Math.sqrt(effectiveObserverHeightM) + Math.sqrt(effectiveTargetHeightM))
-  );
-}
-
-/**
- * 2. ★ 计算考虑目标姿态角 (Aspect Angle) 与挂载方案 (Loadout) 后的瞬时等效 RCS (m²)
- * - 正前方 (0° ~ 35°): frontalM2 (五代机隐身最优区)
- * - 正侧向 (35° ~ 135°): beamM2 (侧翼进气道与垂尾强反射，RCS 暴增 15~35 倍)
- * - 尾喷口向 (135° ~ 180°): rearM2
- */
-export function calculateAspectEffectiveRcsM2(
-  targetSpec: PlatformSpec,
-  observerPosition: [number, number],
-  targetPosition: [number, number],
-  targetHeadingDeg: number,
-  loadoutRcsPenaltyM2 = 0
-): number {
-  const profile = targetSpec.rcsProfile;
-  if (!profile) {
-    return Math.max(0.001, targetSpec.rcsM2 + loadoutRcsPenaltyM2);
-  }
-
-  // 计算从目标指向观察者的方位角，与目标当前机头航向的夹角 (0° = 正对雷达, 90° = 侧身暴露, 180° = 背对雷达)
-  const bearingTargetToObs = getBearingDeg(targetPosition, observerPosition);
-  const rawDiff = Math.abs(bearingTargetToObs - targetHeadingDeg) % 360;
-  const aspectAngleDeg = rawDiff > 180 ? 360 - rawDiff : rawDiff;
-
-  let baseRcs: number;
-  if (aspectAngleDeg <= 35) {
-    baseRcs = profile.frontalM2;
-  } else if (aspectAngleDeg <= 135) {
-    // 在 35° 到 90° 之间平滑过渡至侧向峰值 beamM2
-    const t =
-      1 - Math.abs(aspectAngleDeg - 85) / 55;
-    baseRcs =
-      profile.frontalM2 +
-      Math.max(0.25, Math.min(1, t)) * (profile.beamM2 - profile.frontalM2);
-  } else {
-    baseRcs = profile.rearM2;
-  }
-
-  return Math.max(0.001, baseRcs + loadoutRcsPenaltyM2);
-}
-
-/**
- * 3. 计算考虑目标 RCS 四次方根律、米波反隐身修正与有源电子干扰 (OECM) 压制后的实际雷达探测距离 (km)
- * @param ecmSuppressionFactor 电子干扰压制因子 (0.0 = 无干扰, 0.65 = 强伴随干扰)，将雷达烧穿距离压缩为 (1 - factor * 0.65)
- */
-export function calculateEffectiveRadarRangeKm(
-  sensor: SensorSpec,
-  targetRcsM2: number,
-  observerAltM: number,
-  observerAntennaM: number,
-  targetAltM: number,
-  ecmSuppressionFactor = 0
-): number {
-  const horizonKm = calculateRadarHorizonKm(
-    observerAltM,
-    observerAntennaM,
-    targetAltM
-  );
-  if (horizonKm <= 0) return 0;
-
-  const isCounterStealthBand =
-    sensor.type === 'radar_oth' ||
-    sensor.frequencyBand.includes('VHF') ||
-    sensor.frequencyBand.includes('UHF');
-
-  const effectiveRcs = isCounterStealthBand
-    ? Math.max(targetRcsM2, 0.35)
-    : Math.max(targetRcsM2, 0.001);
-
-  const rcsFactor = Math.pow(effectiveRcs / REFERENCE_RCS_M2, 0.25);
-  const clutterModifier =
-    targetAltM > 0 && targetAltM < 50 && !sensor.lookDownCapable ? 0.65 : 1.0;
-
-  // 电子战压制效应 (Burn-through Range Reduction)：米波/数字阵列雷达抗干扰稍强
-  const eccmResistance = isCounterStealthBand ? 0.35 : 0.0;
-  const jammerMultiplier = Math.max(
-    0.35,
-    1 - Math.max(0, ecmSuppressionFactor) * (0.65 - eccmResistance * 0.25)
-  );
-
-  const powerLimitedRangeKm =
-    sensor.maxRangeKm * rcsFactor * clutterModifier * jammerMultiplier;
-  return Math.min(horizonKm, powerLimitedRangeKm);
-}
-
-/**
- * 4. 计算水声声呐探测距离 (考虑温跃层深度 -120m 遮蔽与主动/被动声呐特性)
- */
-export function calculateSonarDetectionRangeKm(
-  sensor: SensorSpec,
-  observerAltM: number,
-  targetAltM: number,
-  targetAcousticDb: number,
-  targetSpeedKts: number,
-  targetSonarActive: boolean
-): number {
-  if (sensor.type === 'sonar_passive' && targetSonarActive) {
-    return sensor.maxRangeKm * 1.65;
-  }
-
-  const acrossThermocline =
-    (observerAltM > -90 && targetAltM < -140) ||
-    (observerAltM < -140 && targetAltM > -90);
-  const thermoclineFactor = acrossThermocline ? 0.68 : 1.0;
-
-  if (sensor.type === 'sonar_active') {
-    return sensor.maxRangeKm * thermoclineFactor;
-  }
-
-  const speedNoiseBonus = 1 + Math.max(0, targetSpeedKts - 10) * 0.035;
-  const acousticFactor = Math.max(0.35, (targetAcousticDb - 75) / 40);
-  return (
-    sensor.maxRangeKm * acousticFactor * speedNoiseBonus * thermoclineFactor
-  );
-}
-
-export function getDistanceKm(
-  posA: [number, number],
-  posB: [number, number]
-): number {
-  return turf.distance(posA, posB, { units: 'kilometers' });
-}
-
-export function getBearingDeg(
-  from: [number, number],
-  to: [number, number]
-): number {
-  const b = turf.bearing(from, to);
-  return (b + 360) % 360;
-}
-
-export function buildAouPolygon(
-  center: [number, number],
-  radiusKm: number
-): [number, number][] {
-  if (radiusKm <= 0.8) return [];
-  const circle = turf.circle(center, radiusKm, {
-    steps: 16,
-    units: 'kilometers',
-  });
-  return circle.geometry.coordinates[0] as [number, number][];
-}
-
-export function getContactSidc(
-  domain: Domain,
-  classification: TacticalContact['classification'],
-  targetSide: SideId
-): string {
-  const aff =
-    classification === 'unknown' ? 'U' : targetSide === 'RED' ? 'H' : 'F';
-  switch (domain) {
-    case 'air':
-      return `S${aff}APMF------`;
-    case 'surface':
-      return `S${aff}SPCLDD----`;
-    case 'subsurface':
-      return `S${aff}UPSN------`;
-    case 'land':
-      return `S${aff}GPUCDM----`;
-  }
-}
-
-/**
- * 评估目标当前享有的友军电子战伴随干扰 (Escort Jamming) + 自卫干扰综合压制系数 (0.0 - 0.75)
- */
-export function evaluateTargetEcmSuppression(
-  target: RuntimeUnit,
-  allAliveUnits: RuntimeUnit[],
-  catalog: EquipmentCatalog
-): number {
-  const targetSpec = catalog.platforms[target.platformId];
-  let bestEcm =
-    target.doctrine.emconJamming && targetSpec?.ecmStrength
-      ? targetSpec.ecmStrength
-      : 0;
-
-  // 检查 75km 伴随半径内是否有开启 OECM 干扰的友军电子战机或大型舰艇
-  for (const ally of allAliveUnits) {
-    if (ally.side !== target.side || ally.id === target.id) continue;
-    if (!ally.doctrine.emconJamming) continue;
-    const allySpec = catalog.platforms[ally.platformId];
-    if (!allySpec || !allySpec.ecmStrength) continue;
-
-    const distKm = getDistanceKm(ally.position, target.position);
-    if (distKm <= 75) {
-      const escortEffect = allySpec.ecmStrength * (1 - distKm / 120);
-      if (escortEffect > bestEcm) {
-        bestEcm = escortEffect;
-      }
-    }
-  }
-
-  return Math.min(0.75, Math.max(0, bestEcm));
-}
+export { calculateRadarHorizonKm, getDistanceKm, getBearingDeg } from './geometry';
+export { calculateAspectEffectiveRcsM2, calculateEffectiveRadarRangeKm, calculateSonarDetectionRangeKm, evaluateTargetEcmSuppression, buildAouPolygon, getContactSidc } from './sensors';
 
 /**
  * 根据想定胜负条件评估当前战局等级
@@ -364,6 +152,8 @@ export function createRuntimeUnitFromPlacement(
     sidc:
       placement.side === 'RED' ? spec.defaultSidcRed : spec.defaultSidcBlue,
     position: finalPos,
+    recoveryPosition: [...(placement.recoveryPosition ?? finalPos)],
+    navigationMode: placement.assignedMissionId ? 'mission' : 'manual',
     altitudeM,
     targetAltitudeM: altitudeM,
     heading: placement.heading,
@@ -397,6 +187,13 @@ export function createRuntimeUnitFromPlacement(
 }
 
 export interface SimulationWorldState {
+  tick?: number;
+  rngState?: number;
+  objectives?: ScenarioObjective[];
+  objectiveProgress?: ObjectiveProgress;
+  battleResult?: BattleResult;
+  creditedDamage?: Record<string, number>;
+  detectedMissileIds?: string[];
   startTime?: number;
   simTime: number;
   units: Record<string, RuntimeUnit>;
@@ -425,8 +222,12 @@ export function stepSimulationWorld(
   dtSec: number,
   autoPauseSettings: AutoPauseSettings,
   activePerspective: ActivePerspective,
-  rng: () => number = Math.random
+  randomOverride?: () => number
 ): SimulationStepResult {
+  if (world.battleResult) return { nextState: { ...world, missions: deriveMissionAssignments(world.missions, world.units) }, newLogs: [], shouldAutoPause: true };
+  if (!Number.isFinite(dtSec) || dtSec <= 0) throw new Error('Simulation step must be positive');
+  const random = createRandomStream(world.rngState ?? DEFAULT_SEED);
+  const rng = randomOverride ?? random.next;
   const nextSimTime = world.simTime + dtSec * 1000;
   const startTime = world.startTime ?? world.simTime;
 
@@ -467,6 +268,7 @@ export function stepSimulationWorld(
     sortiesLaunched: world.score.sortiesLaunched ?? 0,
   };
 
+  const creditedDamage = { ...world.creditedDamage };
   const newLogs: CombatLogEntry[] = [];
   let shouldAutoPause = false;
   let autoPauseReason: string | undefined;
@@ -491,7 +293,7 @@ export function stepSimulationWorld(
   // STEP 1: 巡逻任务 AI 航路生成、母舰机库冷却 & 平台运动学步进
   // ==========================================================================
   for (const unit of Object.values(units)) {
-    if (unit.hp <= 0 || unit.status === 'destroyed') continue;
+    if (!isActiveUnit(unit)) continue;
 
     for (const mount of unit.mounts) {
       if (mount.cooldownRemainingSec > 0) {
@@ -518,12 +320,13 @@ export function stepSimulationWorld(
     }
 
     const configuration = configurations.get(unit.id)!;
-    unit.targetSpeedKts = Math.max(0, Math.min(configuration.maxSpeedKts, unit.targetSpeedKts));
-    unit.speedKts = Math.max(0, Math.min(configuration.maxSpeedKts, unit.speedKts));
+    updateUnitOperations(unit, units, world.contacts, nextMissions, catalog, nextSimTime, dtSec, score, newLogs);
+    if (!isActiveUnit(unit)) continue;
+    const speedLimit = configuration.maxSpeedKts * getUnitCapabilities(unit).speedFactor;
+    unit.targetSpeedKts = Math.max(0, Math.min(speedLimit, unit.targetSpeedKts));
+    unit.speedKts = Math.max(0, Math.min(speedLimit, unit.speedKts));
 
-    if (unit.domain === 'air' && unit.fuelRemainingSec > 0) {
-      unit.fuelRemainingSec = Math.max(0, unit.fuelRemainingSec - dtSec);
-    }
+
 
     if (Math.abs(unit.altitudeM - unit.targetAltitudeM) > 1) {
       const climbRateMps = unit.domain === 'air' ? 35 : 4;
@@ -539,23 +342,12 @@ export function stepSimulationWorld(
         Math.sign(diff) * Math.min(Math.abs(diff), accelKtsPerSec * dtSec);
     }
 
-    if (unit.waypoints.length === 0 && unit.assignedMissionId) {
+    if (unit.waypoints.length === 0 && unit.assignedMissionId && unit.navigationMode !== 'manual' && unit.status !== 'returning') {
       const mission = nextMissions.find(
         (m) => m.id === unit.assignedMissionId && m.isActive
       );
       if (mission && mission.areaPolygon.length >= 3) {
-        const lons = mission.areaPolygon.map((p) => p[0]);
-        const lats = mission.areaPolygon.map((p) => p[1]);
-        const minLon = Math.min(...lons);
-        const maxLon = Math.max(...lons);
-        const minLat = Math.min(...lats);
-        const maxLat = Math.max(...lats);
-        const nextLon = minLon + (0.2 + 0.6 * rng()) * (maxLon - minLon);
-        const nextLat = minLat + (0.2 + 0.6 * rng()) * (maxLat - minLat);
-        unit.waypoints.push([
-          Number(nextLon.toFixed(4)),
-          Number(nextLat.toFixed(4)),
-        ]);
+        unit.waypoints.push(turf.pointOnFeature(turf.polygon([[...mission.areaPolygon, mission.areaPolygon[0]]])).geometry.coordinates as [number, number]);
       }
     }
 
@@ -591,319 +383,24 @@ export function stepSimulationWorld(
   // ==========================================================================
   // STEP 2: 多域传感器探测、多向 RCS 剖面、有源电子干扰 (OECM) 与数据链融合
   // ==========================================================================
-  const nextContacts: Record<string, TacticalContact> = {};
-  const aliveUnits = Object.values(units).filter(
-    (u) => u.hp > 0 && u.status !== 'destroyed'
-  );
-
-  for (const observerSide of ['RED', 'BLUE'] as SideId[]) {
-    const friendlyUnits = aliveUnits.filter((u) => u.side === observerSide);
-    const hostileUnits = aliveUnits.filter(
-      (u) => u.side !== observerSide && u.side !== 'NEUTRAL'
-    );
-
-    for (const target of hostileUnits) {
-      const targetSpec = catalog.platforms[target.platformId];
-      if (!targetSpec) continue;
-
-      const loadoutRcsPenalty = configurations.get(target.id)!.rcsPenaltyM2;
-
-      // 计算目标当前享有的综合电子战压制强度 (自身 ECM + 75km 内电子战机伴随掩护)
-      const targetEcmSuppression = evaluateTargetEcmSuppression(
-        target,
-        aliveUnits,
-        catalog
-      );
-
-      const detectingSources: string[] = [];
-      let bestUncertaintyKm = Infinity;
-      let bestClassification: TacticalContact['classification'] = 'unknown';
-
-      for (const observer of friendlyUnits) {
-        const obsSpec = catalog.platforms[observer.platformId];
-        if (!obsSpec) continue;
-
-        const distKm = getDistanceKm(observer.position, target.position);
-
-        // 计算目标相对该观察者雷达视线的姿态等效 RCS (正前/侧向/尾向 + 外挂惩罚)
-        const aspectRcsM2 = calculateAspectEffectiveRcsM2(
-          targetSpec,
-          observer.position,
-          target.position,
-          target.heading,
-          loadoutRcsPenalty
-        );
-
-        for (const sensorId of configurations.get(observer.id)!.sensorIds) {
-          const sensor = catalog.sensors[sensorId];
-          if (!sensor) continue;
-          if (!sensor.detectDomains.includes(target.domain)) continue;
-
-          // A. 主动雷达探测 (受姿态 RCS 与敌方 OECM 压制影响)
-          if (
-            sensor.type === 'radar_air_surface' ||
-            sensor.type === 'radar_oth'
-          ) {
-            if (!observer.doctrine.emconRadar) continue;
-
-            const effRangeKm = calculateEffectiveRadarRangeKm(
-              sensor,
-              aspectRcsM2,
-              observer.altitudeM,
-              obsSpec.radarAntennaHeightM,
-              target.altitudeM,
-              targetEcmSuppression
-            );
-
-            if (distKm <= effRangeKm) {
-              detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
-              const ratio = distKm / Math.max(1, effRangeKm);
-              const uncertainty = ratio < 0.72 ? 0.3 : 2.5;
-              if (uncertainty < bestUncertaintyKm) {
-                bestUncertaintyKm = uncertainty;
-              }
-              if (ratio < 0.55) {
-                bestClassification = 'identified';
-              } else if (bestClassification === 'unknown') {
-                bestClassification = 'classified';
-              }
-            }
-          }
-
-          // B. 被动电子支援侦察 (ESM/RWR) —— 敌方开启主动雷达或开启强 OECM 干扰都会暴露辐射方位！
-          else if (sensor.type === 'esm') {
-            if (!target.doctrine.emconRadar && !target.doctrine.emconJamming)
-              continue;
-            const horizonKm =
-              calculateRadarHorizonKm(
-                observer.altitudeM,
-                obsSpec.radarAntennaHeightM,
-                target.altitudeM
-              ) * 1.28;
-            const esmRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
-
-            if (distKm <= esmRangeKm) {
-              detectingSources.push(
-                `${observer.callsign} (${
-                  target.doctrine.emconJamming ? 'ESM截获强干扰源' : 'ESM截获雷达辐射'
-                })`
-              );
-              const esmUncertaintyKm = Math.max(
-                2.0,
-                Math.min(22, distKm * 0.055)
-              );
-              if (esmUncertaintyKm < bestUncertaintyKm) {
-                bestUncertaintyKm = esmUncertaintyKm;
-              }
-              if (bestClassification === 'unknown') {
-                bestClassification = 'classified';
-              }
-            }
-          }
-
-          // C. 光电/红外被动搜索 (IRST/EOTS) —— 不受射频电子干扰影响！
-          else if (sensor.type === 'irst_optical') {
-            const horizonKm = calculateRadarHorizonKm(
-              observer.altitudeM,
-              obsSpec.radarAntennaHeightM,
-              target.altitudeM
-            );
-            const effRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
-            if (distKm <= effRangeKm) {
-              detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
-              if (distKm <= effRangeKm * 0.65) {
-                bestClassification = 'identified';
-                bestUncertaintyKm = Math.min(bestUncertaintyKm, 0.2);
-              } else {
-                if (bestClassification === 'unknown') {
-                  bestClassification = 'classified';
-                }
-                bestUncertaintyKm = Math.min(bestUncertaintyKm, 1.5);
-              }
-            }
-          }
-
-          // D. 主被动声呐探测 (Sonar)
-          else if (
-            sensor.type === 'sonar_passive' ||
-            sensor.type === 'sonar_active'
-          ) {
-            if (
-              sensor.type === 'sonar_active' &&
-              !observer.doctrine.emconSonar
-            ) {
-              continue;
-            }
-            const sonarRangeKm = calculateSonarDetectionRangeKm(
-              sensor,
-              observer.altitudeM,
-              target.altitudeM,
-              targetSpec.acousticSignatureDb,
-              target.speedKts,
-              target.doctrine.emconSonar
-            );
-
-            if (distKm <= sonarRangeKm) {
-              detectingSources.push(
-                `${observer.callsign} (${
-                  sensor.type === 'sonar_active' ? '主动声呐回波' : '被动拖曳阵监听'
-                })`
-              );
-              const sonarUncertainty =
-                sensor.type === 'sonar_active' || distKm < 18
-                  ? 0.4
-                  : Math.max(1.5, distKm * 0.08);
-              if (sonarUncertainty < bestUncertaintyKm) {
-                bestUncertaintyKm = sonarUncertainty;
-              }
-              if (
-                sensor.type === 'sonar_active' ||
-                distKm < sonarRangeKm * 0.55
-              ) {
-                bestClassification = 'identified';
-              } else if (bestClassification === 'unknown') {
-                bestClassification = 'classified';
-              }
-            }
-          }
-        }
-      }
-
-      const contactKey = `${observerSide}_CONTACT_${target.id}`;
-      const prevContact = world.contacts[contactKey];
-
-      if (detectingSources.length > 0) {
-        if (detectingSources.length >= 2 && bestUncertaintyKm > 1.0) {
-          bestUncertaintyKm = Number((bestUncertaintyKm * 0.45).toFixed(2));
-        }
-
-        let estimatedPos: [number, number] = [...target.position];
-        if (bestUncertaintyKm > 2.0) {
-          const hashAngle =
-            (target.id.charCodeAt(0) * 73 + Math.floor(nextSimTime / 10000)) %
-            360;
-          const offsetDest = turf.destination(
-            target.position,
-            bestUncertaintyKm * 0.35,
-            hashAngle,
-            { units: 'kilometers' }
-          );
-          estimatedPos = offsetDest.geometry.coordinates as [number, number];
-        }
-
-        const prefix =
-          target.domain === 'air'
-            ? 'BOGEY'
-            : target.domain === 'surface'
-            ? 'SKUNK'
-            : target.domain === 'subsurface'
-            ? 'GOBLIN'
-            : 'SITE';
-
-        const shortNum =
-          (Math.abs(
-            target.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
-          ) %
-            899) +
-          100;
-
-        const displayName =
-          bestClassification === 'identified'
-            ? `${target.callsign} · ${targetSpec.className}`
-            : bestClassification === 'classified'
-            ? `${prefix}-${shortNum} [疑似${
-                target.domain === 'air'
-                  ? '战机/预警机'
-                  : target.domain === 'surface'
-                  ? '大型水面舰'
-                  : target.domain === 'subsurface'
-                  ? '水下潜艇'
-                  : '防空/导弹阵地'
-              }]`
-            : `${prefix}-${shortNum} [不明接触]`;
-
-        const threatLevel: TacticalContact['threatLevel'] =
-          target.category === 'stealth_fighter' ||
-          target.category === 'destroyer' ||
-          target.category === 'ssn' ||
-          target.category === 'sam_battery'
-            ? 'critical'
-            : target.category === 'bomber' ||
-              target.category === 'carrier' ||
-              target.category === 'ew_aircraft'
-            ? 'high'
-            : 'medium';
-
-        nextContacts[contactKey] = {
-          id: contactKey,
-          actualUnitId: target.id,
-          observerSide,
-          targetSide: target.side,
-          domain: target.domain,
-          classification: bestClassification,
-          displayName,
-          sidc: getContactSidc(target.domain, bestClassification, target.side),
-          estimatedPosition: estimatedPos,
-          truePosition: [...target.position],
-          uncertaintyRadiusKm: Number(bestUncertaintyKm.toFixed(1)),
-          uncertaintyPolygon: buildAouPolygon(estimatedPos, bestUncertaintyKm),
-          heading: Math.round(target.heading),
-          speedKts: Math.round(target.speedKts),
-          altitudeM: Math.round(target.altitudeM),
-          firstDetectedTime: prevContact
-            ? prevContact.firstDetectedTime
-            : nextSimTime,
-          lastDetectedTime: nextSimTime,
-          detectedBySources: Array.from(new Set(detectingSources)).slice(0, 3),
-          isJammingDetected: target.doctrine.emconJamming,
-          threatLevel,
-        };
-
-        if (!prevContact) {
-          newLogs.push({
-            id: `log_det_${nextSimTime}_${contactKey}`,
-            simTime: nextSimTime,
-            side: observerSide,
-            category: 'DETECTION',
-            severity: 'warning',
-            title: `发现新目标接触: ${displayName}`,
-            message: `${detectingSources[0]} 捕获新目标，AOU误差半径 ${bestUncertaintyKm.toFixed(
-              1
-            )} km。`,
-            position: estimatedPos,
-            unitId: target.id,
-          });
-          triggerPauseIfMatch(
-            autoPauseSettings.onNewContact,
-            `[${observerSide}] 发现新战术接触: ${displayName}`,
-            observerSide
-          );
-        }
-      } else if (
-        prevContact &&
-        nextSimTime - prevContact.lastDetectedTime <= 25000
-      ) {
-        const expandedRadius = Math.min(
-          35,
-          prevContact.uncertaintyRadiusKm + dtSec * 0.4
-        );
-        nextContacts[contactKey] = {
-          ...prevContact,
-          uncertaintyRadiusKm: Number(expandedRadius.toFixed(1)),
-          uncertaintyPolygon: buildAouPolygon(
-            prevContact.estimatedPosition,
-            expandedRadius
-          ),
-        };
-      }
-    }
+  for (const log of newLogs) {
+    if (log.category === 'DESTROYED') triggerPauseIfMatch(autoPauseSettings.onUnitHitOrDestroyed, log.title, log.side);
+  }
+  const sensed = computeContactsOnly(units, catalog, world.contacts, nextSimTime, dtSec);
+  const nextContacts = sensed.contacts;
+  const aliveUnits = Object.values(units).filter(isActiveUnit);
+  newLogs.push(...sensed.logs);
+  for (const log of sensed.logs) {
+    triggerPauseIfMatch(autoPauseSettings.onNewContact, log.title, log.side);
   }
 
   // ==========================================================================
   // STEP 3: 防空反导拦截 AI & 条令自动火力分配
   // ==========================================================================
   for (const shooter of aliveUnits) {
-    if (shooter.doctrine.roe === 'hold') continue;
+    const doctrine = effectiveDoctrine(shooter, nextMissions);
+    const fireUnit = { ...shooter, doctrine };
+    if (doctrine.roe === 'hold' || !getUnitCapabilities(shooter).canFire) continue;
 
     // 3A. 优先拦截来袭敌方导弹
     const samMounts = shooter.mounts.filter((m) => {
@@ -935,31 +432,13 @@ export function stepSimulationWorld(
         )
           break;
 
-        const distToVampireKm = getDistanceKm(
-          shooter.position,
-          vampire.position
-        );
-        const shooterPlatform = catalog.platforms[shooter.platformId];
-        const ownHorizonKm = calculateRadarHorizonKm(
-          shooter.altitudeM,
-          shooterPlatform?.radarAntennaHeightM || 20,
-          vampire.altitudeM
-        );
-        const hasFriendlyAwacsCec = aliveUnits.some(
-          (u) =>
-            u.side === shooter.side &&
-            u.category === 'awacs' &&
-            u.doctrine.emconRadar &&
-            getDistanceKm(u.position, vampire.position) <= 420
-        );
-        const maxInterceptRangeKm = hasFriendlyAwacsCec
-          ? samSpec.maxRangeKm * 0.85
-          : Math.min(samSpec.maxRangeKm, ownHorizonKm);
-
-        if (
-          distToVampireKm <= maxInterceptRangeKm &&
-          distToVampireKm >= samSpec.minRangeKm
-        ) {
+        const missileContact = observeMissile(shooter.side, vampire, units, catalog, nextSimTime, shooter);
+        if (!missileContact) continue;
+        const solution = evaluateFireControl(fireUnit, missileContact, samMount, samSpec, catalog, units, nextSimTime, 'defense');
+        const distToVampireKm = solution.distanceKm!;
+        const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some((id) => id !== shooter.id);
+        const ownHorizonKm = calculateRadarHorizonKm(shooter.altitudeM, catalog.platforms[shooter.platformId].radarAntennaHeightM, vampire.altitudeM);
+        if (solution.status === 'executable') {
           const existingInterceptors = Object.values(weaponsInFlight).filter(
             (w) => w.side === shooter.side && w.targetId === vampire.id
           );
@@ -990,12 +469,13 @@ export function stepSimulationWorld(
                 requiresDatalinkBeyondHorizon:
                   samSpec.requiresDatalinkBeyondHorizon,
                 datalinkSupported: true,
+                ...launchGuidance(missileContact),
               };
               samMount.currentAmmo -= 1;
               if (shooter.side === 'RED') score.redMissilesFired += 1;
               else score.blueMissilesFired += 1;
             }
-            samMount.cooldownRemainingSec = samMount.reloadTimeSec;
+            samMount.cooldownRemainingSec = samMount.reloadTimeSec * getUnitCapabilities(shooter).reloadFactor;
             recordWeaponLaunch(shooter, samMount, interceptCount, nextSimTime);
 
             newLogs.push({
@@ -1022,8 +502,8 @@ export function stepSimulationWorld(
 
     // 3B. 对已探明的敌方高威胁 Contact 自动开火
     if (
-      shooter.doctrine.roe === 'free' &&
-      shooter.doctrine.engageOpportunityTargets
+      doctrine.roe === 'free' &&
+      doctrine.engageOpportunityTargets && shooter.status !== 'returning'
     ) {
       const readyMounts = shooter.mounts.filter(
         (m) => m.currentAmmo > 0 && m.cooldownRemainingSec <= 0
@@ -1032,14 +512,11 @@ export function stepSimulationWorld(
 
       const sideContacts = Object.values(nextContacts).filter(
         (c) =>
-          c.observerSide === shooter.side &&
-          c.uncertaintyRadiusKm <= 8.0 &&
-          c.classification !== 'unknown'
+          c.observerSide === shooter.side
       );
 
       for (const contact of sideContacts) {
-        const targetUnit = units[contact.actualUnitId];
-        if (!targetUnit || targetUnit.hp <= 0) continue;
+        const targetId = contact.actualUnitId;
 
         const distKm = getDistanceKm(
           shooter.position,
@@ -1049,9 +526,7 @@ export function stepSimulationWorld(
         const matchingMount = readyMounts.find((m) => {
           const wSpec = catalog.weapons[m.weaponId];
           if (!wSpec) return false;
-          if (!wSpec.targetDomains.includes(contact.domain)) return false;
-          if (distKm > wSpec.maxRangeKm * 0.92 || distKm < wSpec.minRangeKm)
-            return false;
+          if (evaluateFireControl(fireUnit, contact, m, wSpec, catalog, units, nextSimTime, 'automatic').status !== 'executable') return false;
           if (wSpec.canInterceptMissile && m.currentAmmo <= m.maxAmmo * 0.4) {
             return false;
           }
@@ -1065,17 +540,17 @@ export function stepSimulationWorld(
           (w) =>
             w.side === shooter.side &&
             w.targetType === 'unit' &&
-            w.targetId === targetUnit.id
+            w.targetId === targetId
         );
-        if (inFlightToTarget.length >= shooter.doctrine.salvoSize) continue;
+        if (inFlightToTarget.length >= doctrine.salvoSize) continue;
 
         const salvo = Math.min(
-          shooter.doctrine.salvoSize,
+          doctrine.salvoSize,
           matchingMount.currentAmmo
         );
 
         for (let i = 0; i < salvo; i++) {
-          const mslId = `msl_${nextSimTime}_${shooter.id}_${targetUnit.id}_${i}`;
+          const mslId = `msl_${nextSimTime}_${shooter.id}_${targetId}_${i}`;
           weaponsInFlight[mslId] = {
             id: mslId,
             weaponId: wSpec.id,
@@ -1083,13 +558,13 @@ export function stepSimulationWorld(
             side: shooter.side,
             shooterId: shooter.id,
             shooterName: shooter.callsign,
-            targetId: targetUnit.id,
+            targetId: targetId,
             targetType: 'unit',
             position: [...shooter.position],
             launchPosition: [...shooter.position],
             trail: [[...shooter.position]],
             altitudeM: wSpec.cruiseAltitudeM,
-            heading: getBearingDeg(shooter.position, targetUnit.position),
+            heading: getBearingDeg(shooter.position, contact.estimatedPosition),
             speedKts: wSpec.speedKts,
             distanceRemainingKm: distKm,
             maxRangeKm: wSpec.maxRangeKm,
@@ -1098,13 +573,14 @@ export function stepSimulationWorld(
             warheadDamage: wSpec.warheadDamage,
             requiresDatalinkBeyondHorizon: wSpec.requiresDatalinkBeyondHorizon,
             datalinkSupported: true,
+            ...launchGuidance(contact),
           };
           matchingMount.currentAmmo -= 1;
           if (shooter.side === 'RED') score.redMissilesFired += 1;
           else score.blueMissilesFired += 1;
         }
 
-        matchingMount.cooldownRemainingSec = matchingMount.reloadTimeSec;
+        matchingMount.cooldownRemainingSec = matchingMount.reloadTimeSec * getUnitCapabilities(shooter).reloadFactor;
         recordWeaponLaunch(shooter, matchingMount, salvo, nextSimTime);
         shooter.status = 'engaged';
 
@@ -1118,7 +594,7 @@ export function stepSimulationWorld(
             : 'BIRDS AWAY!';
 
         newLogs.push({
-          id: `log_launch_${nextSimTime}_${shooter.id}_${targetUnit.id}`,
+          id: `log_launch_${nextSimTime}_${shooter.id}_${targetId}`,
           simTime: nextSimTime,
           side: shooter.side,
           category: 'LAUNCH',
@@ -1131,12 +607,24 @@ export function stepSimulationWorld(
           unitId: shooter.id,
         });
 
-        triggerPauseIfMatch(
-          autoPauseSettings.onMissileDetected,
-          `${callout} 侦测到导弹发射: ${wSpec.codeName} -> ${contact.displayName}`,
-          targetUnit.side
-        );
         break;
+      }
+    }
+  }
+
+  const detectedMissileIds: string[] = [];
+  for (const missile of Object.values(weaponsInFlight)) {
+    for (const side of ['RED', 'BLUE'] as const) {
+      if (missile.side === side) continue;
+      const observed = observeMissile(side, missile, units, catalog, nextSimTime);
+      if (!observed) continue;
+      const key = `${side}:${missile.id}`;
+      detectedMissileIds.push(key);
+      if (!world.detectedMissileIds?.includes(key)) {
+        newLogs.push({ id: `missile_contact_${nextSimTime}_${key}`, simTime: nextSimTime, side,
+          category: 'DETECTION', severity: 'warning', title: '传感器捕获来袭武器',
+          message: `观测来源：${observed.detectedBySources.join('、')}`, position: observed.estimatedPosition });
+        triggerPauseIfMatch(autoPauseSettings.onMissileDetected, '本方传感器捕获来袭武器', side);
       }
     }
   }
@@ -1149,7 +637,7 @@ export function stepSimulationWorld(
   );
 
   const sortedMissiles = Object.values(weaponsInFlight).sort((a, b) =>
-    a.targetType === 'missile' && b.targetType !== 'missile' ? -1 : 1
+    Number(b.targetType === 'missile') - Number(a.targetType === 'missile') || a.id.localeCompare(b.id)
   );
 
   for (const msl of sortedMissiles) {
@@ -1158,26 +646,24 @@ export function stepSimulationWorld(
       continue;
     }
 
-    const stepDistKm = (msl.speedKts * KTS_TO_KMPH * dtSec) / 3600;
-    msl.traveledKm += stepDistKm;
-
-    if (msl.traveledKm > msl.maxRangeKm * 1.05) {
+    const wSpec = catalog.weapons[msl.weaponId];
+    if (!wSpec) { delete weaponsInFlight[msl.id]; continue; }
+    const target = msl.targetType === 'missile' ? weaponsInFlight[msl.targetId] : units[msl.targetId];
+    const contact = msl.targetType === 'missile'
+      ? (target ? observeMissile(msl.side, target as WeaponInFlight, units, catalog, nextSimTime, units[msl.shooterId]) : undefined)
+      : nextContacts[`${msl.side}_CONTACT_${msl.targetId}`];
+    const flight = advanceGuidance(msl, wSpec, contact, units, catalog, nextSimTime, dtSec, target);
+    if (flight.expired) {
+      newLogs.push({ id: `log_lost_${nextSimTime}_${msl.id}`, simTime: nextSimTime, side: msl.side,
+        category: 'EVENT', severity: 'info', title: `${msl.name} 搜索结束，未确认命中`,
+        message: '导引头未保持捕获，或动力航程耗尽。', position: [...msl.position] });
       delete weaponsInFlight[msl.id];
       continue;
     }
-
+    if (!flight.reached || !target) continue;
     if (msl.targetType === 'missile') {
-      const targetMsl = weaponsInFlight[msl.targetId];
-      if (!targetMsl || targetMsl.isIntercepted) {
-        delete weaponsInFlight[msl.id];
-        continue;
-      }
-
-      const distKm = getDistanceKm(msl.position, targetMsl.position);
-      const closingDistKm =
-        stepDistKm + (targetMsl.speedKts * KTS_TO_KMPH * dtSec) / 3600;
-
-      if (distKm <= Math.max(1.8, closingDistKm * 1.3)) {
+      const targetMsl = target as WeaponInFlight;
+      if (!targetMsl.isIntercepted) {
         const isHypersonicTarget = targetMsl.speedKts >= 3800;
         const effectiveInterceptPk = isHypersonicTarget
           ? msl.basePk * 0.35
@@ -1211,52 +697,16 @@ export function stepSimulationWorld(
           });
         }
         delete weaponsInFlight[msl.id];
-      } else {
-        msl.heading = getBearingDeg(msl.position, targetMsl.position);
-        const nextPos = turf.destination(msl.position, stepDistKm, msl.heading, {
-          units: 'kilometers',
-        });
-        msl.position = nextPos.geometry.coordinates as [number, number];
-        msl.distanceRemainingKm = distKm - stepDistKm;
-        msl.trail.push([...msl.position]);
-        if (msl.trail.length > 18) msl.trail.shift();
       }
       continue;
     }
 
-    // 目标是作战单元 (targetType === 'unit')
-    const targetUnit = units[msl.targetId];
-    if (!targetUnit || targetUnit.hp <= 0 || targetUnit.status === 'destroyed') {
-      delete weaponsInFlight[msl.id];
-      continue;
-    }
-
-    // ★ 检查超视距导弹的数据链中继引导支持 (CEC / Mid-course Datalink)
-    const contactKey = `${msl.side}_CONTACT_${targetUnit.id}`;
-    const currentContact = nextContacts[contactKey];
-    const hasFreshDatalinkTrack =
-      Boolean(currentContact) &&
-      nextSimTime - currentContact.lastDetectedTime <= 5000 &&
-      currentContact.uncertaintyRadiusKm <= 12;
-    msl.datalinkSupported = hasFreshDatalinkTrack;
-
-    const distToUnitKm = getDistanceKm(msl.position, targetUnit.position);
-    if (distToUnitKm <= Math.max(1.2, stepDistKm * 1.2)) {
+    const targetUnit = target as RuntimeUnit;
+    if (isActiveUnit(targetUnit)) {
       const targetSpec = catalog.platforms[targetUnit.platformId];
       const ciwsProb = targetSpec ? targetSpec.ciwsDefenseProb : 0.2;
-      const effectiveCiwsProb =
-        msl.speedKts >= 3800 ? ciwsProb * 0.22 : ciwsProb * 0.55;
-
-      // ★ 计算末端有效命中率 Pk：
-      // 1) 若武器依赖超视距数据链中继且失去己方雷达/预警机跟踪，Pk 衰减 65%
-      // 2) 若目标享有强有源电子干扰 (OECM)，非红外/反辐射武器 Pk 衰减，而反辐射导弹 (ARM) 攻击开机雷达则获得 +15% Pk 加成！
-      const wSpec = catalog.weapons[msl.weaponId];
+      const effectiveCiwsProb = msl.speedKts >= 3800 ? ciwsProb * 0.22 : ciwsProb * 0.55;
       let effectivePk = msl.basePk;
-
-      if (msl.requiresDatalinkBeyondHorizon && !msl.datalinkSupported) {
-        effectivePk *= 0.35; // 断链盲射导致末制导雷达开机找不到目标
-      }
-
       const targetEcm = evaluateTargetEcmSuppression(
         targetUnit,
         aliveUnits,
@@ -1305,27 +755,15 @@ export function stepSimulationWorld(
           targetUnit.status = 'destroyed';
           targetUnit.speedKts = 0;
 
-          // 基础击毁分 + 高价值目标(航母/预警机/核潜艇)额外奖励分
-          const killPts =
-            targetUnit.category === 'carrier'
-              ? 400
-              : targetUnit.category === 'awacs' || targetUnit.category === 'ssn'
-              ? 220
-              : 150;
-
-          if (targetUnit.side === 'RED') {
-            score.redLosses += 1;
-            score.blueScore += killPts;
-          } else {
-            score.blueLosses += 1;
-            score.redScore += killPts;
-          }
+          creditDamage(score, targetUnit, creditedDamage, 1, world.victoryConditions);
+          if (targetUnit.side === 'RED') score.redLosses += 1;
+          else if (targetUnit.side === 'BLUE') score.blueLosses += 1;
 
           nextExplosions.push({
             id: `exp_kill_${nextSimTime}_${msl.id}`,
             position: [...targetUnit.position],
             type: 'destroy',
-            side: msl.side,
+            side: targetUnit.side,
             label: `KILLED: ${targetUnit.callsign}`,
             createdAtSimTime: nextSimTime,
             radiusKm: 9.0,
@@ -1334,11 +772,11 @@ export function stepSimulationWorld(
           newLogs.push({
             id: `log_kill_${nextSimTime}_${msl.id}`,
             simTime: nextSimTime,
-            side: msl.side,
+            side: targetUnit.side,
             category: 'DESTROYED',
             severity: 'critical',
-            title: `战果确认: ${targetUnit.name} 被彻底击毁！ (+${killPts} PTS)`,
-            message: `${msl.shooterName} 发射的 ${msl.name} 直接命中 ${targetUnit.name}，造成 ${damage} 点致命毁伤！`,
+            title: `本方损失: ${targetUnit.name} 被击毁`,
+            message: `${targetUnit.name} 遭受致命毁伤，失去战斗力。`,
             position: [...targetUnit.position],
             unitId: targetUnit.id,
           });
@@ -1346,17 +784,17 @@ export function stepSimulationWorld(
           triggerPauseIfMatch(
             autoPauseSettings.onUnitHitOrDestroyed,
             `重大战果/损失: ${targetUnit.name} 被 ${msl.name} 击毁！`,
-            'SYSTEM'
+            targetUnit.side
           );
         } else {
-          if (msl.side === 'RED') score.redScore += 45;
-          else score.blueScore += 45;
+          creditDamage(score, targetUnit, creditedDamage,
+            getUnitCapabilities(targetUnit).state === 'mission_killed' ? 0.7 : Math.min(0.5, 1 - targetUnit.hp / targetUnit.maxHp), world.victoryConditions);
 
           nextExplosions.push({
             id: `exp_hit_${nextSimTime}_${msl.id}`,
             position: [...targetUnit.position],
             type: 'hit',
-            side: msl.side,
+            side: targetUnit.side,
             label: `HIT -${damage} HP`,
             createdAtSimTime: nextSimTime,
             radiusKm: 6.0,
@@ -1365,7 +803,7 @@ export function stepSimulationWorld(
           newLogs.push({
             id: `log_hit_${nextSimTime}_${msl.id}`,
             simTime: nextSimTime,
-            side: msl.side,
+            side: targetUnit.side,
             category: 'HIT',
             severity: 'critical',
             title: `武器命中: ${msl.name} 重创 ${targetUnit.callsign} (-${damage} HP)`,
@@ -1377,7 +815,7 @@ export function stepSimulationWorld(
           triggerPauseIfMatch(
             autoPauseSettings.onUnitHitOrDestroyed,
             `单位遭受打击: ${targetUnit.name} 命中受损 (-${damage} HP)`,
-            'SYSTEM'
+            targetUnit.side
           );
         }
       } else {
@@ -1386,25 +824,16 @@ export function stepSimulationWorld(
           position: [...targetUnit.position],
           type: 'miss',
           side: msl.side,
-          label:
-            msl.requiresDatalinkBeyondHorizon && !msl.datalinkSupported
-              ? 'MISSED (LOST DATALINK)'
-              : 'MISSED (SPOOFED)',
+          label: 'MISSED (TERMINAL)',
           createdAtSimTime: nextSimTime,
           radiusKm: 2.5,
         });
       }
 
+      newLogs.push({ id: `terminal_report_${nextSimTime}_${msl.id}`, simTime: nextSimTime, side: msl.side,
+        category: 'EVENT', severity: 'info', title: `${msl.name} 末段攻击结束`,
+        message: '最终效果需结合后续观测与任务结算判断，不提供敌方结构真值。', unitId: msl.shooterId });
       delete weaponsInFlight[msl.id];
-    } else {
-      msl.heading = getBearingDeg(msl.position, targetUnit.position);
-      const nextPos = turf.destination(msl.position, stepDistKm, msl.heading, {
-        units: 'kilometers',
-      });
-      msl.position = nextPos.geometry.coordinates as [number, number];
-      msl.distanceRemainingKm = distToUnitKm - stepDistKm;
-      msl.trail.push([...msl.position]);
-      if (msl.trail.length > 18) msl.trail.shift();
     }
   }
 
@@ -1491,9 +920,24 @@ export function stepSimulationWorld(
     }
   }
 
+  const objectiveEvaluation = evaluateObjectives(world.objectives ?? [], world.objectiveProgress ?? {},
+    units, nextContacts, score, nextSimTime, startTime, world.victoryConditions);
+  if (objectiveEvaluation.battleResult) {
+    shouldAutoPause = true;
+    autoPauseReason = '想定已结束：请查看任务结算与战报';
+  }
+  newLogs.push(...objectiveEvaluation.logs);
+
   return {
     nextState: {
       startTime,
+      tick: (world.tick ?? 0) + 1,
+      rngState: random.state(),
+      objectives: world.objectives,
+      objectiveProgress: objectiveEvaluation.progress,
+      battleResult: objectiveEvaluation.battleResult,
+      creditedDamage,
+      detectedMissileIds,
       simTime: nextSimTime,
       units,
       contacts: nextContacts,
@@ -1508,4 +952,27 @@ export function stepSimulationWorld(
     shouldAutoPause,
     autoPauseReason,
   };
+}
+
+export function initializeWorldContacts(world: SimulationWorldState, catalog: EquipmentCatalog): SimulationStepResult {
+  const sensed = computeContactsOnly(world.units, catalog, world.contacts, world.simTime);
+  return { nextState: { ...world, contacts: sensed.contacts, missions: deriveMissionAssignments(world.missions, world.units) },
+    newLogs: sensed.logs, shouldAutoPause: false };
+}
+
+export function advanceSimulation(
+  world: SimulationWorldState, catalog: EquipmentCatalog, seconds: number,
+  autoPause: AutoPauseSettings, playerSide: ActivePerspective
+): SimulationStepResult & { remainingSec: number } {
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('Invalid simulation duration');
+  let result: SimulationStepResult = { nextState: { ...world, missions: deriveMissionAssignments(world.missions, world.units) }, newLogs: [], shouldAutoPause: false };
+  const logs: CombatLogEntry[] = [];
+  let remainingSec = seconds;
+  while (remainingSec + 1e-9 >= FIXED_DT_SEC && !result.nextState.battleResult) {
+    result = stepSimulationWorld(result.nextState, catalog, FIXED_DT_SEC, autoPause, playerSide);
+    logs.push(...result.newLogs);
+    remainingSec = Math.max(0, remainingSec - FIXED_DT_SEC);
+    if (result.shouldAutoPause) { remainingSec = 0; break; }
+  }
+  return { ...result, newLogs: logs, remainingSec };
 }

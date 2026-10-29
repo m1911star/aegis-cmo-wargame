@@ -1,3 +1,5 @@
+import { FireControlDiagnostics } from './FireControlDiagnostics';
+import { getUnitCapabilities } from '../engine/unitCapabilities';
 import React, { useMemo } from 'react';
 import ms from 'milsymbol';
 import {
@@ -8,12 +10,10 @@ import {
   Gauge,
   Trash2,
   Flame,
-  Target,
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import {
   calculateRadarHorizonKm,
-  getDistanceKm,
 } from '../engine/simulationEngine';
 import { classificationLabels, domainLabels, statusLabels, threatLabels } from '../ui/labels';
 import type { ROEStatus } from '../types/wargame';
@@ -36,10 +36,13 @@ export const RightUnitTelemetryInspector: React.FC = () => {
   const switchUnitLoadout = useWargameStore((s) => s.switchUnitLoadout);
   const launchCarrierAircraft = useWargameStore((s) => s.launchCarrierAircraft);
   const assignUnitMission = useWargameStore((s) => s.assignUnitMission);
-  const executeManualEngage = useWargameStore((s) => s.executeManualEngage);
 
-  const selectedUnit = selectedUnitId ? units[selectedUnitId] : null;
-  const selectedContact = selectedContactId ? contacts[selectedContactId] : null;
+  const playerSide = useWargameStore((s) => s.playerSide);
+  const playMode = useWargameStore((s) => s.playMode);
+  const rawUnit = selectedUnitId ? units[selectedUnitId] : null;
+  const selectedUnit = rawUnit && (rawUnit.side === playerSide || playMode === 'sandbox') ? rawUnit : null;
+  const rawContact = selectedContactId ? contacts[selectedContactId] : null;
+  const selectedContact = rawContact && (rawContact.observerSide === playerSide || playMode === 'sandbox') ? rawContact : null;
 
   const platformSpec = selectedUnit
     ? catalog.platforms[selectedUnit.platformId]
@@ -69,22 +72,6 @@ export const RightUnitTelemetryInspector: React.FC = () => {
 
   // 情形 A: 当前选中了敌方情报接触 (Contact)
   if (selectedContact) {
-    // 筛选己方有哪些算子在射程内可以立即对该 Contact 发动打击
-    const capableFriendlyUnits = Object.values(units).filter((u) => {
-      if (u.hp <= 0 || u.side !== selectedContact.observerSide) return false;
-      const distKm = getDistanceKm(u.position, selectedContact.estimatedPosition);
-      return u.mounts.some((m) => {
-        if (m.currentAmmo <= 0 || m.cooldownRemainingSec > 0) return false;
-        const w = catalog.weapons[m.weaponId];
-        return (
-          w &&
-          w.targetDomains.includes(selectedContact.domain) &&
-          distKm <= w.maxRangeKm &&
-          distKm >= w.minRangeKm
-        );
-      });
-    });
-
     return (
       <aside className="z-20 w-full h-full tactical-panel border-l border-cyan-500/25 flex flex-col overflow-y-auto p-3 space-y-4 inspector-content">
         <div className="flex items-center gap-3 p-2.5 rounded bg-amber-950/30 border border-amber-500/40">
@@ -138,55 +125,7 @@ export const RightUnitTelemetryInspector: React.FC = () => {
           </div>
         </div>
 
-        {/* 快速联合火力打击分配 */}
-        <div className="p-2.5 rounded bg-rose-950/25 border border-rose-500/35 space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
-            <Target className="w-4 h-4" />
-            <span>联合火力分配</span>
-          </div>
-          {capableFriendlyUnits.length === 0 ? (
-            <div className="text-[11px] text-slate-400">
-              当前暂无己方平台处于有效打击射程内，请指挥战机或舰艇机动接敌。
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {capableFriendlyUnits.map((attacker) => {
-                const distKm = getDistanceKm(
-                  attacker.position,
-                  selectedContact.estimatedPosition
-                );
-                return (
-                  <div
-                    key={attacker.id}
-                    className="p-2 rounded bg-slate-950/90 border border-rose-500/30 flex items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-slate-100 truncate">
-                        {attacker.name}
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        距离目标: {distKm.toFixed(1)} km
-                      </div>
-                    </div>
-                    <button
-                      onClick={() =>
-                        executeManualEngage(
-                          attacker.id,
-                          selectedContact.id,
-                          undefined,
-                          2
-                        )
-                      }
-                      className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold cursor-pointer shrink-0"
-                    >
-                      齐射 2 枚
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <FireControlDiagnostics key={selectedContact.id} contact={selectedContact} />
       </aside>
     );
   }
@@ -240,6 +179,11 @@ export const RightUnitTelemetryInspector: React.FC = () => {
         </div>
       </div>
 
+      <div className="text-xs p-2 rounded bg-slate-950/80 border border-slate-800 space-y-1">
+        <p>能力状态：{getUnitCapabilities(selectedUnit).state === 'mission_killed' ? '任务失能' : getUnitCapabilities(selectedUnit).state === 'damaged' ? '受损降级' : '正常'}</p>
+        {selectedUnit.domain === 'air' && <p>剩余燃油预算：{Math.floor(selectedUnit.fuelRemainingSec / 60)} 分钟（按巡航基准）</p>}
+        <p>导航：{selectedUnit.status === 'returning' ? '资源约束返航' : selectedUnit.navigationMode === 'manual' ? '人工指挥' : '任务自动驾驶'}</p>
+      </div>
       {/* 2. 快捷战术动作按钮组 (F3 航路点 / F1 手动交战) */}
       <div className="unit-actions grid grid-cols-2 gap-2">
         <button
@@ -402,7 +346,7 @@ export const RightUnitTelemetryInspector: React.FC = () => {
             [
               { id: 'free', label: '自由开火', color: 'bg-rose-600 text-white' },
               { id: 'tight', label: '自卫反导', color: 'bg-amber-500 text-slate-950' },
-              { id: 'hold', label: '严禁开火', color: 'bg-emerald-600 text-white' },
+              { id: 'hold', label: '停止自动开火', color: 'bg-emerald-600 text-white' },
             ] as { id: ROEStatus; label: string; color: string }[]
           ).map((r) => (
             <button
@@ -628,12 +572,12 @@ export const RightUnitTelemetryInspector: React.FC = () => {
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
                     <span>
                       射程: {wSpec.maxRangeKm}km · 速度:{' '}
-                      {(wSpec.speedKts / 661).toFixed(1)}马赫 · 命中率:{' '}
+                      {(wSpec.speedKts / 661).toFixed(1)}马赫 · 基准 Pk:{' '}
                       {Math.round(wSpec.basePk * 100)}%
                       {wSpec.requiresDatalinkBeyondHorizon ? ' · CEC中继' : ''}
                     </span>
                     <button
-                      disabled={m.currentAmmo <= 0}
+                      disabled={m.currentAmmo <= 0 || m.cooldownRemainingSec > 0 || !getUnitCapabilities(selectedUnit).canFire}
                       onClick={() =>
                         startManualEngage(
                           m.weaponId,

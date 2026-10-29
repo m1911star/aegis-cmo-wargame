@@ -362,6 +362,7 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
     expect(useWargameStore.getState().score.redMissilesFired).toBe(prevFired + 2);
 
     // 5. 实时算子投放器测试
+    store.setPlayMode('sandbox');
     const beforeCount = Object.keys(useWargameStore.getState().units).length;
     store.startSpawnUnitOnMap({
       platformId: 'j20_mighty_dragon',

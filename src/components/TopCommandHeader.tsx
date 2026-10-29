@@ -38,6 +38,12 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
   const lastAutoPauseBanner = useWargameStore((s) => s.lastAutoPauseBanner);
   const clearAutoPauseBanner = useWargameStore((s) => s.clearAutoPauseBanner);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
+  const playerSide = useWargameStore((s) => s.playerSide);
+  const playMode = useWargameStore((s) => s.playMode);
+  const tick = useWargameStore((s) => s.tick);
+  const seed = useWargameStore((s) => s.seed);
+  const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
+  const setPlayMode = useWargameStore((s) => s.setPlayMode);
   const utc = new Date(simTime).toISOString();
 
   return (
@@ -64,7 +70,13 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
           </button>
         </div>
         <div className="utility-controls">
-          <button onClick={() => setActiveModal('unit_spawner')} className="toolbar-button text-emerald-300">
+          <select aria-label="控制席位" title="开局选择控制席位；观察视角不会改变控制权" disabled={tick > 0 || timeScale !== 0}
+            value={playerSide} onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')} className="bg-slate-900 rounded p-1 text-xs">
+            <option value="RED">指挥红方</option><option value="BLUE">指挥蓝方</option>
+          </select>
+          <button className="toolbar-button" aria-pressed={playMode === 'sandbox'} title="沙盒模式可编辑双方；与观察视角独立"
+            onClick={() => setPlayMode(playMode === 'command' ? 'sandbox' : 'command')}>{playMode === 'sandbox' ? '沙盒编辑中' : '指挥模式'}</button>
+          <button disabled={playMode !== 'sandbox'} onClick={() => setActiveModal('unit_spawner')} className="toolbar-button text-emerald-300 disabled:opacity-40">
             <PlusCircle /><span>兵力投放</span>
           </button>
           <button onClick={() => setActiveModal('catalog_viewer')} className="toolbar-button">
@@ -79,6 +91,8 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
               <div className="mb-3 text-slate-400">遇到以下情况时暂停推演</div>
               <label><input type="checkbox" checked={autoPause.onNewContact} onChange={() => toggleAutoPause('onNewContact')} />发现新目标</label>
               <label><input type="checkbox" checked={autoPause.onMissileDetected} onChange={() => toggleAutoPause('onMissileDetected')} />收到导弹告警</label>
+              <label><input type="checkbox" checked={autoPause.onUnitHitOrDestroyed} onChange={() => toggleAutoPause('onUnitHitOrDestroyed')} />本方受损或损失</label>
+              <p className="mt-2 text-slate-500">种子 {seed} · Tick {tick}</p>
             </div>
           </details>
         </div>
@@ -109,7 +123,7 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
             <button onClick={() => stepSingleTick(5)} title="单步推进 5 秒" className="toolbar-button">
               <StepForward /><span>+5秒</span>
             </button>
-            <button onClick={() => resetScenario()} aria-label="重置当前想定" title="重置当前想定" className="toolbar-button icon-button">
+            <button onClick={() => resetScenario()} aria-label="重置当前想定" title="使用相同种子重新开局" className="toolbar-button icon-button">
               <RotateCcw />
             </button>
           </div>

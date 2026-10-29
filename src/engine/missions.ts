@@ -1,4 +1,5 @@
 import type { MissionDefinition, RuntimeUnit, TacticalMission } from '../types/wargame';
+import { isActiveUnit } from './unitCapabilities';
 
 export function deriveMissionAssignments(
   missions: readonly MissionDefinition[],
@@ -6,7 +7,7 @@ export function deriveMissionAssignments(
 ): TacticalMission[] {
   const assigned = new Map<string, string[]>();
   for (const unit of Object.values(units)) {
-    if (!unit.assignedMissionId || unit.hp <= 0 || unit.status === 'destroyed') continue;
+    if (!unit.assignedMissionId || !isActiveUnit(unit)) continue;
     const ids = assigned.get(unit.assignedMissionId) ?? [];
     ids.push(unit.id);
     assigned.set(unit.assignedMissionId, ids);

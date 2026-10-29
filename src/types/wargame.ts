@@ -9,6 +9,18 @@ export type Domain = 'air' | 'surface' | 'subsurface' | 'land';
 export type SideId = 'RED' | 'BLUE' | 'NEUTRAL';
 export type ActivePerspective = SideId | 'GOD';
 export type TimeScale = 0 | 1 | 5 | 15 | 60;
+export type PlayMode = 'command' | 'sandbox';
+
+export interface GuidanceProfile {
+  activationRangeKm: number;
+  seekerRangeKm: number;
+  seekerFovDeg: number; // Full angle, not half-angle.
+  searchDurationSec: number;
+  maxTrackAgeSec: number;
+  maxUncertaintyKm: number;
+  receivesUpdates: boolean;
+  requiresSupport: boolean;
+}
 
 export type UnitCategory =
   | 'fighter'         // 制空/多用途战斗机
@@ -77,11 +89,12 @@ export interface WeaponSpec {
   warheadDamage: number;        // 毁伤值
   salvoDefault: number;         // 默认齐射发数 (WRA)
   /**
-   * ★ 核心扩展：是否依赖超视距数据链中继引导 (CEC / Mid-course Datalink)
-   * 若为 true，当射击距离超过发射平台自身雷达视距时，必须有己方传感器持续保持对目标的跟踪；
-   * 若中途预警机被击落或目标脱离己方所有传感器视野，导弹末端捕获概率 Pk 大幅衰减！
+   * Legacy catalog hint for midcourse support. GuidanceProfile defines actual capabilities.
+   * Loss of optional support freezes/extrapolates the aimpoint; it is not a universal launch ban
+   * or an arbitrary terminal Pk penalty after the seeker has independently acquired a target.
    */
   requiresDatalinkBeyondHorizon?: boolean;
+  guidanceProfile?: Partial<GuidanceProfile>;
   description: string;
 }
 
@@ -220,6 +233,11 @@ export interface RuntimeUnit {
   platformId: string;
   activeLoadoutId?: string;     // 当前挂载方案 ID
   hostCarrierId?: string;       // 若由航母/基地放飞，记录母舰 ID
+  recoveryPosition?: [number, number];
+  navigationMode?: 'manual' | 'mission';
+  missionTargetId?: string;
+  nextMissionDecisionTime?: number;
+  returnReason?: 'fuel' | 'ammunition';
   parentGroupId: string;
   domain: Domain;
   category: UnitCategory;
@@ -237,7 +255,7 @@ export interface RuntimeUnit {
   maxHp: number;
   fuelRemainingSec: number;
   maxFuelSec: number;
-  status: 'operational' | 'engaged' | 'evading' | 'returning' | 'destroyed';
+  status: 'operational' | 'engaged' | 'evading' | 'returning' | 'recovered' | 'destroyed';
 
   doctrine: UnitDoctrine;
   mounts: RuntimeWeaponMount[];
@@ -268,6 +286,8 @@ export interface TacticalContact {
   firstDetectedTime: number;
   lastDetectedTime: number;
   detectedBySources: string[];
+  sourceUnitIds?: string[];
+  fireControlSourceIds?: string[];
   isJammingDetected?: boolean;  // 是否侦测到对方开启强电磁干扰
   threatLevel: 'low' | 'medium' | 'high' | 'critical';
 }
@@ -295,6 +315,14 @@ export interface WeaponInFlight {
   requiresDatalinkBeyondHorizon?: boolean;
   datalinkSupported?: boolean;  // 当前帧是否获得己方预警机/雷达数据链中继支持
   isIntercepted?: boolean;
+  aimPosition?: [number, number];
+  aimHeading?: number;
+  aimSpeedKts?: number;
+  aimAltitudeM?: number;
+  targetDomain?: Domain;
+  lastTrackTime?: number;
+  seekerState?: 'midcourse_datalink' | 'midcourse_blind' | 'terminal_searching' | 'terminal_locked' | 'lost';
+  searchElapsedSec?: number;
 }
 
 export interface TacticalExplosionEffect {
@@ -372,6 +400,7 @@ export interface InitialUnitPlacement {
   waypoints?: [number, number][];
   doctrine?: Partial<UnitDoctrine>;
   assignedMissionId?: string;
+  recoveryPosition?: [number, number];
 }
 
 export type ScenarioEventTrigger =
@@ -458,6 +487,25 @@ export interface VictoryConditionRule {
   }[];
 }
 
+export interface ScenarioObjective {
+  id: string;
+  side: 'RED' | 'BLUE';
+  title: string;
+  type: 'destroy' | 'disable' | 'preserve' | 'observe' | 'withdraw';
+  unitIds: string[];
+  required: boolean;
+  points: number;
+  criticalFailure?: boolean;
+  preserveCapability?: boolean;
+}
+
+export type ObjectiveProgress = Record<string, 'pending' | 'achieved' | 'failed'>;
+export interface BattleResult {
+  endedAt: number;
+  reason: 'time_limit' | 'critical_objective';
+  outcomes: Record<'RED' | 'BLUE', 'victory' | 'costly_victory' | 'defeat' | 'draw'>;
+}
+
 export interface ScenarioDefinition {
   id: string;
   title: string;
@@ -483,6 +531,7 @@ export interface ScenarioDefinition {
   referencePoints: ReferencePoint[];
   events?: ScenarioEventRule[]; // ★ 动态事件触发器列表
   victoryConditions?: VictoryConditionRule; // ★ 胜负评估规则
+  objectives?: ScenarioObjective[];
   customCatalogOverlay?: Partial<EquipmentCatalog>;
 }
 
@@ -510,6 +559,7 @@ export interface CombatLogEntry {
   message: string;
   position?: [number, number];
   unitId?: string;
+  contactId?: string;
 }
 
 export interface AutoPauseSettings {
