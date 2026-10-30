@@ -20,14 +20,20 @@ type HeaderProps = {
   onToggleRight: () => void;
 };
 
-export const TopCommandHeader: React.FC<HeaderProps> = ({
+const SimulationDebugStatus = React.memo(function SimulationDebugStatus() {
+  const seed = useWargameStore((state) => state.seed);
+  const tick = useWargameStore((state) => state.tick);
+  return <p className="mt-2 text-slate-500">种子 {seed} · Tick {tick}</p>;
+});
+
+export const TopCommandHeader = React.memo(function TopCommandHeader({
   leftOpen, rightOpen, onToggleLeft, onToggleRight,
-}) => {
+}: HeaderProps) {
   const currentScenario = useWargameStore((s) => s.currentScenario);
   const availableScenarios = useWargameStore((s) => s.availableScenarios);
   const loadScenario = useWargameStore((s) => s.loadScenario);
   const resetScenario = useWargameStore((s) => s.resetScenario);
-  const simTime = useWargameStore((s) => s.simTime);
+  const simTimeSecond = useWargameStore((s) => Math.floor(s.simTime / 1000));
   const timeScale = useWargameStore((s) => s.timeScale);
   const setTimeScale = useWargameStore((s) => s.setTimeScale);
   const stepSingleTick = useWargameStore((s) => s.stepSingleTick);
@@ -40,11 +46,10 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
-  const tick = useWargameStore((s) => s.tick);
-  const seed = useWargameStore((s) => s.seed);
+  const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
   const setPlayMode = useWargameStore((s) => s.setPlayMode);
-  const utc = new Date(simTime).toISOString();
+  const utc = new Date(simTimeSecond * 1000).toISOString();
 
   return (
     <header className="command-header tactical-panel">
@@ -70,7 +75,7 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
           </button>
         </div>
         <div className="utility-controls">
-          <select aria-label="控制席位" title="开局选择控制席位；观察视角不会改变控制权" disabled={tick > 0 || timeScale !== 0}
+          <select aria-label="控制席位" title="开局选择控制席位；观察视角不会改变控制权" disabled={hasStarted || timeScale !== 0}
             value={playerSide} onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')} className="bg-slate-900 rounded p-1 text-xs">
             <option value="RED">指挥红方</option><option value="BLUE">指挥蓝方</option>
           </select>
@@ -92,7 +97,7 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
               <label><input type="checkbox" checked={autoPause.onNewContact} onChange={() => toggleAutoPause('onNewContact')} />发现新目标</label>
               <label><input type="checkbox" checked={autoPause.onMissileDetected} onChange={() => toggleAutoPause('onMissileDetected')} />收到导弹告警</label>
               <label><input type="checkbox" checked={autoPause.onUnitHitOrDestroyed} onChange={() => toggleAutoPause('onUnitHitOrDestroyed')} />本方受损或损失</label>
-              <p className="mt-2 text-slate-500">种子 {seed} · Tick {tick}</p>
+              <SimulationDebugStatus />
             </div>
           </details>
         </div>
@@ -156,4 +161,4 @@ export const TopCommandHeader: React.FC<HeaderProps> = ({
       )}
     </header>
   );
-};
+});

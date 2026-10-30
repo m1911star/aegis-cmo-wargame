@@ -19,13 +19,19 @@ import { classificationLabels, domainLabels, statusLabels, threatLabels } from '
 import type { ROEStatus } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 
-export const RightUnitTelemetryInspector: React.FC = () => {
-  const selectedUnitId = useWargameStore((s) => s.selectedUnitId);
-  const selectedContactId = useWargameStore((s) => s.selectedContactId);
-  const units = useWargameStore((s) => s.units);
-  const contacts = useWargameStore((s) => s.contacts);
+const EMPTY_MISSIONS: never[] = [];
+
+export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetryInspector() {
+  const rawUnit = useWargameStore((state) =>
+    state.selectedUnitId ? state.units[state.selectedUnitId] ?? null : null
+  );
+  const rawContact = useWargameStore((state) =>
+    state.selectedContactId ? state.contacts[state.selectedContactId] ?? null : null
+  );
   const catalog = useWargameStore((s) => s.catalog);
-  const missions = useWargameStore((s) => s.missions);
+  const missions = useWargameStore((s) =>
+    s.selectedUnitId ? s.missions : EMPTY_MISSIONS
+  );
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
@@ -39,9 +45,7 @@ export const RightUnitTelemetryInspector: React.FC = () => {
 
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
-  const rawUnit = selectedUnitId ? units[selectedUnitId] : null;
   const selectedUnit = rawUnit && (rawUnit.side === playerSide || playMode === 'sandbox') ? rawUnit : null;
-  const rawContact = selectedContactId ? contacts[selectedContactId] : null;
   const selectedContact = rawContact && (rawContact.observerSide === playerSide || playMode === 'sandbox') ? rawContact : null;
 
   const platformSpec = selectedUnit
@@ -69,6 +73,31 @@ export const RightUnitTelemetryInspector: React.FC = () => {
       return '';
     }
   }, [selectedUnit?.sidc, selectedContact?.sidc]);
+  const capabilities = useMemo(
+    () => selectedUnit ? getUnitCapabilities(selectedUnit) : null,
+    [selectedUnit]
+  );
+  const radarHorizons = useMemo(() => {
+    if (!selectedUnit || !platformSpec) return null;
+    return {
+      seaSkimmer: calculateRadarHorizonKm(
+        selectedUnit.altitudeM,
+        platformSpec.radarAntennaHeightM,
+        12
+      ),
+      highAltitude: calculateRadarHorizonKm(
+        selectedUnit.altitudeM,
+        platformSpec.radarAntennaHeightM,
+        9000
+      ),
+    };
+  }, [selectedUnit?.altitudeM, platformSpec?.radarAntennaHeightM]);
+  const eligibleMissions = useMemo(
+    () => selectedUnit
+      ? missions.filter((mission) => mission.side === selectedUnit.side)
+      : [],
+    [missions, selectedUnit?.side]
+  );
 
   // 情形 A: 当前选中了敌方情报接触 (Contact)
   if (selectedContact) {
@@ -139,17 +168,6 @@ export const RightUnitTelemetryInspector: React.FC = () => {
     );
   }
 
-  const seaSkimmerHorizonKm = calculateRadarHorizonKm(
-    selectedUnit.altitudeM,
-    platformSpec.radarAntennaHeightM,
-    12
-  );
-  const highAltHorizonKm = calculateRadarHorizonKm(
-    selectedUnit.altitudeM,
-    platformSpec.radarAntennaHeightM,
-    9000
-  );
-
   return (
     <aside className="z-20 w-full h-full tactical-panel border-l border-cyan-500/25 flex flex-col overflow-y-auto p-3 space-y-4 inspector-content">
       {/* 1. 算子头部信息与北约军标 */}
@@ -180,7 +198,7 @@ export const RightUnitTelemetryInspector: React.FC = () => {
       </div>
 
       <div className="text-xs p-2 rounded bg-slate-950/80 border border-slate-800 space-y-1">
-        <p>能力状态：{getUnitCapabilities(selectedUnit).state === 'mission_killed' ? '任务失能' : getUnitCapabilities(selectedUnit).state === 'damaged' ? '受损降级' : '正常'}</p>
+        <p>能力状态：{capabilities?.state === 'mission_killed' ? '任务失能' : capabilities?.state === 'damaged' ? '受损降级' : '正常'}</p>
         {selectedUnit.domain === 'air' && <p>剩余燃油预算：{Math.floor(selectedUnit.fuelRemainingSec / 60)} 分钟（按巡航基准）</p>}
         <p>导航：{selectedUnit.status === 'returning' ? '资源约束返航' : selectedUnit.navigationMode === 'manual' ? '人工指挥' : '任务自动驾驶'}</p>
       </div>
@@ -254,13 +272,13 @@ export const RightUnitTelemetryInspector: React.FC = () => {
           <div className="p-1.5 rounded bg-slate-900/80">
             <div className="text-slate-400 text-[10px]">对12m掠海视距</div>
             <div className="text-amber-300 font-semibold">
-              {seaSkimmerHorizonKm.toFixed(1)} km
+              {radarHorizons!.seaSkimmer.toFixed(1)} km
             </div>
           </div>
           <div className="p-1.5 rounded bg-slate-900/80">
             <div className="text-slate-400 text-[10px]">对9000m高空视距</div>
             <div className="text-emerald-300 font-semibold">
-              {highAltHorizonKm.toFixed(0)} km
+              {radarHorizons!.highAltitude.toFixed(0)} km
             </div>
           </div>
         </div>
@@ -483,9 +501,7 @@ export const RightUnitTelemetryInspector: React.FC = () => {
             className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-slate-200"
           >
             <option value="">-- 人工直接指挥 --</option>
-            {missions
-              .filter((m) => m.side === selectedUnit.side)
-              .map((m) => (
+            {eligibleMissions.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>
@@ -577,7 +593,7 @@ export const RightUnitTelemetryInspector: React.FC = () => {
                       {wSpec.requiresDatalinkBeyondHorizon ? ' · CEC中继' : ''}
                     </span>
                     <button
-                      disabled={m.currentAmmo <= 0 || m.cooldownRemainingSec > 0 || !getUnitCapabilities(selectedUnit).canFire}
+                      disabled={m.currentAmmo <= 0 || m.cooldownRemainingSec > 0 || !capabilities?.canFire}
                       onClick={() =>
                         startManualEngage(
                           m.weaponId,
@@ -647,4 +663,4 @@ export const RightUnitTelemetryInspector: React.FC = () => {
       )}
     </aside>
   );
-};
+});

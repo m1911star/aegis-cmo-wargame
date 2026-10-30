@@ -16,7 +16,7 @@ import { resolveUnitConfiguration } from '../db/unitConfiguration';
 // 架构亮点：通过 Zustand subscribe 直推 GeoJSON Source，60FPS 零 React VDOM 重绘抖动
 // ============================================================================
 
-export const TacticalMapCanvas: React.FC = () => {
+export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const basemapLoaderRef = useRef<BasemapLoader | null>(null);
@@ -26,8 +26,9 @@ export const TacticalMapCanvas: React.FC = () => {
   const [cursorCoord, setCursorCoord] = useState<[number, number]>([124.2, 26.2]);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
-  const selectedUnit = useWargameStore((s) =>
-    s.selectedUnitId ? s.units[s.selectedUnitId] : null
+  // The map layers subscribe imperatively; React only needs the stable banner label.
+  const selectedUnitCallsign = useWargameStore((s) =>
+    s.selectedUnitId ? s.units[s.selectedUnitId]?.callsign : undefined
   );
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
 
@@ -810,7 +811,7 @@ export const TacticalMapCanvas: React.FC = () => {
           <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
           {interactionMode === 'plot_waypoint' && (
             <span>
-              [F3 航路点标绘模式] 点击海图追加机动航路点 ({selectedUnit?.callsign}
+              [F3 航路点标绘模式] 点击海图追加机动航路点 ({selectedUnitCallsign}
               ) · 右键或按 ESC 完成
             </span>
           )}
@@ -863,4 +864,4 @@ export const TacticalMapCanvas: React.FC = () => {
       </div>
     </div>
   );
-};
+});

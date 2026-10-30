@@ -1,6 +1,6 @@
 import { BattleObjectivesPanel } from './BattleObjectivesPanel';
 import { BASEMAP_PRESETS, type BasemapMode } from '../map/basemaps';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Radar,
   Crosshair,
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useWargameStore, type MapLayerVisibility } from '../store/useWargameStore';
 import { classificationLabels, perspectiveLabels } from '../ui/labels';
-import type { Domain } from '../types/wargame';
+import type { Domain, RuntimeUnit } from '../types/wargame';
 
 function DomainIcon({ domain }: { domain: Domain }) {
   switch (domain) {
@@ -33,7 +33,21 @@ function DomainIcon({ domain }: { domain: Domain }) {
   }
 }
 
-export const LeftOrbatMissionSidebar: React.FC = () => {
+const LAYER_ITEMS: {
+  key: keyof MapLayerVisibility;
+  label: string;
+  desc: string;
+}[] = [
+  { key: 'showRadarRings', label: '主动雷达搜索视距圈', desc: '显示全军开机雷达探测包线' },
+  { key: 'showWeaponRings', label: '防空/反舰导弹射程圈', desc: '显示主战武器最大动力射程' },
+  { key: 'showSonarRings', label: '水下声呐监听包线', desc: '显示拖曳线列阵与主动声呐圈' },
+  { key: 'showWaypoints', label: '机动航路点与航向矢量', desc: '显示F3规划航线及90s预测线' },
+  { key: 'showAouPolygons', label: '情报误差范围', desc: '显示ESM/声呐测向误差范围' },
+  { key: 'showMissions', label: '自动巡逻任务区多边形', desc: '显示防空、反舰与反潜巡逻区' },
+  { key: 'showReferencePoints', label: '战术参考点', desc: '显示海图基准坐标点' },
+];
+
+export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSidebar() {
   const [activeTab, setActiveTab] = useState<
     'orbat' | 'contacts' | 'missions' | 'layers'
   >('orbat');
@@ -61,28 +75,33 @@ export const LeftOrbatMissionSidebar: React.FC = () => {
   const basemapMode = useWargameStore((s) => s.basemapMode);
   const setBasemapMode = useWargameStore((s) => s.setBasemapMode);
 
-  const visibleGroups = currentScenario.groups.filter(
-    (g) => activePerspective === 'GOD' || g.side === activePerspective
+  const visibleGroups = useMemo(
+    () => currentScenario.groups.filter(
+      (group) => activePerspective === 'GOD' || group.side === activePerspective
+    ),
+    [currentScenario.groups, activePerspective]
   );
-
-  const visibleContacts = Object.values(contacts).filter(
-    (c) =>
-      activePerspective === 'GOD' || c.observerSide === activePerspective
+  const visibleContacts = useMemo(
+    () => Object.values(contacts).filter(
+      (contact) => activePerspective === 'GOD' || contact.observerSide === activePerspective
+    ),
+    [contacts, activePerspective]
   );
-
-  const visibleMissions = missions.filter(
-    (m) => activePerspective === 'GOD' || m.side === activePerspective
+  const visibleMissions = useMemo(
+    () => missions.filter(
+      (mission) => activePerspective === 'GOD' || mission.side === activePerspective
+    ),
+    [missions, activePerspective]
   );
-
-  const layerItems: { key: keyof MapLayerVisibility; label: string; desc: string }[] = [
-    { key: 'showRadarRings', label: '主动雷达搜索视距圈', desc: '显示全军开机雷达探测包线' },
-    { key: 'showWeaponRings', label: '防空/反舰导弹射程圈', desc: '显示主战武器最大动力射程' },
-    { key: 'showSonarRings', label: '水下声呐监听包线', desc: '显示拖曳线列阵与主动声呐圈' },
-    { key: 'showWaypoints', label: '机动航路点与航向矢量', desc: '显示F3规划航线及90s预测线' },
-    { key: 'showAouPolygons', label: '情报误差范围', desc: '显示ESM/声呐测向误差范围' },
-    { key: 'showMissions', label: '自动巡逻任务区多边形', desc: '显示防空、反舰与反潜巡逻区' },
-    { key: 'showReferencePoints', label: '战术参考点', desc: '显示海图基准坐标点' },
-  ];
+  const unitsByGroup = useMemo(() => {
+    const grouped = new Map<string, RuntimeUnit[]>();
+    for (const unit of Object.values(units)) {
+      const groupUnits = grouped.get(unit.parentGroupId) ?? [];
+      groupUnits.push(unit);
+      grouped.set(unit.parentGroupId, groupUnits);
+    }
+    return grouped;
+  }, [units]);
 
   return (
     <aside className="z-20 w-full h-full tactical-panel border-r border-cyan-500/25 flex flex-col overflow-hidden">
@@ -148,9 +167,7 @@ export const LeftOrbatMissionSidebar: React.FC = () => {
             </div>
 
             {visibleGroups.map((group) => {
-              const groupUnits = Object.values(units).filter(
-                (u) => u.parentGroupId === group.id
-              );
+              const groupUnits = unitsByGroup.get(group.id) ?? [];
               const isCollapsed = collapsedGroups[group.id] ?? false;
               const isRed = group.side === 'RED';
 
@@ -398,7 +415,7 @@ export const LeftOrbatMissionSidebar: React.FC = () => {
             <div className="text-[10px] text-slate-400 px-1">
               地图显示设置
             </div>
-            {layerItems.map((item) => {
+            {LAYER_ITEMS.map((item) => {
               const active = mapLayers[item.key];
               return (
                 <div
@@ -433,4 +450,4 @@ export const LeftOrbatMissionSidebar: React.FC = () => {
       </div>
     </aside>
   );
-};
+});

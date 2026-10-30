@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useWargameStore } from './store/useWargameStore';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
@@ -121,20 +121,30 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const toggleLeft = useCallback(() => {
+    const next = !leftOpen;
+    setLeftOpen(next);
+    if (next && window.matchMedia('(max-width: 900px)').matches) {
+      setRightOpen(false);
+    }
+  }, [leftOpen]);
+
+  const toggleRight = useCallback(() => {
+    const next = !rightOpen;
+    setRightOpen(next);
+    if (next && window.matchMedia('(max-width: 900px)').matches) {
+      setLeftOpen(false);
+    }
+  }, [rightOpen]);
+
   return (
     <div className="app-shell bg-[#050811] text-slate-100 select-none">
       {/* 顶栏：半实时推演时钟、想定切换、视角迷雾与工具入口 */}
       <TopCommandHeader
         leftOpen={leftOpen}
         rightOpen={rightOpen}
-        onToggleLeft={() => {
-          setLeftOpen(!leftOpen);
-          if (!leftOpen && window.matchMedia('(max-width: 900px)').matches) setRightOpen(false);
-        }}
-        onToggleRight={() => {
-          setRightOpen(!rightOpen);
-          if (!rightOpen && window.matchMedia('(max-width: 900px)').matches) setLeftOpen(false);
-        }}
+        onToggleLeft={toggleLeft}
+        onToggleRight={toggleRight}
       />
 
       {/* 中间主体区：左侧 ORBAT/情报/任务树 + 中央 WebGL 海陆空战术态势图 + 右侧单元火控与遥测面板 */}
