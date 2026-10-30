@@ -3,8 +3,17 @@ import type { CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUni
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
-
-const REFERENCE_RCS_M2 = 5.0; // 标准四代机基准 RCS = 5.0 m²
+import {
+  REFERENCE_RCS_M2,
+  RCS_ASPECT_ANGLE,
+  ECM_SUPPRESSION,
+  SEA_CLUTTER_FACTOR,
+  COUNTER_STEALTH_MIN_RCS,
+  THERMOCLINE,
+  ACTIVE_SONAR_PING_BONUS,
+  SONAR_DETECTION,
+  LOW_ALTITUDE_THRESHOLD,
+} from './constants';
 
 /**
  * 2. ★ 计算考虑目标姿态角 (Aspect Angle) 与挂载方案 (Loadout) 后的瞬时等效 RCS (m²)
@@ -30,12 +39,12 @@ export function calculateAspectEffectiveRcsM2(
   const aspectAngleDeg = rawDiff > 180 ? 360 - rawDiff : rawDiff;
 
   let baseRcs: number;
-  if (aspectAngleDeg <= 35) {
+  if (aspectAngleDeg <= RCS_ASPECT_ANGLE.FRONTAL_MAX) {
     baseRcs = profile.frontalM2;
-  } else if (aspectAngleDeg <= 135) {
-    // 在 35° 到 90° 之间平滑过渡至侧向峰值 beamM2
+  } else if (aspectAngleDeg <= RCS_ASPECT_ANGLE.BEAM_MAX) {
+    // 在正前方到侧向之间平滑过渡至侧向峰值 beamM2
     const t =
-      1 - Math.abs(aspectAngleDeg - 85) / 55;
+      1 - Math.abs(aspectAngleDeg - RCS_ASPECT_ANGLE.BEAM_PEAK) / RCS_ASPECT_ANGLE.TRANSITION_HALF_WIDTH;
     baseRcs =
       profile.frontalM2 +
       Math.max(0.25, Math.min(1, t)) * (profile.beamM2 - profile.frontalM2);
@@ -71,18 +80,20 @@ export function calculateEffectiveRadarRangeKm(
     sensor.frequencyBand.includes('UHF');
 
   const effectiveRcs = isCounterStealthBand
-    ? Math.max(targetRcsM2, 0.35)
+    ? Math.max(targetRcsM2, COUNTER_STEALTH_MIN_RCS)
     : Math.max(targetRcsM2, 0.001);
 
   const rcsFactor = Math.pow(effectiveRcs / REFERENCE_RCS_M2, 0.25);
   const clutterModifier =
-    targetAltM > 0 && targetAltM < 50 && !sensor.lookDownCapable ? 0.65 : 1.0;
+    targetAltM > 0 && targetAltM < LOW_ALTITUDE_THRESHOLD && !sensor.lookDownCapable
+      ? SEA_CLUTTER_FACTOR
+      : 1.0;
 
   // 电子战压制效应 (Burn-through Range Reduction)：米波/数字阵列雷达抗干扰稍强
-  const eccmResistance = isCounterStealthBand ? 0.35 : 0.0;
+  const eccmResistance = isCounterStealthBand ? ECM_SUPPRESSION.COUNTER_STEALTH_ECCM_BONUS : 0.0;
   const jammerMultiplier = Math.max(
-    0.35,
-    1 - Math.max(0, ecmSuppressionFactor) * (0.65 - eccmResistance * 0.25)
+    ECM_SUPPRESSION.MIN_DETECTION_RATIO,
+    1 - Math.max(0, ecmSuppressionFactor) * (ECM_SUPPRESSION.MAX_BURN_THROUGH_REDUCTION - eccmResistance * 0.25)
   );
 
   const powerLimitedRangeKm =
@@ -102,20 +113,23 @@ export function calculateSonarDetectionRangeKm(
   targetSonarActive: boolean
 ): number {
   if (sensor.type === 'sonar_passive' && targetSonarActive) {
-    return sensor.maxRangeKm * 1.65;
+    return sensor.maxRangeKm * ACTIVE_SONAR_PING_BONUS;
   }
 
   const acrossThermocline =
-    (observerAltM > -90 && targetAltM < -140) ||
-    (observerAltM < -140 && targetAltM > -90);
-  const thermoclineFactor = acrossThermocline ? 0.68 : 1.0;
+    (observerAltM > THERMOCLINE.UPPER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY) ||
+    (observerAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM > THERMOCLINE.UPPER_BOUNDARY);
+  const thermoclineFactor = acrossThermocline ? THERMOCLINE.CROSS_LAYER_FACTOR : 1.0;
 
   if (sensor.type === 'sonar_active') {
     return sensor.maxRangeKm * thermoclineFactor;
   }
 
-  const speedNoiseBonus = 1 + Math.max(0, targetSpeedKts - 10) * 0.035;
-  const acousticFactor = Math.max(0.35, (targetAcousticDb - 75) / 40);
+  const speedNoiseBonus = 1 + Math.max(0, targetSpeedKts - SONAR_DETECTION.SPEED_NOISE_THRESHOLD) * SONAR_DETECTION.SPEED_NOISE_COEFFICIENT;
+  const acousticFactor = Math.max(
+    SONAR_DETECTION.MIN_ACOUSTIC_FACTOR,
+    (targetAcousticDb - SONAR_DETECTION.BASELINE_ACOUSTIC_DB) / SONAR_DETECTION.ACOUSTIC_NORMALIZATION
+  );
   return (
     sensor.maxRangeKm * acousticFactor * speedNoiseBonus * thermoclineFactor
   );

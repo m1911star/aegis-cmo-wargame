@@ -1,4 +1,5 @@
 import * as turf from '@turf/turf';
+import { EARTH_CURVATURE_COEFFICIENT } from './constants';
 
 export function calculateRadarHorizonKm(
   observerAltitudeM: number,
@@ -16,7 +17,7 @@ export function calculateRadarHorizonKm(
     targetAltitudeM <= 0 ? 14 : Math.max(2, targetAltitudeM);
 
   return (
-    4.12 *
+    EARTH_CURVATURE_COEFFICIENT *
     (Math.sqrt(effectiveObserverHeightM) + Math.sqrt(effectiveTargetHeightM))
   );
 }

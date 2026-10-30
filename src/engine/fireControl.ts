@@ -1,17 +1,32 @@
 import type { EquipmentCatalog, GuidanceProfile, RuntimeUnit, RuntimeWeaponMount, TacticalContact, WeaponSpec } from '../types/wargame';
 import { getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
+import { GUIDANCE_DEFAULTS } from './constants';
 
 export function guidanceProfile(weapon: WeaponSpec): GuidanceProfile {
   const acoustic = weapon.guidance === 'acoustic_homing';
   const infrared = weapon.guidance === 'infrared';
   return {
-    activationRangeKm: acoustic ? 10 : infrared ? 25 : 35,
-    seekerRangeKm: acoustic ? 8 : infrared ? 20 : 30,
-    seekerFovDeg: acoustic ? 120 : 90,
-    searchDurationSec: acoustic ? 180 : 45,
-    maxTrackAgeSec: 5,
-    maxUncertaintyKm: acoustic ? 4 : 8,
+    activationRangeKm: acoustic
+      ? GUIDANCE_DEFAULTS.ACOUSTIC_ACTIVATION_RANGE
+      : infrared
+        ? GUIDANCE_DEFAULTS.INFRARED_ACTIVATION_RANGE
+        : GUIDANCE_DEFAULTS.ACTIVE_RADAR_ACTIVATION_RANGE,
+    seekerRangeKm: acoustic
+      ? GUIDANCE_DEFAULTS.ACOUSTIC_SEEKER_RANGE
+      : infrared
+        ? GUIDANCE_DEFAULTS.INFRARED_SEEKER_RANGE
+        : GUIDANCE_DEFAULTS.ACTIVE_RADAR_SEEKER_RANGE,
+    seekerFovDeg: acoustic
+      ? GUIDANCE_DEFAULTS.ACOUSTIC_FOV
+      : GUIDANCE_DEFAULTS.DEFAULT_FOV,
+    searchDurationSec: acoustic
+      ? GUIDANCE_DEFAULTS.ACOUSTIC_SEARCH_DURATION
+      : GUIDANCE_DEFAULTS.DEFAULT_SEARCH_DURATION,
+    maxTrackAgeSec: GUIDANCE_DEFAULTS.MAX_TRACK_AGE,
+    maxUncertaintyKm: acoustic
+      ? GUIDANCE_DEFAULTS.ACOUSTIC_MAX_UNCERTAINTY
+      : GUIDANCE_DEFAULTS.DEFAULT_MAX_UNCERTAINTY,
     receivesUpdates: !acoustic && !infrared && weapon.guidance !== 'anti_radiation',
     requiresSupport: weapon.guidance === 'semi_active_radar',
     ...weapon.guidanceProfile,
