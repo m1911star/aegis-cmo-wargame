@@ -1,0 +1,340 @@
+import type {
+  AutoPauseSettings,
+  CombatLogEntry,
+  EquipmentCatalog,
+  RuntimeUnit,
+  ScoreLedger,
+  TacticalContact,
+  TacticalMission,
+  WeaponInFlight,
+} from '../../types/wargame';
+import { evaluateFireControl } from '../fireControl';
+import { getBearingDeg, getDistanceKm, calculateRadarHorizonKm } from '../geometry';
+import { launchGuidance } from '../guidance';
+import { effectiveDoctrine } from '../operations';
+import { observeMissile } from '../sensors';
+import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
+import { recordWeaponLaunch } from '../unitConfiguration';
+import type { PauseTrigger } from './types';
+
+type AutoDefenseContext = {
+  units: Record<string, RuntimeUnit>;
+  missions: TacticalMission[];
+  contacts: Record<string, TacticalContact>;
+  weaponsInFlight: Record<string, WeaponInFlight>;
+  catalog: EquipmentCatalog;
+  nextSimTime: number;
+  score: ScoreLedger;
+  logs: CombatLogEntry[];
+  previousDetectedMissileIds?: string[];
+  autoPauseSettings: AutoPauseSettings;
+  triggerPause: PauseTrigger;
+};
+
+/** Resolve automatic defensive/offensive launches and missile warning tracks. */
+export function runAutoDefense({
+  units,
+  missions,
+  contacts,
+  weaponsInFlight,
+  catalog,
+  nextSimTime,
+  score,
+  logs,
+  previousDetectedMissileIds,
+  autoPauseSettings,
+  triggerPause,
+}: AutoDefenseContext): string[] {
+  const aliveUnits = Object.values(units).filter(isActiveUnit);
+
+  for (const shooter of aliveUnits) {
+    const doctrine = effectiveDoctrine(shooter, missions);
+    const fireUnit = { ...shooter, doctrine };
+    if (doctrine.roe === 'hold' || !getUnitCapabilities(shooter).canFire) {
+      continue;
+    }
+
+    const samMounts = shooter.mounts.filter((mount) => {
+      const weapon = catalog.weapons[mount.weaponId];
+      return (
+        weapon &&
+        weapon.canInterceptMissile &&
+        mount.currentAmmo > 0 &&
+        mount.cooldownRemainingSec <= 0
+      );
+    });
+
+    if (samMounts.length > 0) {
+      const incomingEnemyMissiles = Object.values(weaponsInFlight).filter(
+        (missile) =>
+          missile.side !== shooter.side &&
+          missile.targetType === 'unit' &&
+          !missile.isIntercepted &&
+          missile.altitudeM >= -5
+      );
+
+      for (const incoming of incomingEnemyMissiles) {
+        const samMount = samMounts[0];
+        const samSpec = catalog.weapons[samMount.weaponId];
+        if (
+          !samSpec ||
+          samMount.currentAmmo <= 0 ||
+          samMount.cooldownRemainingSec > 0
+        ) {
+          break;
+        }
+
+        const missileContact = observeMissile(
+          shooter.side,
+          incoming,
+          units,
+          catalog,
+          nextSimTime,
+          shooter
+        );
+        if (!missileContact) continue;
+        const solution = evaluateFireControl(
+          fireUnit,
+          missileContact,
+          samMount,
+          samSpec,
+          catalog,
+          units,
+          nextSimTime,
+          'defense'
+        );
+        const distanceToIncomingKm = solution.distanceKm!;
+        const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some(
+          (id) => id !== shooter.id
+        );
+        const ownHorizonKm = calculateRadarHorizonKm(
+          shooter.altitudeM,
+          catalog.platforms[shooter.platformId].radarAntennaHeightM,
+          incoming.altitudeM
+        );
+        if (solution.status !== 'executable') continue;
+
+        const existingInterceptors = Object.values(weaponsInFlight).filter(
+          (weapon) =>
+            weapon.side === shooter.side && weapon.targetId === incoming.id
+        );
+        if (existingInterceptors.length > 0) continue;
+
+        const interceptCount = Math.min(2, samMount.currentAmmo);
+        for (let index = 0; index < interceptCount; index++) {
+          const interceptorId = `msl_int_${nextSimTime}_${shooter.id}_${incoming.id}_${index}`;
+          weaponsInFlight[interceptorId] = {
+            id: interceptorId,
+            weaponId: samSpec.id,
+            name: samSpec.codeName,
+            side: shooter.side,
+            shooterId: shooter.id,
+            shooterName: shooter.callsign,
+            targetId: incoming.id,
+            targetType: 'missile',
+            position: [...shooter.position],
+            launchPosition: [...shooter.position],
+            trail: [[...shooter.position]],
+            altitudeM: samSpec.cruiseAltitudeM,
+            heading: getBearingDeg(shooter.position, incoming.position),
+            speedKts: samSpec.speedKts,
+            distanceRemainingKm: distanceToIncomingKm,
+            maxRangeKm: samSpec.maxRangeKm,
+            traveledKm: 0,
+            basePk: samSpec.basePk,
+            warheadDamage: samSpec.warheadDamage,
+            requiresDatalinkBeyondHorizon:
+              samSpec.requiresDatalinkBeyondHorizon,
+            datalinkSupported: true,
+            ...launchGuidance(missileContact),
+          };
+          samMount.currentAmmo -= 1;
+          if (shooter.side === 'RED') score.redMissilesFired += 1;
+          else score.blueMissilesFired += 1;
+        }
+        samMount.cooldownRemainingSec =
+          samMount.reloadTimeSec * getUnitCapabilities(shooter).reloadFactor;
+        recordWeaponLaunch(
+          shooter,
+          samMount,
+          interceptCount,
+          nextSimTime
+        );
+
+        logs.push({
+          id: `log_int_launch_${nextSimTime}_${shooter.id}_${incoming.id}`,
+          simTime: nextSimTime,
+          side: shooter.side,
+          category: 'LAUNCH',
+          severity: 'info',
+          title: `${shooter.callsign} 发射防空拦截弹 (${samSpec.codeName} x${interceptCount})`,
+          message: `${shooter.name} 升空拦截来袭 ${incoming.name}（距本舰 ${distanceToIncomingKm.toFixed(
+            1
+          )} km${
+            hasFriendlyAwacsCec && distanceToIncomingKm > ownHorizonKm
+              ? '，由预警机CEC超视距引导'
+              : ''
+          }）。`,
+          position: [...shooter.position],
+          unitId: shooter.id,
+        });
+      }
+    }
+
+    if (
+      doctrine.roe !== 'free' ||
+      !doctrine.engageOpportunityTargets ||
+      shooter.status === 'returning'
+    ) {
+      continue;
+    }
+
+    const readyMounts = shooter.mounts.filter(
+      (mount) => mount.currentAmmo > 0 && mount.cooldownRemainingSec <= 0
+    );
+    if (readyMounts.length === 0) continue;
+
+    const sideContacts = Object.values(contacts).filter(
+      (contact) => contact.observerSide === shooter.side
+    );
+    for (const contact of sideContacts) {
+      const targetId = contact.actualUnitId;
+      const distanceKm = getDistanceKm(
+        shooter.position,
+        contact.estimatedPosition
+      );
+      const matchingMount = readyMounts.find((mount) => {
+        const weapon = catalog.weapons[mount.weaponId];
+        if (!weapon) return false;
+        if (
+          evaluateFireControl(
+            fireUnit,
+            contact,
+            mount,
+            weapon,
+            catalog,
+            units,
+            nextSimTime,
+            'automatic'
+          ).status !== 'executable'
+        ) {
+          return false;
+        }
+        return !(
+          weapon.canInterceptMissile &&
+          mount.currentAmmo <= mount.maxAmmo * 0.4
+        );
+      });
+      if (!matchingMount) continue;
+
+      const weapon = catalog.weapons[matchingMount.weaponId]!;
+      const inFlightToTarget = Object.values(weaponsInFlight).filter(
+        (inFlight) =>
+          inFlight.side === shooter.side &&
+          inFlight.targetType === 'unit' &&
+          inFlight.targetId === targetId
+      );
+      if (inFlightToTarget.length >= doctrine.salvoSize) continue;
+
+      const salvo = Math.min(doctrine.salvoSize, matchingMount.currentAmmo);
+      for (let index = 0; index < salvo; index++) {
+        const missileId = `msl_${nextSimTime}_${shooter.id}_${targetId}_${index}`;
+        weaponsInFlight[missileId] = {
+          id: missileId,
+          weaponId: weapon.id,
+          name: weapon.codeName,
+          side: shooter.side,
+          shooterId: shooter.id,
+          shooterName: shooter.callsign,
+          targetId,
+          targetType: 'unit',
+          position: [...shooter.position],
+          launchPosition: [...shooter.position],
+          trail: [[...shooter.position]],
+          altitudeM: weapon.cruiseAltitudeM,
+          heading: getBearingDeg(
+            shooter.position,
+            contact.estimatedPosition
+          ),
+          speedKts: weapon.speedKts,
+          distanceRemainingKm: distanceKm,
+          maxRangeKm: weapon.maxRangeKm,
+          traveledKm: 0,
+          basePk: weapon.basePk,
+          warheadDamage: weapon.warheadDamage,
+          requiresDatalinkBeyondHorizon:
+            weapon.requiresDatalinkBeyondHorizon,
+          datalinkSupported: true,
+          ...launchGuidance(contact),
+        };
+        matchingMount.currentAmmo -= 1;
+        if (shooter.side === 'RED') score.redMissilesFired += 1;
+        else score.blueMissilesFired += 1;
+      }
+
+      matchingMount.cooldownRemainingSec =
+        matchingMount.reloadTimeSec *
+        getUnitCapabilities(shooter).reloadFactor;
+      recordWeaponLaunch(shooter, matchingMount, salvo, nextSimTime);
+      shooter.status = 'engaged';
+
+      const callout =
+        weapon.category === 'aam'
+          ? 'FOX-3!'
+          : weapon.category === 'ashm'
+            ? 'VAMPIRE! VAMPIRE!'
+            : weapon.category === 'torpedo'
+              ? 'TORPEDO IN THE WATER!'
+              : 'BIRDS AWAY!';
+      logs.push({
+        id: `log_launch_${nextSimTime}_${shooter.id}_${targetId}`,
+        simTime: nextSimTime,
+        side: shooter.side,
+        category: 'LAUNCH',
+        severity: 'warning',
+        title: `${callout} ${shooter.callsign} 齐射 ${salvo} 枚 ${weapon.codeName}`,
+        message: `${shooter.name} 对目标 [${contact.displayName}]（距离 ${distanceKm.toFixed(
+          1
+        )} km）发起火力打击！`,
+        position: [...shooter.position],
+        unitId: shooter.id,
+      });
+      break;
+    }
+  }
+
+  const detectedMissileIds: string[] = [];
+  for (const missile of Object.values(weaponsInFlight)) {
+    for (const side of ['RED', 'BLUE'] as const) {
+      if (missile.side === side) continue;
+      const observed = observeMissile(
+        side,
+        missile,
+        units,
+        catalog,
+        nextSimTime
+      );
+      if (!observed) continue;
+      const key = `${side}:${missile.id}`;
+      detectedMissileIds.push(key);
+      if (!previousDetectedMissileIds?.includes(key)) {
+        logs.push({
+          id: `missile_contact_${nextSimTime}_${key}`,
+          simTime: nextSimTime,
+          side,
+          category: 'DETECTION',
+          severity: 'warning',
+          title: '传感器捕获来袭武器',
+          message: `观测来源：${observed.detectedBySources.join('、')}`,
+          position: observed.estimatedPosition,
+        });
+        triggerPause(
+          autoPauseSettings.onMissileDetected,
+          '本方传感器捕获来袭武器',
+          side
+        );
+      }
+    }
+  }
+  return detectedMissileIds;
+}
