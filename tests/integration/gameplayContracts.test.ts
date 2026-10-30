@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import { MASTER_EQUIPMENT_CATALOG as catalog } from '../src/db';
-import { createRuntimeUnitFromPlacement, initializeWorldContacts, stepSimulationWorld, advanceSimulation, type SimulationWorldState } from '../src/engine/simulationEngine';
-import { createRandomStream } from '../src/engine/determinism';
-import { evaluateFireControl, trackSupport } from '../src/engine/fireControl';
-import { advanceGuidance, launchGuidance, seekerCanObserve, sweptSeparationKm } from '../src/engine/guidance';
-import { getBearingDeg, getDistanceKm } from '../src/engine/geometry';
-import { recoverySolution, updateUnitOperations } from '../src/engine/operations';
-import { getUnitCapabilities } from '../src/engine/unitCapabilities';
-import { evaluateObjectives, creditDamage } from '../src/engine/objectives';
-import { observeMissile } from '../src/engine/sensors';
-import { visibleLogs } from '../src/engine/commandPolicy';
-import { compileScenario } from '../src/scenarios/compileScenario';
-import { INFORMATION_EXERCISE } from '../src/scenarios/informationExercise';
-import { BUILTIN_SCENARIOS, SCENARIO_EAST_SEA_THUNDER as east, exportCurrentStateAsScenarioJson } from '../src/scenarios/builtinScenarios';
-import { useWargameStore as store } from '../src/store/useWargameStore';
-import { captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../src/store/battleRecording';
-import type { InitialUnitPlacement, RuntimeUnit, ScenarioDefinition, ScenarioObjective, TacticalContact, TacticalMission, WeaponInFlight, WeaponSpec } from '../src/types/wargame';
+import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
+import { createRuntimeUnitFromPlacement, initializeWorldContacts, stepSimulationWorld, advanceSimulation, type SimulationWorldState } from '../../src/engine/simulationEngine';
+import { createRandomStream } from '../../src/engine/determinism';
+import { evaluateFireControl, trackSupport } from '../../src/engine/fireControl';
+import { advanceGuidance, launchGuidance, seekerCanObserve, sweptSeparationKm } from '../../src/engine/guidance';
+import { getBearingDeg, getDistanceKm } from '../../src/engine/geometry';
+import { recoverySolution, updateUnitOperations } from '../../src/engine/operations';
+import { getUnitCapabilities } from '../../src/engine/unitCapabilities';
+import { evaluateObjectives, creditDamage } from '../../src/engine/objectives';
+import { observeMissile } from '../../src/engine/sensors';
+import { visibleLogs } from '../../src/engine/commandPolicy';
+import { compileScenario } from '../../src/scenarios/compileScenario';
+import { INFORMATION_EXERCISE } from '../../src/scenarios/informationExercise';
+import { BUILTIN_SCENARIOS, SCENARIO_EAST_SEA_THUNDER as east, exportCurrentStateAsScenarioJson } from '../../src/scenarios/builtinScenarios';
+import { useWargameStore as store } from '../../src/store/useWargameStore';
+import { captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../src/store/battleRecording';
+import type { InitialUnitPlacement, RuntimeUnit, ScenarioDefinition, ScenarioObjective, TacticalContact, TacticalMission, WeaponInFlight, WeaponSpec } from '../../src/types/wargame';
 
 const pausesOff = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
 const score = () => ({ redLosses: 0, blueLosses: 0, redMissilesFired: 0, blueMissilesFired: 0,

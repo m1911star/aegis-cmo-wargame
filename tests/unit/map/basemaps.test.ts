@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { LayerSpecification, SourceSpecification, StyleSpecification } from 'maplibre-gl';
-import { BasemapLoader, BASEMAP_PRESETS, DEFAULT_BASEMAP, prepareOnlineStyle, basemapFallbackImage, type BasemapState } from '../src/map/basemaps';
-import { createOfflineBasemap } from '../src/map/offlineBasemap';
-import { installTacticalLayers, type TacticalLayerHost } from '../src/map/tacticalLayers';
-import { useWargameStore as store } from '../src/store/useWargameStore';
-import { canonicalBattleState } from '../src/store/battleRecording';
+import { BasemapLoader, BASEMAP_PRESETS, DEFAULT_BASEMAP, prepareOnlineStyle, basemapFallbackImage, type BasemapState } from '../../../src/map/basemaps';
+import { createOfflineBasemap } from '../../../src/map/offlineBasemap';
+import { installTacticalLayers, type TacticalLayerHost } from '../../../src/map/tacticalLayers';
+import { useWargameStore as store } from '../../../src/store/useWargameStore';
+import { canonicalBattleState } from '../../../src/store/battleRecording';
 
 const style = (name = 'test'): StyleSpecification => ({
   version: 8, name, center: [10, 40], zoom: 4, bearing: 90, pitch: 45,

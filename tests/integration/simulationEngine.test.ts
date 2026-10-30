@@ -8,19 +8,19 @@ import {
   stepSimulationWorld,
   getDistanceKm,
   type SimulationWorldState,
-} from '../src/engine/simulationEngine';
+} from '../../src/engine/simulationEngine';
 import {
   MASTER_EQUIPMENT_CATALOG,
   resolveEquipmentCatalog,
   validateCatalogIntegrity,
-} from '../src/catalog/equipmentCatalog';
+} from '../../src/catalog/equipmentCatalog';
 import {
   SCENARIO_EAST_SEA_THUNDER,
   SCENARIO_DEEP_SEA_CARRIER_HUNT,
   instantiateScenarioUnits,
   validateAndParseScenarioJson,
   exportCurrentStateAsScenarioJson,
-} from '../src/scenarios/builtinScenarios';
+} from '../../src/scenarios/builtinScenarios';
 
 describe('AEGIS-CMO // 物理公式与传感器视距测试 (Physics & Horizon Formulas)', () => {
   test('地球曲率雷达视距公式：水面舰艇对掠海导弹视距受限，高空预警机大幅扩展视距', () => {
@@ -284,7 +284,7 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
   });
 
   test('Loadout 挂载方案切换、航母母舰机库 (Hangar) 弹射起飞与胜负评级测试', async () => {
-    const { useWargameStore } = await import('../src/store/useWargameStore');
+    const { useWargameStore } = await import('../../src/store/useWargameStore');
     const store = useWargameStore.getState();
 
     // 1. 载入想定 02《深海猎杀》(包含红方003福建舰与蓝方CVN-73核航母)
@@ -326,7 +326,7 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
   });
 
   test('Zustand C2 Store 参谋作业指令测试：F3 航路点、F9 EMCON、F1 手动齐射与实时算子投放', async () => {
-    const { useWargameStore } = await import('../src/store/useWargameStore');
+    const { useWargameStore } = await import('../../src/store/useWargameStore');
     const store = useWargameStore.getState();
 
     // 1. 切换想定 02《深海猎杀》并切回想定 01

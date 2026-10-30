@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { MASTER_EQUIPMENT_CATALOG as catalog, resolveEquipmentCatalog, validateCatalogIntegrity } from '../src/db';
-import { resolveUnitConfiguration } from '../src/db/unitConfiguration';
-import { compileScenario } from '../src/scenarios/compileScenario';
+import { MASTER_EQUIPMENT_CATALOG as catalog, resolveEquipmentCatalog, validateCatalogIntegrity } from '../../src/db';
+import { resolveUnitConfiguration } from '../../src/db/unitConfiguration';
+import { compileScenario } from '../../src/scenarios/compileScenario';
 import {
   SCENARIO_EAST_SEA_THUNDER as east,
   SCENARIO_DEEP_SEA_CARRIER_HUNT as deep,
   instantiateScenarioUnits,
   validateAndParseScenarioJson,
   exportCurrentStateAsScenarioJson,
-} from '../src/scenarios/builtinScenarios';
-import { createRuntimeUnitFromPlacement, stepSimulationWorld, type SimulationWorldState } from '../src/engine/simulationEngine';
-import { deriveMissionAssignments } from '../src/engine/missions';
-import { getEventOccurrences } from '../src/engine/scenarioEvents';
-import { useWargameStore as store } from '../src/store/useWargameStore';
+} from '../../src/scenarios/builtinScenarios';
+import { createRuntimeUnitFromPlacement, stepSimulationWorld, type SimulationWorldState } from '../../src/engine/simulationEngine';
+import { deriveMissionAssignments } from '../../src/engine/missions';
+import { getEventOccurrences } from '../../src/engine/scenarioEvents';
+import { useWargameStore as store } from '../../src/store/useWargameStore';
 import type {
   EquipmentCatalog, InitialUnitPlacement, RuntimeScenarioEvent, RuntimeUnit,
   ScenarioDefinition, ScenarioEventRule, TacticalContact, WeaponInFlight,
-} from '../src/types/wargame';
+} from '../../src/types/wargame';
 
 function placement(id: string, platformId = 'j20_mighty_dragon', extra: Partial<InitialUnitPlacement> = {}): InitialUnitPlacement {
   const side = extra.side ?? 'RED';
