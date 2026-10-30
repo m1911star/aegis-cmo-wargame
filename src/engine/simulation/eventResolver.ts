@@ -14,7 +14,7 @@ import { evaluateObjectives } from '../objectives';
 import { getEventOccurrences } from '../scenarioEvents';
 import { createRuntimeUnitFromPlacement } from './unitFactory';
 
-type EventResolutionContext = {
+export type EventResolutionContext = {
   events: RuntimeScenarioEvent[];
   units: Record<string, RuntimeUnit>;
   contacts: Record<string, TacticalContact>;

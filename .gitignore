@@ -2,6 +2,7 @@
 node_modules/
 dist/
 coverage/
+docs/api/
 test-results/
 playwright-report/
 .vite/

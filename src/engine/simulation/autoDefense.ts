@@ -17,7 +17,7 @@ import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
 import { recordWeaponLaunch } from '../unitConfiguration';
 import type { PauseTrigger } from './types';
 
-type AutoDefenseContext = {
+export type AutoDefenseContext = {
   units: Record<string, RuntimeUnit>;
   missions: TacticalMission[];
   contacts: Record<string, TacticalContact>;

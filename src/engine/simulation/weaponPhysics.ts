@@ -15,7 +15,7 @@ import { evaluateTargetEcmSuppression, observeMissile } from '../sensors';
 import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
 import type { PauseTrigger } from './types';
 
-type WeaponPhysicsContext = {
+export type WeaponPhysicsContext = {
   units: Record<string, RuntimeUnit>;
   contacts: Record<string, TacticalContact>;
   weaponsInFlight: Record<string, WeaponInFlight>;

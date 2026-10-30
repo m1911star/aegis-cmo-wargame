@@ -14,7 +14,7 @@ import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
 
 const KTS_TO_KMPH = 1.852;
 
-type UnitPhysicsContext = {
+export type UnitPhysicsContext = {
   units: Record<string, RuntimeUnit>;
   previousContacts: Record<string, TacticalContact>;
   missions: TacticalMission[];
