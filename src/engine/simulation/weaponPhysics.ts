@@ -9,7 +9,8 @@ import type {
   VictoryConditionRule,
   WeaponInFlight,
 } from '../../types/wargame';
-import { advanceGuidance } from '../guidance';
+import { advanceGuidance, seekerCanObserve } from '../guidance';
+import { getDistanceKm } from '../geometry';
 import { creditDamage } from '../objectives';
 import { evaluateTargetEcmSuppression, observeMissile } from '../sensors';
 import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
@@ -70,23 +71,28 @@ export function advanceWeaponPhysics({
       delete weaponsInFlight[missile.id];
       continue;
     }
-    const target =
-      missile.targetType === 'missile'
-        ? weaponsInFlight[missile.targetId]
-        : units[missile.targetId];
-    const contact =
-      missile.targetType === 'missile'
-        ? target
-          ? observeMissile(
-              missile.side,
-              target as WeaponInFlight,
-              units,
-              catalog,
-              nextSimTime,
-              units[missile.shooterId]
-            )
-          : undefined
-        : contacts[`${missile.side}_CONTACT_${missile.targetId}`];
+    let target: RuntimeUnit | WeaponInFlight | undefined = missile.targetType === 'missile'
+      ? weaponsInFlight[missile.targetId]
+      : missile.targetType === 'unit' ? units[missile.targetId] : undefined;
+    if (missile.targetType === 'area') {
+      target = aliveUnits.filter((candidate) =>
+        candidate.side !== missile.side && candidate.side !== 'NEUTRAL' &&
+        seekerCanObserve(missile, weapon, candidate, catalog, false)
+      ).sort((a, b) => getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
+        a.id.localeCompare(b.id))[0];
+    }
+    const contact = missile.targetType === 'missile'
+      ? target
+        ? observeMissile(
+            missile.side,
+            target as WeaponInFlight,
+            units,
+            catalog,
+            nextSimTime,
+            units[missile.shooterId]
+          )
+        : undefined
+      : missile.targetType === 'unit' ? contacts[`${missile.side}_CONTACT_${missile.targetId}`] : undefined;
     const flight = advanceGuidance(
       missile,
       weapon,
@@ -144,6 +150,9 @@ export function advanceWeaponPhysics({
             title: `成功拦截来袭导弹: ${missile.name} 击毁 ${targetMissile.name}`,
             message: `${missile.shooterName} 发射的 ${missile.name} 在空中成功凌空打爆敌方 ${targetMissile.name}！`,
             position: [...targetMissile.position],
+            unitId: missile.shooterId,
+            weaponId: weapon.id,
+            quantity: 1,
           });
         }
         delete weaponsInFlight[missile.id];
@@ -179,6 +188,43 @@ export function advanceWeaponPhysics({
       effectivePk *= Math.max(0.45, 1 - targetEcm * 0.42);
     }
 
+    const countermeasures = targetUnit.countermeasureEffect &&
+      targetUnit.countermeasureEffect.expiresAtSimTime > nextSimTime
+      ? targetUnit.countermeasureEffect : undefined;
+    const softKillProbability = weapon.guidance === 'infrared' && countermeasures?.flares ? 0.4
+      : weapon.guidance === 'acoustic_homing' && countermeasures?.acoustic ? 0.35
+      : ['active_radar', 'semi_active_radar', 'hypersonic_glide'].includes(weapon.guidance) && countermeasures?.chaff ? 0.28
+      : 0;
+    if (softKillProbability > 0 && rng() < softKillProbability) {
+      if (targetUnit.side === 'RED') score.redInterceptions += 1;
+      else score.blueInterceptions += 1;
+      explosions.push({
+        id: `exp_softkill_${nextSimTime}_${missile.id}`,
+        position: [...targetUnit.position],
+        type: 'miss',
+        side: targetUnit.side,
+        label: `DECOYED ${missile.name}`,
+        createdAtSimTime: nextSimTime,
+        radiusKm: 2.5,
+      });
+      logs.push({
+        id: `log_softkill_${nextSimTime}_${missile.id}`,
+        simTime: nextSimTime,
+        side: targetUnit.side,
+        category: 'INTERCEPT',
+        severity: 'info',
+        title: `${targetUnit.callsign} 软杀伤诱骗 ${missile.name}`,
+        message: '已投放的有限诱饵使来袭武器末段脱锁。',
+        position: [...targetUnit.position],
+        unitId: targetUnit.id,
+        targetUnitId: targetUnit.id,
+        weaponId: weapon.id,
+        quantity: 1,
+      });
+      delete weaponsInFlight[missile.id];
+      continue;
+    }
+
     if (rng() < effectiveCiwsProbability) {
       if (targetUnit.side === 'RED') score.redInterceptions += 1;
       else score.blueInterceptions += 1;
@@ -201,6 +247,9 @@ export function advanceWeaponPhysics({
         message: `${targetUnit.name} 通过近防炮/海拉姆与电子诱饵成功挫败 ${missile.name} 末端攻击！`,
         position: [...targetUnit.position],
         unitId: targetUnit.id,
+        targetUnitId: targetUnit.id,
+        weaponId: weapon.id,
+        quantity: 1,
       });
     } else if (rng() < effectivePk) {
       const damage = Math.round(
@@ -240,6 +289,9 @@ export function advanceWeaponPhysics({
           message: `${targetUnit.name} 遭受致命毁伤，失去战斗力。`,
           position: [...targetUnit.position],
           unitId: targetUnit.id,
+          targetUnitId: targetUnit.id,
+          weaponId: weapon.id,
+          quantity: 1,
         });
         triggerPause(
           autoPauseSettings.onUnitHitOrDestroyed,
@@ -275,6 +327,10 @@ export function advanceWeaponPhysics({
           message: `${targetUnit.name} 被 ${missile.name} 命中，剩余结构完好度 ${targetUnit.hp}/${targetUnit.maxHp}。`,
           position: [...targetUnit.position],
           unitId: targetUnit.id,
+          targetUnitId: targetUnit.id,
+          weaponId: weapon.id,
+          quantity: 1,
+          aarSide: missile.side,
         });
         triggerPause(
           autoPauseSettings.onUnitHitOrDestroyed,

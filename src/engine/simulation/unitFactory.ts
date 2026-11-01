@@ -11,7 +11,7 @@ import { createRuntimeWeaponMounts } from '../unitConfiguration';
 export function createRuntimeUnitFromPlacement(
   placement: InitialUnitPlacement,
   catalog: EquipmentCatalog,
-  rng: () => number = Math.random
+  rng: () => number = () => 0.5
 ): RuntimeUnit {
   const configuration = resolveUnitConfiguration(
     catalog,
@@ -61,6 +61,10 @@ export function createRuntimeUnitFromPlacement(
     autoEvade: true,
     engageOpportunityTargets: true,
     salvoSize: 2,
+    automaticFireRangeFraction: 0.75,
+    minimumWeaponReserve: 0,
+    automaticTargetDomains: ['air', 'surface', 'subsurface', 'land'] as RuntimeUnit['doctrine']['automaticTargetDomains'],
+    minimumAutomaticThreat: 'medium' as const,
     ...(placement.doctrine || {}),
   };
 
@@ -79,20 +83,34 @@ export function createRuntimeUnitFromPlacement(
     position: finalPos,
     recoveryPosition: [...(placement.recoveryPosition ?? finalPos)],
     navigationMode: placement.assignedMissionId ? 'mission' : 'manual',
+    missionState: placement.assignedMissionId ? 'ingress' : undefined,
+    missionRouteIndex: 0,
     altitudeM,
     targetAltitudeM: altitudeM,
     heading: placement.heading,
     speedKts,
     targetSpeedKts: speedKts,
     waypoints: placement.waypoints
-      ? placement.waypoints.map((waypoint) => [...waypoint])
+      ? placement.waypoints.map((waypoint) => Array.isArray(waypoint)
+        ? { position: [...waypoint] as [number, number] }
+        : { ...waypoint, position: [...waypoint.position] as [number, number] })
       : [],
     hp: spec.maxHp,
     maxHp: spec.maxHp,
     fuelRemainingSec: maxFuelSec,
     maxFuelSec,
     status: 'operational',
-    doctrine: defaultDoctrine,
+    aarFuelRemainingSec: spec.aarFuelCapacitySec ?? 0,
+    aarQueue: [],
+    deployableInventory: Object.fromEntries((spec.deployables ?? []).map((deployable) =>
+      [deployable.platformId, deployable.count])),
+    countermeasures: {
+      chaff: spec.domain === 'air' ? 4 : spec.domain === 'surface' ? 6 : spec.domain === 'land' ? 2 : 0,
+      flares: spec.domain === 'air' ? 4 : 0,
+      acousticDecoys: spec.domain === 'subsurface' ? 4 : 0,
+      cooldownUntil: 0,
+    },
+    doctrine: { ...defaultDoctrine, automaticTargetDomains: [...defaultDoctrine.automaticTargetDomains] },
     mounts: createRuntimeWeaponMounts(configuration, catalog),
     weaponUsage: {},
     hangar: (spec.hangarSlots || []).map((slot) => ({
@@ -109,6 +127,11 @@ export function createRuntimeUnitFromPlacement(
         slot.readyAirframes === 0 && slot.totalAirframes > 0
           ? slot.launchCooldownSec
           : 0,
+      turnaroundSec: slot.turnaroundSec ?? slot.launchCooldownSec * 4,
+      turnaroundSupplies: slot.turnaroundSupplyBatches ?? slot.totalAirframes,
+      turnaroundQueue: [],
+      activeSortieIds: [],
+      nextSortieNumber: 1,
     })),
     assignedMissionId: placement.assignedMissionId,
   };

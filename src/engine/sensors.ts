@@ -1,6 +1,7 @@
 import * as turf from '@turf/turf';
-import type { CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
+import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { acousticRangeFactor } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
 import {
@@ -147,6 +148,47 @@ export function buildAouPolygon(
   return circle.geometry.coordinates[0] as [number, number][];
 }
 
+export function buildBearingCorridor(observation: BearingObservation): [number, number][] {
+  const nearKm = Math.min(1, observation.maxRangeKm * 0.02);
+  const leftNear = turf.destination(observation.origin, nearKm, observation.bearingDeg - observation.errorDeg,
+    { units: 'kilometers' }).geometry.coordinates as [number, number];
+  const leftFar = turf.destination(observation.origin, observation.maxRangeKm, observation.bearingDeg - observation.errorDeg,
+    { units: 'kilometers' }).geometry.coordinates as [number, number];
+  const rightFar = turf.destination(observation.origin, observation.maxRangeKm, observation.bearingDeg + observation.errorDeg,
+    { units: 'kilometers' }).geometry.coordinates as [number, number];
+  const rightNear = turf.destination(observation.origin, nearKm, observation.bearingDeg + observation.errorDeg,
+    { units: 'kilometers' }).geometry.coordinates as [number, number];
+  return [leftNear, leftFar, rightFar, rightNear, leftNear];
+}
+
+export function fuseBearingObservations(observations: BearingObservation[]) {
+  if (observations.length < 2) return undefined;
+  const [first, second] = observations;
+  const line = (observation: BearingObservation) => turf.lineString([
+    observation.origin,
+    turf.destination(observation.origin, observation.maxRangeKm, observation.bearingDeg,
+      { units: 'kilometers' }).geometry.coordinates,
+  ]);
+  const intersections = turf.lineIntersect(line(first), line(second));
+  const estimatedPosition = intersections.features[0]?.geometry.coordinates as [number, number] | undefined;
+  if (!estimatedPosition) return undefined;
+  const crossingAngle = Math.max(10, Math.min(90,
+    Math.abs(((first.bearingDeg - second.bearingDeg + 540) % 360) - 180)));
+  const majorKm = Math.max(2, Math.min(25,
+    (first.errorDeg + second.errorDeg) * 1.8 / Math.sin(crossingAngle * Math.PI / 180)));
+  const minorKm = Math.max(1, majorKm * 0.38);
+  const ellipse = turf.ellipse(estimatedPosition, majorKm, minorKm, {
+    angle: first.bearingDeg,
+    steps: 24,
+    units: 'kilometers',
+  });
+  return {
+    estimatedPosition,
+    uncertaintyRadiusKm: majorKm,
+    uncertaintyPolygon: ellipse.geometry.coordinates[0] as [number, number][],
+  };
+}
+
 export function getContactSidc(
   domain: Domain,
   classification: TacticalContact['classification'],
@@ -202,7 +244,8 @@ export function evaluateTargetEcmSuppression(
 
 export function computeContactsOnly(
   units: Record<string, RuntimeUnit>, catalog: EquipmentCatalog,
-  previousContacts: Record<string, TacticalContact>, nextSimTime: number, dtSec = 0
+  previousContacts: Record<string, TacticalContact>, nextSimTime: number, dtSec = 0,
+  environment?: ScenarioEnvironment
 ): { contacts: Record<string, TacticalContact>; logs: CombatLogEntry[] } {
   const configurations = new Map(Object.values(units).map((unit) => [unit.id,
     resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId)]));
@@ -234,8 +277,11 @@ export function computeContactsOnly(
       const detectingSources: string[] = [];
       const sourceUnitIds: string[] = [];
       const fireControlSourceIds: string[] = [];
+      const esmObservations: BearingObservation[] = [];
+      let hasNonEsmDetection = false;
       let bestUncertaintyKm = Infinity;
       let bestClassification: TacticalContact['classification'] = 'unknown';
+      let emitterObserved = false;
 
       for (const observer of friendlyUnits) {
         const obsSpec = catalog.platforms[observer.platformId];
@@ -275,6 +321,7 @@ export function computeContactsOnly(
             );
 
             if (distKm <= effRangeKm) {
+              hasNonEsmDetection = true;
               detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
               fireControlSourceIds.push(observer.id);
               const ratio = distKm / Math.max(1, effRangeKm);
@@ -302,6 +349,17 @@ export function computeContactsOnly(
             const esmRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
 
             if (distKm <= esmRangeKm) {
+              emitterObserved = true;
+              const trueBearing = getBearingDeg(observer.position, target.position);
+              const hash = `${observer.id}:${target.id}`.split('').reduce((sum, character) => sum + character.charCodeAt(0), 0);
+              const bearingBiasDeg = ((hash % 2001) / 1000 - 1) * 2;
+              esmObservations.push({
+                sourceUnitId: observer.id,
+                origin: [...observer.position],
+                bearingDeg: (trueBearing + bearingBiasDeg + 360) % 360,
+                errorDeg: 2.5,
+                maxRangeKm: esmRangeKm,
+              });
               detectingSources.push(
                 `${observer.callsign} (${
                   target.doctrine.emconJamming ? 'ESM截获强干扰源' : 'ESM截获雷达辐射'
@@ -329,6 +387,7 @@ export function computeContactsOnly(
             );
             const effRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
             if (distKm <= effRangeKm) {
+              hasNonEsmDetection = true;
               detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
               if (distKm <= effRangeKm * 0.65) {
                 bestClassification = 'identified';
@@ -360,9 +419,10 @@ export function computeContactsOnly(
               targetSpec.acousticSignatureDb,
               target.speedKts,
               target.doctrine.emconSonar
-            );
+            ) * acousticRangeFactor(observer.position, target.position, environment);
 
             if (distKm <= sonarRangeKm) {
+              hasNonEsmDetection = true;
               detectingSources.push(
                 `${observer.callsign} (${
                   sensor.type === 'sonar_active' ? '主动声呐回波' : '被动拖曳阵监听'
@@ -393,22 +453,45 @@ export function computeContactsOnly(
       const prevContact = previousContacts[contactKey];
 
       if (detectingSources.length > 0) {
-        if (detectingSources.length >= 2 && bestUncertaintyKm > 1.0) {
-          bestUncertaintyKm = Number((bestUncertaintyKm * 0.45).toFixed(2));
-        }
-
+        const uniqueEsmObservations = esmObservations.filter((observation, index, all) =>
+          all.findIndex((candidate) => candidate.sourceUnitId === observation.sourceUnitId) === index);
+        let uncertaintyKind: TacticalContact['uncertaintyKind'] = 'circle';
         let estimatedPos: [number, number] = [...target.position];
-        if (bestUncertaintyKm > 2.0) {
-          const hashAngle =
-            (target.id.charCodeAt(0) * 73 + Math.floor(nextSimTime / 10000)) %
-            360;
-          const offsetDest = turf.destination(
-            target.position,
-            bestUncertaintyKm * 0.35,
-            hashAngle,
-            { units: 'kilometers' }
-          );
-          estimatedPos = offsetDest.geometry.coordinates as [number, number];
+        let uncertaintyPolygon: [number, number][] | undefined;
+        if (!hasNonEsmDetection && uniqueEsmObservations.length > 0) {
+          const fusion = fuseBearingObservations(uniqueEsmObservations);
+          if (fusion) {
+            uncertaintyKind = 'ellipse';
+            estimatedPos = fusion.estimatedPosition;
+            bestUncertaintyKm = fusion.uncertaintyRadiusKm;
+            uncertaintyPolygon = fusion.uncertaintyPolygon;
+          } else {
+            const observation = uniqueEsmObservations[0];
+            uncertaintyKind = 'bearing_corridor';
+            estimatedPos = turf.destination(
+              observation.origin,
+              observation.maxRangeKm * 0.5,
+              observation.bearingDeg,
+              { units: 'kilometers' }
+            ).geometry.coordinates as [number, number];
+            bestUncertaintyKm = observation.maxRangeKm * 0.5;
+            uncertaintyPolygon = buildBearingCorridor(observation);
+          }
+        } else {
+          if (new Set(sourceUnitIds).size >= 2 && bestUncertaintyKm > 1.0) {
+            bestUncertaintyKm = Number((bestUncertaintyKm * 0.45).toFixed(2));
+          }
+          if (bestUncertaintyKm > 2.0) {
+            const hashAngle =
+              (target.id.charCodeAt(0) * 73 + Math.floor(nextSimTime / 10000)) % 360;
+            estimatedPos = turf.destination(
+              target.position,
+              bestUncertaintyKm * 0.35,
+              hashAngle,
+              { units: 'kilometers' }
+            ).geometry.coordinates as [number, number];
+          }
+          uncertaintyPolygon = buildAouPolygon(estimatedPos, bestUncertaintyKm);
         }
 
         const prefix =
@@ -442,17 +525,15 @@ export function computeContactsOnly(
               }]`
             : `${prefix}-${shortNum} [不明接触]`;
 
-        const threatLevel: TacticalContact['threatLevel'] =
-          target.category === 'stealth_fighter' ||
-          target.category === 'destroyer' ||
-          target.category === 'ssn' ||
-          target.category === 'sam_battery'
-            ? 'critical'
-            : target.category === 'bomber' ||
-              target.category === 'carrier' ||
-              target.category === 'ew_aircraft'
-            ? 'high'
-            : 'medium';
+        const threatLevel: TacticalContact['threatLevel'] = bestClassification !== 'identified'
+          ? target.domain === 'subsurface' ? 'critical' : target.domain === 'air' ? 'high' : 'high'
+          : target.category === 'decoy' || target.category === 'tanker'
+            ? 'low'
+            : target.category === 'stealth_fighter' || target.category === 'destroyer' ||
+              target.category === 'ssn' || target.category === 'sam_battery'
+              ? 'critical'
+              : target.category === 'bomber' || target.category === 'carrier' || target.category === 'ew_aircraft'
+                ? 'high' : 'medium';
 
         nextContacts[contactKey] = {
           id: contactKey,
@@ -461,12 +542,15 @@ export function computeContactsOnly(
           targetSide: target.side,
           domain: target.domain,
           classification: bestClassification,
+          identifiedCategory: bestClassification === 'identified' ? target.category : undefined,
           displayName,
           sidc: getContactSidc(target.domain, bestClassification, target.side),
           estimatedPosition: estimatedPos,
           truePosition: [...target.position],
           uncertaintyRadiusKm: Number(bestUncertaintyKm.toFixed(1)),
-          uncertaintyPolygon: buildAouPolygon(estimatedPos, bestUncertaintyKm),
+          uncertaintyKind,
+          uncertaintyPolygon,
+          bearingObservations: uniqueEsmObservations.length ? uniqueEsmObservations : undefined,
           heading: Math.round(target.heading),
           speedKts: Math.round(target.speedKts),
           altitudeM: Math.round(target.altitudeM),
@@ -478,6 +562,8 @@ export function computeContactsOnly(
           sourceUnitIds,
           fireControlSourceIds: [...new Set(fireControlSourceIds)],
           isJammingDetected: target.doctrine.emconJamming,
+          emitterObserved,
+          lastEmitterDetectedTime: emitterObserved ? nextSimTime : prevContact?.lastEmitterDetectedTime,
           threatLevel,
         };
 
@@ -508,10 +594,10 @@ export function computeContactsOnly(
         nextContacts[contactKey] = {
           ...prevContact,
           uncertaintyRadiusKm: Number(expandedRadius.toFixed(1)),
-          uncertaintyPolygon: buildAouPolygon(
-            prevContact.estimatedPosition,
-            expandedRadius
-          ),
+          uncertaintyPolygon: prevContact.uncertaintyKind === 'circle' || !prevContact.uncertaintyKind
+            ? buildAouPolygon(prevContact.estimatedPosition, expandedRadius)
+            : prevContact.uncertaintyPolygon,
+          emitterObserved: false,
         };
       }
     }
@@ -522,7 +608,9 @@ export function computeContactsOnly(
     if (nextContacts[previous.id] || nextSimTime - previous.lastDetectedTime > 120000) continue;
     const radius = Math.min(80, previous.uncertaintyRadiusKm + dtSec * 0.4);
     nextContacts[previous.id] = { ...previous, uncertaintyRadiusKm: radius,
-      uncertaintyPolygon: buildAouPolygon(previous.estimatedPosition, radius) };
+      uncertaintyPolygon: previous.uncertaintyKind === 'circle' || !previous.uncertaintyKind
+        ? buildAouPolygon(previous.estimatedPosition, radius) : previous.uncertaintyPolygon,
+      emitterObserved: false };
   }
   return { contacts: nextContacts, logs: newLogs };
 }
@@ -538,9 +626,16 @@ export function observeMissile(
     if (receiver && receiver.id !== observer.id &&
         (!catalog.platforms[receiver.platformId]?.hasDatalink || !config.platform.hasDatalink)) continue;
     const distance = getDistanceKm(observer.position, missile.position);
+    const missileDomain: Domain = missile.altitudeM < 0 ? 'subsurface' : 'air';
     const detected = config.sensorIds.some((id) => {
       const sensor = catalog.sensors[id];
-      if (!sensor?.detectDomains.includes('air') || missile.altitudeM < 0) return false;
+      if (!sensor?.detectDomains.includes(missileDomain)) return false;
+      if (missileDomain === 'subsurface') {
+        if (sensor.type !== 'sonar_active' && sensor.type !== 'sonar_passive') return false;
+        if (sensor.type === 'sonar_active' && !observer.doctrine.emconSonar) return false;
+        const torpedoNoiseRangeKm = sensor.maxRangeKm * (sensor.type === 'sonar_active' ? 1 : 0.65);
+        return distance <= torpedoNoiseRangeKm;
+      }
       if (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth') return false;
       if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) return false;
       return distance <= calculateEffectiveRadarRangeKm(
@@ -551,10 +646,11 @@ export function observeMissile(
     if (detected) sources.push(observer);
   }
   if (!sources.length) return undefined;
+  const missileDomain: Domain = missile.altitudeM < 0 ? 'subsurface' : 'air';
   return {
     id: `${side}_MISSILE_${missile.id}`, actualUnitId: missile.id, observerSide: side,
-    targetSide: missile.side, domain: 'air', classification: 'classified', displayName: '来袭武器',
-    sidc: getContactSidc('air', 'classified', missile.side), estimatedPosition: [...missile.position],
+    targetSide: missile.side, domain: missileDomain, classification: 'classified', displayName: '来袭武器',
+    sidc: getContactSidc(missileDomain, 'classified', missile.side), estimatedPosition: [...missile.position],
     truePosition: [...missile.position], uncertaintyRadiusKm: 0.3,
     heading: missile.heading, speedKts: missile.speedKts, altitudeM: missile.altitudeM,
     firstDetectedTime: simTime, lastDetectedTime: simTime,

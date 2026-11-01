@@ -31,6 +31,8 @@ export type AutoDefenseContext = {
   triggerPause: PauseTrigger;
 };
 
+const THREAT_RANK = { low: 0, medium: 1, high: 2, critical: 3 } as const;
+
 /** Resolve automatic defensive/offensive launches and missile warning tracks. */
 export function runAutoDefense({
   units,
@@ -68,7 +70,7 @@ export function runAutoDefense({
       const incomingEnemyMissiles = Object.values(weaponsInFlight).filter(
         (missile) =>
           missile.side !== shooter.side &&
-          missile.targetType === 'unit' &&
+          missile.targetType !== 'missile' &&
           !missile.isIntercepted &&
           missile.altitudeM >= -5
       );
@@ -177,10 +179,15 @@ export function runAutoDefense({
           }）。`,
           position: [...shooter.position],
           unitId: shooter.id,
+          weaponId: samSpec.id,
+          quantity: interceptCount,
         });
       }
     }
 
+    if (shooter.coordinatedAttack && nextSimTime < shooter.coordinatedAttack.releaseAtSimTime) {
+      continue;
+    }
     if (
       doctrine.roe !== 'free' ||
       !doctrine.engageOpportunityTargets ||
@@ -194,10 +201,19 @@ export function runAutoDefense({
     );
     if (readyMounts.length === 0) continue;
 
+    const coordinatedContactId = shooter.coordinatedAttack?.contactId;
     const sideContacts = Object.values(contacts).filter(
-      (contact) => contact.observerSide === shooter.side
+      (contact) => contact.observerSide === shooter.side &&
+        (!coordinatedContactId || contact.id === coordinatedContactId) &&
+        (!coordinatedContactId || nextSimTime - contact.lastDetectedTime <= 5000)
     );
+    if (coordinatedContactId && sideContacts.length === 0) {
+      shooter.coordinatedAttack = undefined;
+      continue;
+    }
     for (const contact of sideContacts) {
+      if (!doctrine.automaticTargetDomains.includes(contact.domain) ||
+          THREAT_RANK[contact.threatLevel] < THREAT_RANK[doctrine.minimumAutomaticThreat]) continue;
       const targetId = contact.actualUnitId;
       const distanceKm = getDistanceKm(
         shooter.position,
@@ -206,24 +222,20 @@ export function runAutoDefense({
       const matchingMount = readyMounts.find((mount) => {
         const weapon = catalog.weapons[mount.weaponId];
         if (!weapon) return false;
-        if (
-          evaluateFireControl(
-            fireUnit,
-            contact,
-            mount,
-            weapon,
-            catalog,
-            units,
-            nextSimTime,
-            'automatic'
-          ).status !== 'executable'
-        ) {
-          return false;
-        }
-        return !(
-          weapon.canInterceptMissile &&
-          mount.currentAmmo <= mount.maxAmmo * 0.4
+        const solution = evaluateFireControl(
+          fireUnit,
+          contact,
+          mount,
+          weapon,
+          catalog,
+          units,
+          nextSimTime,
+          'automatic'
         );
+        if (solution.status !== 'executable' ||
+            solution.distanceKm! > weapon.maxRangeKm * doctrine.automaticFireRangeFraction ||
+            mount.currentAmmo <= doctrine.minimumWeaponReserve) return false;
+        return !(weapon.canInterceptMissile && mount.currentAmmo <= mount.maxAmmo * 0.4);
       });
       if (!matchingMount) continue;
 
@@ -232,11 +244,16 @@ export function runAutoDefense({
         (inFlight) =>
           inFlight.side === shooter.side &&
           inFlight.targetType === 'unit' &&
-          inFlight.targetId === targetId
+          inFlight.targetId === targetId &&
+          (!coordinatedContactId || inFlight.shooterId === shooter.id)
       );
       if (inFlightToTarget.length >= doctrine.salvoSize) continue;
 
-      const salvo = Math.min(doctrine.salvoSize, matchingMount.currentAmmo);
+      const salvo = Math.min(
+        doctrine.salvoSize,
+        matchingMount.currentAmmo - doctrine.minimumWeaponReserve
+      );
+      if (salvo <= 0) continue;
       for (let index = 0; index < salvo; index++) {
         const missileId = `msl_${nextSimTime}_${shooter.id}_${targetId}_${index}`;
         weaponsInFlight[missileId] = {
@@ -277,6 +294,7 @@ export function runAutoDefense({
         getUnitCapabilities(shooter).reloadFactor;
       recordWeaponLaunch(shooter, matchingMount, salvo, nextSimTime);
       shooter.status = 'engaged';
+      shooter.coordinatedAttack = undefined;
 
       const callout =
         weapon.category === 'aam'
@@ -298,6 +316,9 @@ export function runAutoDefense({
         )} km）发起火力打击！`,
         position: [...shooter.position],
         unitId: shooter.id,
+        targetUnitId: targetId,
+        weaponId: weapon.id,
+        quantity: salvo,
       });
       break;
     }

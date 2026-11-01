@@ -29,7 +29,7 @@ export function getEventOccurrences(
     matches = Object.values(contacts).filter((contact) =>
       contact.observerSide === trigger.observerSide &&
       (!trigger.targetUnitId || trigger.targetUnitId === contact.actualUnitId) &&
-      (!trigger.targetCategory || trigger.targetCategory === units[contact.actualUnitId]?.category)
+      (!trigger.targetCategory || trigger.targetCategory === contact.identifiedCategory)
     ).map((contact) => contact.actualUnitId);
   } else {
     const area = polygon([[...trigger.areaPolygon, trigger.areaPolygon[0]]]);

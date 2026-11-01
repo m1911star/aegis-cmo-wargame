@@ -23,7 +23,7 @@ export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = {
 };
 
 export const MASTER_EQUIPMENT_CATALOG: EquipmentCatalog = {
-  version: '2026.11-MODULAR-4LAYER',
+  version: '2026.11-TANKER-DECOY-1',
   sensors: MODULAR_SENSORS,
   weapons: MODULAR_WEAPONS,
   loadouts: MODULAR_LOADOUTS,
@@ -117,8 +117,21 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
     unique(platform.mounts.map((m) => m.mountId), `platforms.${pId}.mounts`);
     unique((platform.hangarSlots ?? []).map((s) => s.slotId), `platforms.${pId}.hangarSlots`);
     if (platform.cruiseSpeedKts > platform.maxSpeedKts) errors.push(`platforms.${pId}: cruise speed exceeds maximum`);
+    if ((platform.aarFuelCapacitySec === undefined) !== (platform.aarTransferRateSecPerSec === undefined)) {
+      errors.push(`platforms.${pId}: tanker capacity and transfer rate must be configured together`);
+    }
+    if (platform.aarFuelCapacitySec !== undefined && (platform.domain !== 'air' || platform.category !== 'tanker')) {
+      errors.push(`platforms.${pId}: AAR supply is only valid on tanker aircraft`);
+    }
     if (platform.minAltitudeM > platform.defaultAltitudeM || platform.defaultAltitudeM > platform.maxAltitudeM) {
       errors.push(`platforms.${pId}: default altitude is outside platform limits`);
+    }
+    unique((platform.deployables ?? []).map((deployable) => deployable.platformId), `platforms.${pId}.deployables`);
+    for (const deployable of platform.deployables ?? []) {
+      const target = catalog.platforms[deployable.platformId];
+      if (!target || target.domain !== 'air' || !['decoy', 'mpa_uav'].includes(target.category)) {
+        errors.push(`platforms.${pId}: invalid deployable platform ${deployable.platformId}`);
+      }
     }
     for (const sId of platform.sensorIds) {
       if (!Object.hasOwn(catalog.sensors, sId)) {

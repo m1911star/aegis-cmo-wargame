@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database,
-  FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight,
+  FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler,
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import type { ActivePerspective, TimeScale } from '../types/wargame';
@@ -46,6 +46,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
+  const battleResult = useWargameStore((s) => s.battleResult);
   const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
   const setPlayMode = useWargameStore((s) => s.setPlayMode);
@@ -89,6 +90,14 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           </button>
           <button onClick={() => setActiveModal('scenario_io')} className="toolbar-button">
             <FileJson /><span>想定管理</span>
+          </button>
+          <button disabled={playMode !== 'sandbox'} onClick={() => setActiveModal('builder')}
+            className="toolbar-button text-emerald-300 disabled:opacity-35">
+            <PencilRuler /><span>想定编辑</span>
+          </button>
+          <button disabled={!battleResult && playMode !== 'sandbox'} onClick={() => setActiveModal('aar')}
+            className="toolbar-button text-amber-300 disabled:opacity-35" title="战后或沙盒模式可查看完整真值复盘">
+            <ChartColumn /><span>战后复盘</span>
           </button>
           <details className="pause-settings">
             <summary className="toolbar-button"><ShieldAlert /><span>自动暂停</span></summary>

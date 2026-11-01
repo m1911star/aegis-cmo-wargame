@@ -4,10 +4,12 @@ import type {
   CombatLogEntry,
   EquipmentCatalog,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScoreLedger,
   TacticalContact,
   TacticalMission,
 } from '../../types/wargame';
+import { isRouteAllowed } from '../environment';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { updateUnitOperations } from '../operations';
 import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
@@ -19,6 +21,7 @@ export type UnitPhysicsContext = {
   previousContacts: Record<string, TacticalContact>;
   missions: TacticalMission[];
   catalog: EquipmentCatalog;
+  environment?: ScenarioEnvironment;
   nextSimTime: number;
   dtSec: number;
   score: ScoreLedger;
@@ -31,6 +34,7 @@ export function advanceUnitPhysics({
   previousContacts,
   missions,
   catalog,
+  environment,
   nextSimTime,
   dtSec,
   score,
@@ -48,7 +52,69 @@ export function advanceUnitPhysics({
   );
 
   for (const unit of Object.values(units)) {
-    if (!isActiveUnit(unit)) continue;
+    const unitActive = isActiveUnit(unit);
+    for (const slot of unit.hangar || []) {
+      const survivingSorties = slot.activeSortieIds.filter((sortieId) => {
+        const sortie = units[sortieId];
+        return !!sortie && sortie.hp > 0 && sortie.status !== 'destroyed';
+      });
+      const lostSorties = slot.activeSortieIds.length - survivingSorties.length;
+      if (lostSorties > 0) {
+        slot.activeSortieIds = survivingSorties;
+        slot.totalAirframes = Math.max(0, slot.totalAirframes - lostSorties);
+      }
+
+      if (!unitActive) {
+        const lostOnboard = slot.readyAirframes + slot.reserveAirframes + slot.turnaroundQueue.length;
+        if (lostOnboard > 0) {
+          logs.push({
+            id: `hangar_loss_${unit.id}_${slot.slotId}_${nextSimTime}`,
+            simTime: nextSimTime,
+            side: unit.side,
+            category: 'DESTROYED',
+            severity: 'critical',
+            title: `${unit.callsign} 舰载航空库存损失`,
+            message: `${slot.squadronName} 共 ${lostOnboard} 个待命/整备批次随母舰失能；在空波次必须转场。`,
+            unitId: unit.id,
+            aarType: 'hangar_loss',
+          });
+        }
+        slot.readyAirframes = 0;
+        slot.reserveAirframes = 0;
+        slot.turnaroundQueue = [];
+        slot.turnaroundSupplies = 0;
+        slot.cooldownRemainingSec = 0;
+        slot.totalAirframes = slot.activeSortieIds.length;
+        continue;
+      }
+
+      const wasPreparing = slot.cooldownRemainingSec > 0 || slot.readyAirframes === 0;
+      if (slot.cooldownRemainingSec > 0) {
+        slot.cooldownRemainingSec = Math.max(0, slot.cooldownRemainingSec - dtSec);
+      }
+      if (wasPreparing && slot.cooldownRemainingSec === 0 && slot.reserveAirframes > 0) {
+        slot.reserveAirframes -= 1;
+        slot.readyAirframes += 1;
+      }
+      while (slot.turnaroundSupplies > 0 && slot.turnaroundQueue.length > 0 &&
+             slot.turnaroundQueue[0].readyAtSimTime <= nextSimTime) {
+        const completed = slot.turnaroundQueue.shift()!;
+        slot.turnaroundSupplies -= 1;
+        slot.readyAirframes += 1;
+        logs.push({
+          id: `turnaround_ready_${unit.id}_${slot.slotId}_${completed.sortieId}_${nextSimTime}`,
+          simTime: nextSimTime,
+          side: unit.side,
+          category: 'EVENT',
+          severity: 'info',
+          title: `${slot.squadronName} 完成整备`,
+          message: `回收波次 ${completed.sortieId} 已完成加油挂弹，可再次出动；剩余补给 ${slot.turnaroundSupplies} 批。`,
+          unitId: unit.id,
+          aarType: 'turnaround',
+        });
+      }
+    }
+    if (!unitActive) continue;
 
     for (const mount of unit.mounts) {
       if (mount.cooldownRemainingSec > 0) {
@@ -56,25 +122,6 @@ export function advanceUnitPhysics({
           0,
           mount.cooldownRemainingSec - dtSec
         );
-      }
-    }
-
-    for (const slot of unit.hangar || []) {
-      const wasPreparing =
-        slot.cooldownRemainingSec > 0 || slot.readyAirframes === 0;
-      if (slot.cooldownRemainingSec > 0) {
-        slot.cooldownRemainingSec = Math.max(
-          0,
-          slot.cooldownRemainingSec - dtSec
-        );
-      }
-      if (
-        wasPreparing &&
-        slot.cooldownRemainingSec === 0 &&
-        slot.reserveAirframes > 0
-      ) {
-        slot.reserveAirframes -= 1;
-        slot.readyAirframes += 1;
       }
     }
 
@@ -94,6 +141,28 @@ export function advanceUnitPhysics({
 
     const speedLimit =
       configuration.maxSpeedKts * getUnitCapabilities(unit).speedFactor;
+    if (unit.navigationMode === 'formation' && unit.status !== 'returning') {
+      const leader = unit.formationLeaderId ? units[unit.formationLeaderId] : undefined;
+      if (leader && isActiveUnit(leader) && leader.status !== 'returning' && unit.formationOffset) {
+        const desired = turf.destination(
+          leader.position,
+          unit.formationOffset.distanceKm,
+          (leader.heading + unit.formationOffset.relativeBearingDeg + 360) % 360,
+          { units: 'kilometers' }
+        ).geometry.coordinates as [number, number];
+        unit.waypoints = [{
+          position: desired,
+          speedKts: Math.min(speedLimit, leader.targetSpeedKts),
+          altitudeM: Math.max(configuration.platform.minAltitudeM,
+            Math.min(configuration.platform.maxAltitudeM, leader.targetAltitudeM)),
+        }];
+      } else {
+        unit.navigationMode = unit.assignedMissionId ? 'mission' : 'manual';
+        unit.formationLeaderId = undefined;
+        unit.formationOffset = undefined;
+        unit.waypoints = [];
+      }
+    }
     unit.targetSpeedKts = Math.max(
       0,
       Math.min(speedLimit, unit.targetSpeedKts)
@@ -115,24 +184,24 @@ export function advanceUnitPhysics({
         Math.sign(diff) * Math.min(Math.abs(diff), accelKtsPerSec * dtSec);
     }
 
-    if (
-      unit.waypoints.length === 0 &&
-      unit.assignedMissionId &&
-      unit.navigationMode !== 'manual' &&
-      unit.status !== 'returning'
-    ) {
-      const mission = missions.find(
-        (candidate) =>
-          candidate.id === unit.assignedMissionId && candidate.isActive
-      );
-      if (mission && mission.areaPolygon.length >= 3) {
-        unit.waypoints.push(
-          turf.pointOnFeature(
+    const assignedMission = unit.assignedMissionId
+      ? missions.find((candidate) => candidate.id === unit.assignedMissionId && candidate.isActive)
+      : undefined;
+    if (unit.waypoints.length === 0 && assignedMission &&
+        unit.navigationMode !== 'manual' && unit.status !== 'returning') {
+      if (assignedMission.type === 'aew_support' || assignedMission.type === 'tanker_support') {
+        const routeIndex = (unit.missionRouteIndex ?? 0) % assignedMission.areaPolygon.length;
+        unit.waypoints.push({ position: [...assignedMission.areaPolygon[routeIndex]] });
+        unit.missionRouteIndex = (routeIndex + 1) % assignedMission.areaPolygon.length;
+        if (unit.missionState !== 'on_station') unit.missionState = 'ingress';
+      } else if (assignedMission.type !== 'escort') {
+        unit.waypoints.push({
+          position: turf.pointOnFeature(
             turf.polygon([
-              [...mission.areaPolygon, mission.areaPolygon[0]],
+              [...assignedMission.areaPolygon, assignedMission.areaPolygon[0]],
             ])
-          ).geometry.coordinates as [number, number]
-        );
+          ).geometry.coordinates as [number, number],
+        });
       }
     }
 
@@ -141,33 +210,63 @@ export function advanceUnitPhysics({
 
     if (unit.waypoints.length > 0) {
       const targetWaypoint = unit.waypoints[0];
+      if (targetWaypoint.speedKts !== undefined) {
+        unit.targetSpeedKts = Math.max(0, Math.min(speedLimit, targetWaypoint.speedKts));
+      }
+      if (targetWaypoint.altitudeM !== undefined) {
+        unit.targetAltitudeM = Math.max(configuration.platform.minAltitudeM,
+          Math.min(configuration.platform.maxAltitudeM, targetWaypoint.altitudeM));
+      }
       const distanceToWaypointKm = getDistanceKm(
         unit.position,
-        targetWaypoint
+        targetWaypoint.position
       );
-      unit.heading = getBearingDeg(unit.position, targetWaypoint);
+      unit.heading = getBearingDeg(unit.position, targetWaypoint.position);
 
       if (distanceToWaypointKm <= stepDistKm * 1.25) {
-        unit.position = [...targetWaypoint];
+        if (!isRouteAllowed(unit.domain, unit.position, targetWaypoint.position, environment)) {
+          unit.speedKts = unit.targetSpeedKts = 0;
+          unit.waypoints = [];
+          logs.push({ id: `environment_block_${unit.id}_${nextSimTime}`, simTime: nextSimTime,
+            side: unit.side, category: 'DOCTRINE', severity: 'warning',
+            title: `${unit.callsign} 航路被环境边界阻断`, message: '海陆域规则拒绝本段移动，单位已停车等待新命令。',
+            position: [...unit.position], unitId: unit.id });
+          continue;
+        }
+        unit.position = [...targetWaypoint.position];
         unit.waypoints.shift();
+        if (assignedMission?.type === 'aew_support' || assignedMission?.type === 'tanker_support') {
+          unit.missionState = 'on_station';
+        }
       } else {
-        unit.position = turf.destination(
+        const candidate = turf.destination(
           unit.position,
           stepDistKm,
           unit.heading,
           { units: 'kilometers' }
         ).geometry.coordinates as [number, number];
+        if (isRouteAllowed(unit.domain, unit.position, candidate, environment)) unit.position = candidate;
+        else {
+          unit.speedKts = unit.targetSpeedKts = 0;
+          unit.waypoints = [];
+          logs.push({ id: `environment_block_${unit.id}_${nextSimTime}`, simTime: nextSimTime,
+            side: unit.side, category: 'DOCTRINE', severity: 'warning',
+            title: `${unit.callsign} 航路被环境边界阻断`, message: '海陆域规则拒绝本段移动，单位已停车等待新命令。',
+            position: [...unit.position], unitId: unit.id });
+        }
       }
     } else {
       if (unit.domain === 'air') {
         unit.heading = (unit.heading + 1.8 * dtSec) % 360;
       }
-      unit.position = turf.destination(
+      const candidate = turf.destination(
         unit.position,
         stepDistKm,
         unit.heading,
         { units: 'kilometers' }
       ).geometry.coordinates as [number, number];
+      if (isRouteAllowed(unit.domain, unit.position, candidate, environment)) unit.position = candidate;
+      else unit.speedKts = unit.targetSpeedKts = 0;
     }
   }
 }

@@ -1,5 +1,7 @@
 # AEGIS-CMO 优化路线完成报告
 
+> 本文记录 2026-10-30 的上一轮架构优化基线；后续完整兵棋产品化交付与最新测试数据见 [`docs/FINAL_VERIFICATION.md`](docs/FINAL_VERIFICATION.md)。
+
 **完成日期**：2026-10-30  
 **状态**：本轮四项遗留工作全部完成  
 **范围**：仿真引擎模块化、指定 UI 渲染优化、测试金字塔、TypeDoc API 文档

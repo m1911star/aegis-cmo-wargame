@@ -11,6 +11,7 @@ const OUTCOME_LABELS = {
 
 export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const scenario = useWargameStore((state) => state.currentScenario);
+  const allObjectives = useWargameStore((state) => state.objectives);
   const side = useWargameStore((state) => state.playerSide);
   const progress = useWargameStore(
     useShallow((state) => state.objectiveProgress)
@@ -21,8 +22,8 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
     Math.ceil((state.simTime - state.startTime) / 1000)
   );
   const objectives = useMemo(
-    () => scenario.objectives?.filter((objective) => objective.side === side) ?? [],
-    [scenario.objectives, side]
+    () => allObjectives.filter((objective) => objective.side === side),
+    [allObjectives, side]
   );
   const outcome = result?.outcomes[side === 'BLUE' ? 'BLUE' : 'RED'];
   const remaining = Math.max(

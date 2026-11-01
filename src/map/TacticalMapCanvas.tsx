@@ -1,15 +1,12 @@
-import { observeMissile } from '../engine/sensors';
-import { getUnitCapabilities, isActiveUnit } from '../engine/unitCapabilities';
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import ms from 'milsymbol';
-import * as turf from '@turf/turf';
 import { useWargameStore } from '../store/useWargameStore';
+import { projectTacticalState } from './tacticalProjection';
 import { createOfflineBasemap } from './offlineBasemap';
 import { installTacticalLayers } from './tacticalLayers';
 import { BasemapLoader, BASEMAP_PRESETS, initialBasemapState, basemapFallbackImage, type BasemapMode, type BasemapState } from './basemaps';
-import { calculateRadarHorizonKm } from '../engine/simulationEngine';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { getBearingDeg, getDistanceKm } from '../engine/simulationEngine';
 
 // ============================================================================
 // AEGIS-CMO // MapLibre GL + milsymbol 高性能 WebGL 战术态势沙盘组件
@@ -24,6 +21,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
   const setBasemapMode = useWargameStore((s) => s.setBasemapMode);
   const [basemapState, setBasemapState] = useState<BasemapState>(() => initialBasemapState(basemapMode));
   const [cursorCoord, setCursorCoord] = useState<[number, number]>([124.2, 26.2]);
+  const rulerRef = useRef<{ start?: [number, number]; end?: [number, number] }>({});
+  const [rulerMeasurement, setRulerMeasurement] = useState<{ distanceKm: number; bearingDeg: number } | null>(null);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
   // The map layers subscribe imperatively; React only needs the stable banner label.
@@ -216,6 +215,18 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
       }
     });
 
+    const syncRulerLayer = () => {
+      const { start, end } = rulerRef.current;
+      const features: GeoJSON.Feature[] = [];
+      if (start) features.push({ type: 'Feature', properties: { endpoint: 'start' }, geometry: { type: 'Point', coordinates: start } });
+      if (end) features.push({ type: 'Feature', properties: { endpoint: 'end' }, geometry: { type: 'Point', coordinates: end } });
+      if (start && end) features.push({
+        type: 'Feature', properties: { kind: 'ruler' },
+        geometry: { type: 'LineString', coordinates: [start, end] },
+      });
+      (map.getSource('ruler-source') as maplibregl.GeoJSONSource)?.setData({ type: 'FeatureCollection', features });
+    };
+
     // ------------------------------------------------------------------------
     // 初始化全部战术 GeoJSON 数据源与图层并绑定 Zustand 瞬态同步
     // ------------------------------------------------------------------------
@@ -224,422 +235,54 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
       // Once the last tactical layer exists, it is safe to populate their data.
       if (!map.getLayer('units-symbol-layer')) return;
       const state = useWargameStore.getState();
-      const {
-        units,
-        contacts,
-        weaponsInFlight,
-        explosions,
-        missions,
-        referencePoints,
-        activePerspective,
-        selectedUnitId: selUnitId,
-        selectedContactId: selContactId,
-        mapLayers,
-        catalog,
-      } = state;
-
-      // 1. 当前视角可见的真实单位 (Friendly / GOD)
-      const visibleUnits = Object.values(units).filter(
-        (u) =>
-          isActiveUnit(u) &&
-          (activePerspective === 'GOD' || u.side === activePerspective)
-      );
-
-      // 2. 当前视角可见的情报接触 (Contacts - 仅在 RED 或 BLUE 视角显示敌方接触)
-      const visibleContacts =
-        activePerspective === 'GOD'
-          ? []
-          : Object.values(contacts).filter(
-              (c) => c.observerSide === activePerspective
-            );
-
-      // 3. 巡逻任务区域多边形 (Missions)
-      const missionFeatures: GeoJSON.Feature[] = [];
-      if (mapLayers.showMissions) {
-        for (const m of missions) {
-          if (activePerspective !== 'GOD' && m.side !== activePerspective)
-            continue;
-          if (m.areaPolygon.length >= 3) {
-            const closedRing = [...m.areaPolygon, m.areaPolygon[0]];
-            missionFeatures.push({
-              type: 'Feature',
-              properties: {
-                id: m.id,
-                name: `${m.name} [${m.isActive ? 'ACTIVE' : 'STANDBY'}]`,
-                side: m.side,
-                isActive: m.isActive,
-              },
-              geometry: {
-                type: 'Polygon',
-                coordinates: [closedRing],
-              },
-            });
-          }
-        }
-      }
+      const projection = projectTacticalState({
+        units: state.units,
+        contacts: state.contacts,
+        weaponsInFlight: state.weaponsInFlight,
+        explosions: state.explosions,
+        missions: state.missions,
+        referencePoints: state.referencePoints,
+        activePerspective: state.activePerspective,
+        selectedUnitId: state.selectedUnitId,
+        selectedContactId: state.selectedContactId,
+        mapLayers: state.mapLayers,
+        catalog: state.catalog,
+        simTime: state.simTime,
+      });
       (map.getSource('missions-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: missionFeatures,
+        type: 'FeatureCollection', features: projection.missions,
       });
 
-      // 4. 传感器探测圈与武器射程包线 (Envelopes: Radar / Weapon / Sonar)
-      const envelopeFeatures: GeoJSON.Feature[] = [];
-      for (const u of visibleUnits) {
-        const isSelected = u.id === selUnitId;
-        const spec = catalog.platforms[u.platformId];
-        if (!spec) continue;
-        const configuration = resolveUnitConfiguration(catalog, u.platformId, u.activeLoadoutId);
-
-        // 雷达包线 (开启全局雷达圈或当前选中该算子)
-        if ((mapLayers.showRadarRings || isSelected) && u.doctrine.emconRadar && getUnitCapabilities(u).radarFactor > 0) {
-          for (const sId of configuration.sensorIds) {
-            const sensor = catalog.sensors[sId];
-            if (
-              sensor &&
-              (sensor.type === 'radar_air_surface' || sensor.type === 'radar_oth')
-            ) {
-              // 同时展示最大对空探测包线，以及如果是选中舰艇则额外展示对12m掠海目标的地球曲率视距内圈！
-              envelopeFeatures.push(
-                turf.circle(u.position, sensor.maxRangeKm * getUnitCapabilities(u).radarFactor, {
-                  steps: 64,
-                  units: 'kilometers',
-                  properties: {
-                    ringKind: 'radar',
-                    side: u.side,
-                    isSelected,
-                    label: `${u.callsign} 雷达包线 (${sensor.maxRangeKm}km)`,
-                  },
-                })
-              );
-
-              if (isSelected && u.domain === 'surface') {
-                const seaSkimmerHorizonKm = calculateRadarHorizonKm(
-                  u.altitudeM,
-                  spec.radarAntennaHeightM,
-                  12
-                );
-                envelopeFeatures.push(
-                  turf.circle(u.position, seaSkimmerHorizonKm, {
-                    steps: 48,
-                    units: 'kilometers',
-                    properties: {
-                      ringKind: 'horizon',
-                      side: u.side,
-                      isSelected: true,
-                      label: `掠海视距盲区界 (${seaSkimmerHorizonKm.toFixed(0)}km)`,
-                    },
-                  })
-                );
-              }
-            }
-          }
-        }
-
-        // 武器射程包线（为避免画面杂乱，选中单元必显，或开启全局武器圈时显示主战武器最大射程）
-        if (mapLayers.showWeaponRings || isSelected) {
-          const maxWeaponMount = u.mounts
-            .filter((m) => m.currentAmmo > 0)
-            .sort((a, b) => {
-              const wa = catalog.weapons[a.weaponId]?.maxRangeKm || 0;
-              const wb = catalog.weapons[b.weaponId]?.maxRangeKm || 0;
-              return wb - wa;
-            })[0];
-
-          if (maxWeaponMount) {
-            const wSpec = catalog.weapons[maxWeaponMount.weaponId];
-            if (wSpec && (isSelected || u.category === 'sam_battery' || u.category === 'destroyer')) {
-              envelopeFeatures.push(
-                turf.circle(u.position, wSpec.maxRangeKm, {
-                  steps: 64,
-                  units: 'kilometers',
-                  properties: {
-                    ringKind: 'weapon',
-                    side: u.side,
-                    isSelected,
-                    label: `${wSpec.codeName} 射程 (${wSpec.maxRangeKm}km)`,
-                  },
-                })
-              );
-            }
-          }
-        }
-
-        // 声呐包线
-        if (
-          (mapLayers.showSonarRings || isSelected) &&
-          (u.domain === 'subsurface' || u.domain === 'surface')
-        ) {
-          for (const sId of configuration.sensorIds) {
-            const sensor = catalog.sensors[sId];
-            if (sensor && sensor.type === 'sonar_passive') {
-              envelopeFeatures.push(
-                turf.circle(u.position, sensor.maxRangeKm * getUnitCapabilities(u).radarFactor, {
-                  steps: 48,
-                  units: 'kilometers',
-                  properties: {
-                    ringKind: 'sonar',
-                    side: u.side,
-                    isSelected,
-                  },
-                })
-              );
-            }
-          }
-        }
-      }
       (map.getSource('envelopes-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: envelopeFeatures,
+        type: 'FeatureCollection', features: projection.envelopes,
       });
-
-      // 5. AOU 不确定性区域多边形 (Area of Uncertainty)
-      const aouFeatures: GeoJSON.Feature[] = [];
-      if (mapLayers.showAouPolygons) {
-        for (const c of visibleContacts) {
-          if (c.uncertaintyPolygon && c.uncertaintyPolygon.length >= 4) {
-            aouFeatures.push({
-              type: 'Feature',
-              properties: {
-                id: c.id,
-                radiusKm: c.uncertaintyRadiusKm,
-                label: `AOU ±${c.uncertaintyRadiusKm}km`,
-              },
-              geometry: {
-                type: 'Polygon',
-                coordinates: [c.uncertaintyPolygon],
-              },
-            });
-          }
-        }
-      }
       (map.getSource('aou-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: aouFeatures,
+        type: 'FeatureCollection', features: projection.aou,
       });
 
-      // 6. 航路点与速度矢量线 (Waypoints & Heading Vectors)
-      const waypointLineFeatures: GeoJSON.Feature[] = [];
-      const waypointNodeFeatures: GeoJSON.Feature[] = [];
-      if (mapLayers.showWaypoints) {
-        for (const u of visibleUnits) {
-          if (u.waypoints.length > 0) {
-            const coords = [u.position, ...u.waypoints];
-            waypointLineFeatures.push({
-              type: 'Feature',
-              properties: {
-                unitId: u.id,
-                side: u.side,
-                isSelected: u.id === selUnitId,
-              },
-              geometry: {
-                type: 'LineString',
-                coordinates: coords,
-              },
-            });
-            u.waypoints.forEach((wp, idx) => {
-              waypointNodeFeatures.push({
-                type: 'Feature',
-                properties: {
-                  unitId: u.id,
-                  label: `WP-${idx + 1}`,
-                  side: u.side,
-                },
-                geometry: {
-                  type: 'Point',
-                  coordinates: wp,
-                },
-              });
-            });
-          }
-
-          // 绘制 90 秒预测航向速度矢量线
-          if (u.speedKts > 5) {
-            const vecKm = Math.min(45, Math.max(12, u.speedKts * 0.06));
-            const tip = turf.destination(u.position, vecKm, u.heading, {
-              units: 'kilometers',
-            });
-            waypointLineFeatures.push({
-              type: 'Feature',
-              properties: {
-                unitId: u.id,
-                side: u.side,
-                isVector: true,
-              },
-              geometry: {
-                type: 'LineString',
-                coordinates: [u.position, tip.geometry.coordinates],
-              },
-            });
-          }
-        }
-      }
       (map.getSource('waypoints-line-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: waypointLineFeatures,
+        type: 'FeatureCollection', features: projection.waypointLines,
       });
       (map.getSource('waypoints-node-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: waypointNodeFeatures,
+        type: 'FeatureCollection', features: projection.waypointNodes,
       });
-
-      // 7. 飞行中的导弹与尾迹 (Missiles & Trails)
-      const missilePointFeatures: GeoJSON.Feature[] = [];
-      const missileTrailFeatures: GeoJSON.Feature[] = [];
-      for (const msl of Object.values(weaponsInFlight)) {
-        // 迷雾下：己方发射的导弹始终可见；敌方发射的导弹在进入雷达/预警范围（280km内）或 GOD 视角可见
-        const isVisible =
-          activePerspective === 'GOD' ||
-          msl.side === activePerspective ||
-          !!observeMissile(activePerspective, msl, units, catalog, state.simTime);
-        if (!isVisible) continue;
-
-        const iconKey =
-          msl.targetType === 'missile'
-            ? 'MISSILE_INT'
-            : msl.side === 'RED'
-            ? 'MISSILE_RED'
-            : 'MISSILE_BLUE';
-
-        missilePointFeatures.push({
-          type: 'Feature',
-          properties: {
-            id: msl.id,
-            name: activePerspective === 'GOD' || msl.side === activePerspective ? msl.name : '来袭武器',
-            side: msl.side,
-            heading: msl.heading,
-            icon: iconKey,
-            speedMach: (msl.speedKts / 661).toFixed(1),
-          },
-          geometry: {
-            type: 'Point',
-            coordinates: msl.position,
-          },
-        });
-
-        if (msl.trail.length >= 2 && (activePerspective === 'GOD' || msl.side === activePerspective)) {
-          missileTrailFeatures.push({
-            type: 'Feature',
-            properties: {
-              id: msl.id,
-              side: msl.side,
-              isInterceptor: msl.targetType === 'missile',
-            },
-            geometry: {
-              type: 'LineString',
-              coordinates: msl.trail,
-            },
-          });
-        }
-      }
       (map.getSource('missiles-point-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: missilePointFeatures,
+        type: 'FeatureCollection', features: projection.missilePoints,
       });
       (map.getSource('missiles-trail-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: missileTrailFeatures,
-      });
-
-      // 8. 算子符号与情报 Contact 符号图层
-      const unitFeatures: GeoJSON.Feature[] = visibleUnits.map((u) => {
-        const isSel = u.id === selUnitId;
-        const iconId = `${u.sidc}__${isSel ? 'SELECTED' : 'NORMAL'}`;
-        const altStr =
-          u.domain === 'air'
-            ? `FL${Math.round(u.altitudeM / 30.48)
-                .toString()
-                .padStart(3, '0')}`
-            : u.domain === 'subsurface'
-            ? `${Math.round(u.altitudeM)}m`
-            : `${Math.round(u.speedKts)}kt`;
-
-        return {
-          type: 'Feature',
-          properties: {
-            id: u.id,
-            entityType: 'unit',
-            callsign: u.callsign,
-            name: u.name,
-            side: u.side,
-            icon: iconId,
-            subLabel: `${u.callsign} [${altStr}]`,
-            hpPct: Math.round((u.hp / u.maxHp) * 100),
-            emconStr: u.doctrine.emconRadar ? 'RADAR:ON' : 'EMCON',
-          },
-          geometry: {
-            type: 'Point',
-            coordinates: u.position,
-          },
-        };
-      });
-
-      const contactFeatures: GeoJSON.Feature[] = visibleContacts.map((c) => {
-        const isSel = c.id === selContactId;
-        const iconId = `${c.sidc}__${isSel ? 'SELECTED' : 'CONTACT'}`;
-        return {
-          type: 'Feature',
-          properties: {
-            id: c.id,
-            entityType: 'contact',
-            actualUnitId: c.actualUnitId,
-            name: c.displayName,
-            icon: iconId,
-            subLabel: `${c.displayName} (±${c.uncertaintyRadiusKm}km)`,
-          },
-          geometry: {
-            type: 'Point',
-            coordinates: c.estimatedPosition,
-          },
-        };
+        type: 'FeatureCollection', features: projection.missileTrails,
       });
 
       (map.getSource('units-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: [...unitFeatures, ...contactFeatures],
+        type: 'FeatureCollection', features: projection.units,
       });
-
-      // 9. 参考点 (Reference Points)
-      const rpFeatures: GeoJSON.Feature[] = mapLayers.showReferencePoints
-        ? referencePoints
-            .filter(
-              (rp) =>
-                activePerspective === 'GOD' || rp.side === activePerspective
-            )
-            .map((rp) => ({
-              type: 'Feature',
-              properties: {
-                id: rp.id,
-                name: rp.name,
-                icon: rp.side === 'RED' ? 'RP_MARKER_RED' : 'RP_MARKER_BLUE',
-              },
-              geometry: {
-                type: 'Point',
-                coordinates: rp.position,
-              },
-            }))
-        : [];
       (map.getSource('rp-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: rpFeatures,
+        type: 'FeatureCollection', features: projection.referencePoints,
       });
-
-      // 10. 爆炸与拦截波纹特效 (Explosions)
-      const expFeatures: GeoJSON.Feature[] = explosions.filter((exp) => activePerspective === 'GOD' || exp.side === activePerspective).map((exp) => ({
-        type: 'Feature',
-        properties: {
-          id: exp.id,
-          type: exp.type,
-          label: exp.label,
-        },
-        geometry: {
-          type: 'Point',
-          coordinates: exp.position,
-        },
-      }));
       (map.getSource('explosions-source') as maplibregl.GeoJSONSource)?.setData({
-        type: 'FeatureCollection',
-        features: expFeatures,
+        type: 'FeatureCollection', features: projection.explosions,
       });
+      syncRulerLayer();
     };
 
     map.on('style.load', () => {
@@ -663,6 +306,27 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
         Number(e.lngLat.lng.toFixed(4)),
         Number(e.lngLat.lat.toFixed(4)),
       ];
+
+      if (state.interactionMode === 'measure') {
+        const current = rulerRef.current;
+        if (!current.start || current.end) {
+          rulerRef.current = { start: clickedCoord };
+          setRulerMeasurement(null);
+        } else {
+          rulerRef.current = { start: current.start, end: clickedCoord };
+          setRulerMeasurement({
+            distanceKm: getDistanceKm(current.start, clickedCoord),
+            bearingDeg: getBearingDeg(current.start, clickedCoord),
+          });
+        }
+        syncRulerLayer();
+        return;
+      }
+
+      if (state.interactionMode === 'move_unit' && state.selectedUnitId) {
+        state.moveUnitInSandbox(state.selectedUnitId, clickedCoord);
+        return;
+      }
 
       // 模式 A: F3 规划航路点
       if (state.interactionMode === 'plot_waypoint' && state.selectedUnitId) {
@@ -799,6 +463,13 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
             ? `加载真实底图中 · 当前${BASEMAP_PRESETS[basemapState.active].label}`
             : basemapState.active === 'offline' ? '本地简化轮廓 · 非真实地理数据' : 'OpenFreeMap / OpenStreetMap · 非卫星影像')}
         </p>
+        <button
+          aria-pressed={interactionMode === 'measure'}
+          onClick={() => setInteractionMode(interactionMode === 'measure' ? 'select' : 'measure')}
+          className="w-full mt-1 px-2 py-1 rounded bg-yellow-500/15 border border-yellow-500/40 text-yellow-200 cursor-pointer"
+        >
+          测距尺
+        </button>
         {(basemapState.status === 'error' || basemapState.status === 'degraded') && <div className="flex gap-2 mt-1">
           <button type="button" className="text-cyan-300 underline" onClick={() => { void basemapLoaderRef.current?.select(basemapMode, true); }}>重试在线地图</button>
           <button type="button" className="text-slate-300 underline" onClick={() => setBasemapMode('offline')}>使用离线示意</button>
@@ -825,6 +496,16 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
               [参考点标绘模式] 点击海图任意位置部署战术参考点 · 右键取消
             </span>
           )}
+          {interactionMode === 'measure' && (
+            <span className="text-yellow-200">
+              [测距尺] 依次点击起点和终点，显示大圆距离与真方位 · 再次点击开始新测量
+            </span>
+          )}
+          {interactionMode === 'move_unit' && (
+            <span className="text-emerald-200">
+              [沙盒单位移动] 点击海图目标位置移动 {selectedUnitCallsign} · 海陆边界仍会校验
+            </span>
+          )}
           {interactionMode === 'spawn_unit' && (
             <span className="text-emerald-200">
               [实时兵力投放模式] 点击海图目标海域/空域立即部署新增作战算子 · 右键取消
@@ -840,13 +521,18 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
       )}
 
       {/* 左下角经纬度遥测坐标与图例浮窗 */}
-      <div className="map-status tactical-panel">
+      <div className="map-status tactical-panel" style={{ zIndex: 30, pointerEvents: 'auto' }}>
         <div className="flex items-center gap-1.5">
           <span className="text-cyan-400 font-semibold">光标</span>
           <span>
             {cursorCoord[1].toFixed(3)}°N, {cursorCoord[0].toFixed(3)}°E
           </span>
         </div>
+        {rulerMeasurement && (
+          <div className="text-yellow-200 font-semibold text-[10px]">
+            {rulerMeasurement.distanceKm.toFixed(1)} km · {rulerMeasurement.bearingDeg.toFixed(1)}°T
+          </div>
+        )}
         <div className="map-legend">
           <span className="flex items-center gap-1">
             <i className="w-2.5 h-0.5 bg-cyan-400 inline-block" /> 雷达视距圈

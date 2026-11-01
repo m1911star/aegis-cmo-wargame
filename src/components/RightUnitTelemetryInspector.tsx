@@ -1,6 +1,6 @@
 import { FireControlDiagnostics } from './FireControlDiagnostics';
 import { getUnitCapabilities } from '../engine/unitCapabilities';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import ms from 'milsymbol';
 import {
   Navigation,
@@ -16,7 +16,7 @@ import {
   calculateRadarHorizonKm,
 } from '../engine/simulationEngine';
 import { classificationLabels, domainLabels, statusLabels, threatLabels } from '../ui/labels';
-import type { ROEStatus } from '../types/wargame';
+import type { Domain, ROEStatus, ThreatLevel } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 
 const EMPTY_MISSIONS: never[] = [];
@@ -37,12 +37,20 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
   const startManualEngage = useWargameStore((s) => s.startManualEngage);
   const clearUnitWaypoints = useWargameStore((s) => s.clearUnitWaypoints);
+  const updateUnitWaypoint = useWargameStore((s) => s.updateUnitWaypoint);
+  const removeUnitWaypoint = useWargameStore((s) => s.removeUnitWaypoint);
+  const setGroupFormation = useWargameStore((s) => s.setGroupFormation);
+  const requestAirRefuel = useWargameStore((s) => s.requestAirRefuel);
+  const deployCarriedPlatform = useWargameStore((s) => s.deployCarriedPlatform);
   const updateUnitDoctrine = useWargameStore((s) => s.updateUnitDoctrine);
   const updateUnitKinematics = useWargameStore((s) => s.updateUnitKinematics);
   const switchUnitLoadout = useWargameStore((s) => s.switchUnitLoadout);
   const launchCarrierAircraft = useWargameStore((s) => s.launchCarrierAircraft);
   const assignUnitMission = useWargameStore((s) => s.assignUnitMission);
+  const [hangarLoadoutSelections, setHangarLoadoutSelections] = useState<Record<string, string>>({});
+  const [selectedTankerId, setSelectedTankerId] = useState('');
 
+  const units = useWargameStore((s) => s.units);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
   const selectedUnit = rawUnit && (rawUnit.side === playerSide || playMode === 'sandbox') ? rawUnit : null;
@@ -92,6 +100,18 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
       ),
     };
   }, [selectedUnit?.altitudeM, platformSpec?.radarAntennaHeightM]);
+  const availableTankers = useMemo(
+    () => selectedUnit ? Object.values(units).filter((unit) => unit.side === selectedUnit.side &&
+      unit.category === 'tanker' && unit.hp > 0 && unit.status !== 'destroyed' && unit.status !== 'recovered' &&
+      unit.aarFuelRemainingSec > 0) : [],
+    [units, selectedUnit?.side]
+  );
+  const selectedTanker = availableTankers.find((unit) => unit.id === selectedTankerId) ?? availableTankers[0];
+  const groupUnits = useMemo(
+    () => selectedUnit ? Object.values(units).filter((unit) => unit.parentGroupId === selectedUnit.parentGroupId &&
+      unit.hp > 0 && unit.status !== 'destroyed' && unit.status !== 'recovered') : [],
+    [units, selectedUnit?.parentGroupId]
+  );
   const eligibleMissions = useMemo(
     () => selectedUnit
       ? missions.filter((mission) => mission.side === selectedUnit.side)
@@ -134,9 +154,10 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-400">定位误差半径:</span>
+            <span className="text-slate-400">定位几何:</span>
             <span className="text-amber-400 font-bold">
-              ± {selectedContact.uncertaintyRadiusKm} km
+              {selectedContact.uncertaintyKind === 'bearing_corridor' ? '方位走廊' :
+                selectedContact.uncertaintyKind === 'ellipse' ? '交叉定位椭圆' : '误差圆'} · {selectedContact.uncertaintyRadiusKm} km
             </span>
           </div>
           <div className="flex justify-between">
@@ -202,6 +223,37 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
         {selectedUnit.domain === 'air' && <p>剩余燃油预算：{Math.floor(selectedUnit.fuelRemainingSec / 60)} 分钟（按巡航基准）</p>}
         <p>导航：{selectedUnit.status === 'returning' ? '资源约束返航' : selectedUnit.navigationMode === 'manual' ? '人工指挥' : '任务自动驾驶'}</p>
       </div>
+
+      {selectedUnit.category === 'tanker' && (
+        <div className="p-2 rounded bg-sky-950/30 border border-sky-500/30 text-[11px] text-sky-200">
+          可转移燃油：{Math.round(selectedUnit.aarFuelRemainingSec)} 秒 · 等待队列 {selectedUnit.aarQueue.length} 架
+        </div>
+      )}
+      {selectedUnit.domain === 'air' && selectedUnit.category !== 'tanker' && availableTankers.length > 0 && (
+        <div className="p-2 rounded bg-sky-950/30 border border-sky-500/30 flex items-center gap-2 text-[11px]">
+          <select aria-label="选择加油机" value={selectedTanker?.id ?? ''} onChange={(event) => setSelectedTankerId(event.target.value)}
+            className="min-w-0 flex-1 bg-slate-900 rounded p-1 text-sky-200">
+            {availableTankers.map((tanker) => <option key={tanker.id} value={tanker.id}>{tanker.callsign} · {Math.round(tanker.aarFuelRemainingSec)}秒</option>)}
+          </select>
+          <button disabled={!selectedTanker || !!selectedUnit.airRefuelState || selectedUnit.fuelRemainingSec >= selectedUnit.maxFuelSec}
+            onClick={() => selectedTanker && requestAirRefuel(selectedUnit.id, selectedTanker.id)}
+            className="px-2 py-1 rounded bg-sky-500 text-slate-950 font-bold disabled:opacity-35">
+            {selectedUnit.airRefuelState ? selectedUnit.airRefuelState.phase === 'rendezvous' ? '会合中' : '加油中' : '请求加油'}
+          </button>
+        </div>
+      )}
+      {Object.entries(selectedUnit.deployableInventory).some(([, count]) => count > 0) && (
+        <div className="p-2 rounded bg-violet-950/30 border border-violet-500/30 space-y-1 text-[11px]">
+          <div className="text-violet-300 font-bold">携带式无人/诱饵平台</div>
+          {Object.entries(selectedUnit.deployableInventory).map(([platformId, count]) => (
+            <div key={platformId} className="flex items-center justify-between gap-2">
+              <span>{catalog.platforms[platformId]?.name ?? platformId} · {count}</span>
+              <button disabled={count <= 0} onClick={() => deployCarriedPlatform(selectedUnit.id, platformId)}
+                className="px-2 py-1 rounded bg-violet-500 text-white disabled:opacity-35">释放</button>
+            </div>
+          ))}
+        </div>
+      )}
       {/* 2. 快捷战术动作按钮组 (F3 航路点 / F1 手动交战) */}
       <div className="unit-actions grid grid-cols-2 gap-2">
         <button
@@ -235,6 +287,17 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           <Crosshair className="w-3.5 h-3.5" />
           <span>[F1] 手动齐射</span>
         </button>
+
+        {playMode === 'sandbox' && (
+          <button
+            onClick={() => setInteractionMode(interactionMode === 'move_unit' ? 'select' : 'move_unit')}
+            className={`col-span-2 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded text-xs font-bold border cursor-pointer ${
+              interactionMode === 'move_unit' ? 'bg-emerald-500 text-slate-950 border-emerald-300' :
+                'bg-emerald-950/60 text-emerald-200 border-emerald-500/40'}`}
+          >
+            沙盒移动单位
+          </button>
+        )}
       </div>
 
       {/* 3. 运动学遥测与速度/高度控制 (F2 Kinematics) */}
@@ -347,6 +410,68 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
             />
           </div>
         )}
+
+        {groupUnits.length > 1 && (
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-900 text-[10px]">
+            <span className="text-slate-400">
+              编队: {selectedUnit.navigationMode === 'formation'
+                ? `跟随 ${units[selectedUnit.formationLeaderId ?? '']?.callsign ?? '领队'}`
+                : `${groupUnits.length} 个可用单位`}
+            </span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setGroupFormation(selectedUnit.parentGroupId, selectedUnit.id, 10)}
+                className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 cursor-pointer"
+              >
+                设为编队领队
+              </button>
+              <button
+                onClick={() => setGroupFormation(selectedUnit.parentGroupId)}
+                className="px-2 py-1 rounded bg-slate-800 text-slate-300 cursor-pointer"
+              >
+                解散编队
+              </button>
+            </div>
+          </div>
+        )}
+
+        {selectedUnit.waypoints.length > 0 && (
+          <div className="space-y-1.5 pt-2 border-t border-slate-900">
+            <div className="text-[10px] text-cyan-300 font-bold">分段航路参数</div>
+            {selectedUnit.waypoints.map((waypoint, index) => (
+              <div key={`${waypoint.position.join(',')}-${index}`} className="grid grid-cols-[auto_1fr_1fr_auto] gap-1 items-center text-[10px]">
+                <span className="text-slate-400">WP-{index + 1}</span>
+                <input
+                  aria-label={`WP-${index + 1} 速度`}
+                  type="number"
+                  min={0}
+                  max={configuration.maxSpeedKts}
+                  placeholder="继承速度"
+                  value={waypoint.speedKts ?? ''}
+                  onChange={(event) => updateUnitWaypoint(selectedUnit.id, index, { speedKts: Number(event.target.value) })}
+                  className="min-w-0 bg-slate-900 border border-slate-700 rounded px-1 py-1 text-slate-200"
+                />
+                <input
+                  aria-label={`WP-${index + 1} 高度或潜深`}
+                  type="number"
+                  min={platformSpec.minAltitudeM}
+                  max={platformSpec.maxAltitudeM}
+                  placeholder="继承高度"
+                  value={waypoint.altitudeM ?? ''}
+                  onChange={(event) => updateUnitWaypoint(selectedUnit.id, index, { altitudeM: Number(event.target.value) })}
+                  className="min-w-0 bg-slate-900 border border-slate-700 rounded px-1 py-1 text-slate-200"
+                />
+                <button
+                  aria-label={`删除 WP-${index + 1}`}
+                  onClick={() => removeUnitWaypoint(selectedUnit.id, index)}
+                  className="text-rose-400 cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 4. 交战条令 (ROE) 与电磁管控 (EMCON) 面板 */}
@@ -438,6 +563,13 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           </button>
         </div>
 
+        <div className="stat-line flex items-center justify-between text-[10px] text-slate-400">
+          <span>软杀伤库存</span>
+          <span className="text-amber-200">
+            箔条 {selectedUnit.countermeasures.chaff} · 红外 {selectedUnit.countermeasures.flares} · 水声 {selectedUnit.countermeasures.acousticDecoys}
+          </span>
+        </div>
+
         {/* 战术挂载方案 (Loadout Profile) 实时切换 */}
         {platformSpec.availableLoadoutIds &&
           platformSpec.availableLoadoutIds.length > 0 && (
@@ -484,6 +616,78 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
                 {num}枚
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-[10px] pt-1 border-t border-slate-900">
+          <label className="space-y-1 text-slate-400">
+            <span className="block">自动开火距离</span>
+            <select
+              aria-label="自动开火最大射程比例"
+              value={selectedUnit.doctrine.automaticFireRangeFraction}
+              onChange={(event) => updateUnitDoctrine(selectedUnit.id, {
+                automaticFireRangeFraction: Number(event.target.value),
+              })}
+              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"
+            >
+              <option value={0.5}>最大射程 50%</option>
+              <option value={0.75}>最大射程 75%</option>
+              <option value={1}>最大射程 100%</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-slate-400">
+            <span className="block">最低弹药保留</span>
+            <input
+              aria-label="自动开火最低弹药保留"
+              type="number"
+              min={0}
+              max={999}
+              value={selectedUnit.doctrine.minimumWeaponReserve}
+              onChange={(event) => updateUnitDoctrine(selectedUnit.id, {
+                minimumWeaponReserve: Number(event.target.value),
+              })}
+              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"
+            />
+          </label>
+          <label className="col-span-2 flex items-center justify-between gap-2 text-slate-400">
+            最低目标威胁
+            <select
+              aria-label="自动开火最低威胁等级"
+              value={selectedUnit.doctrine.minimumAutomaticThreat}
+              onChange={(event) => updateUnitDoctrine(selectedUnit.id, {
+                minimumAutomaticThreat: event.target.value as ThreatLevel,
+              })}
+              className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"
+            >
+              <option value="low">低</option>
+              <option value="medium">中</option>
+              <option value="high">高</option>
+              <option value="critical">危急</option>
+            </select>
+          </label>
+          <div className="col-span-2 space-y-1 text-slate-400">
+            <span className="block">允许自动交战目标域</span>
+            <div className="grid grid-cols-4 gap-1">
+              {(['air', 'surface', 'subsurface', 'land'] as Domain[]).map((domain) => {
+                const enabled = selectedUnit.doctrine.automaticTargetDomains.includes(domain);
+                return (
+                  <button
+                    key={domain}
+                    aria-pressed={enabled}
+                    onClick={() => updateUnitDoctrine(selectedUnit.id, {
+                      automaticTargetDomains: enabled
+                        ? selectedUnit.doctrine.automaticTargetDomains.filter((candidate) => candidate !== domain)
+                        : [...selectedUnit.doctrine.automaticTargetDomains, domain],
+                    })}
+                    className={`px-1 py-1 rounded cursor-pointer ${enabled
+                      ? 'bg-cyan-500/25 text-cyan-200 border border-cyan-500/40'
+                      : 'bg-slate-900 text-slate-500 border border-slate-800'}`}
+                  >
+                    {domainLabels[domain]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -619,45 +823,65 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
             母舰机库与甲板弹射
           </div>
           <div className="space-y-2">
-            {selectedUnit.hangar.map((slot) => (
-              <div
-                key={slot.slotId}
-                className="p-2 rounded bg-slate-950/90 border border-emerald-500/30 space-y-1.5"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-100">
-                    {slot.squadronName}
-                  </span>
-                  <span className="text-[11px] font-bold text-emerald-400">
-                    待命: {slot.readyAirframes}/{slot.totalAirframes} 批
-                  </span>
+            {selectedUnit.hangar.map((slot) => {
+              const selectionKey = `${selectedUnit.id}:${slot.slotId}`;
+              const pendingSelection = hangarLoadoutSelections[selectionKey];
+              const selectedLoadoutId = pendingSelection && slot.availableLoadoutIds.includes(pendingSelection)
+                ? pendingSelection
+                : slot.selectedLoadoutId;
+              return (
+                <div
+                  key={slot.slotId}
+                  className="p-2 rounded bg-slate-950/90 border border-emerald-500/30 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-100">
+                      {slot.squadronName}
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-400">
+                      待命: {slot.readyAirframes}/{slot.totalAirframes} 批
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    回收整备: {slot.turnaroundQueue.length} 批 · 可用补给: {slot.turnaroundSupplies} 批
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <select
+                      aria-label={`${slot.squadronName} 起飞挂载`}
+                      value={selectedLoadoutId}
+                      onChange={(event) => setHangarLoadoutSelections((current) => ({
+                        ...current,
+                        [selectionKey]: event.target.value,
+                      }))}
+                      className="min-w-0 flex-1 bg-slate-900 border border-emerald-500/35 rounded px-2 py-1 text-[10px] text-emerald-100 cursor-pointer"
+                    >
+                      {slot.availableLoadoutIds.map((loadoutId) => (
+                        <option key={loadoutId} value={loadoutId}>
+                          {catalog.loadouts[loadoutId]?.name || loadoutId}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={
+                        slot.readyAirframes <= 0 || slot.cooldownRemainingSec > 0
+                      }
+                      onClick={() =>
+                        launchCarrierAircraft(
+                          selectedUnit.id,
+                          slot.slotId,
+                          selectedLoadoutId
+                        )
+                      }
+                      className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-35 text-slate-950 font-bold text-[11px] cursor-pointer shrink-0"
+                    >
+                      {slot.cooldownRemainingSec > 0
+                        ? `甲板整备 (${slot.cooldownRemainingSec}s)`
+                        : '弹射升空'}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-slate-400 truncate">
-                    挂载:{' '}
-                    {catalog.loadouts[slot.selectedLoadoutId]?.name ||
-                      slot.selectedLoadoutId}
-                  </span>
-                  <button
-                    disabled={
-                      slot.readyAirframes <= 0 || slot.cooldownRemainingSec > 0
-                    }
-                    onClick={() =>
-                      launchCarrierAircraft(
-                        selectedUnit.id,
-                        slot.slotId,
-                        slot.selectedLoadoutId
-                      )
-                    }
-                    className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-35 text-slate-950 font-bold text-[11px] cursor-pointer shrink-0"
-                  >
-                    {slot.cooldownRemainingSec > 0
-                      ? `甲板整备 (${slot.cooldownRemainingSec}s)`
-                      : '弹射升空'}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

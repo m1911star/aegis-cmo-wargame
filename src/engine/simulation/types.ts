@@ -1,10 +1,12 @@
 import type {
+  BattleAarLedger,
   BattleResult,
   CombatLogEntry,
   MissionDefinition,
   ObjectiveProgress,
   RuntimeScenarioEvent,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScenarioObjective,
   ScoreLedger,
   SideId,
@@ -23,6 +25,7 @@ export interface SimulationWorldState {
   battleResult?: BattleResult;
   creditedDamage?: Record<string, number>;
   detectedMissileIds?: string[];
+  aar?: BattleAarLedger;
   startTime?: number;
   simTime: number;
   units: Record<string, RuntimeUnit>;
@@ -31,6 +34,7 @@ export interface SimulationWorldState {
   explosions: TacticalExplosionEffect[];
   missions: MissionDefinition[];
   events?: RuntimeScenarioEvent[];
+  environment?: ScenarioEnvironment;
   victoryConditions?: VictoryConditionRule;
   score: ScoreLedger;
 }

@@ -27,8 +27,10 @@ export type UnitCategory =
   | 'stealth_fighter' // 第五代隐身战机
   | 'ew_aircraft'     // 专用电子战咆哮者/伴随干扰机
   | 'awacs'           // 空中预警指挥机
+  | 'tanker'          // 空中加油机
   | 'bomber'          // 远程战略/战术轰炸机
   | 'mpa_uav'         // 反潜巡逻机 / 长航时高空侦察无人机
+  | 'decoy'           // 空射诱饵/高仿真假目标
   | 'carrier'         // 航空母舰 / 两栖攻击舰 (具备 Hangar 母舰放飞能力)
   | 'destroyer'       // 大型防空/多用途驱逐舰
   | 'frigate'         // 护卫舰
@@ -149,6 +151,8 @@ export interface EmbarkedHangarSlot {
   totalAirframes: number;       // 机库总架数/编队批次上限
   readyAirframes: number;       // 当前甲板待命可立即弹射批次
   launchCooldownSec: number;    // 波次放飞冷却时间 (秒)
+  turnaroundSec?: number;        // 回收后完成加油/挂弹的整备时间；旧目录默认 launchCooldownSec × 4
+  turnaroundSupplyBatches?: number; // 可供回收机再次出动的有限补给批次；旧目录默认 totalAirframes
 }
 
 export interface PlatformSpec {
@@ -179,6 +183,10 @@ export interface PlatformSpec {
   availableLoadoutIds?: string[]; // 支持切换的挂载方案列表
   mounts: PlatformMountTemplate[]; // Default payload; an explicit Loadout replaces it completely.
   hangarSlots?: EmbarkedHangarSlot[]; // 若为航母/两栖攻击舰/空军基地，可搭载并放飞舰载机！
+  aarFuelCapacitySec?: number;
+  aarTransferRateSecPerSec?: number;
+  canReceiveAar?: boolean;
+  deployables?: { platformId: string; count: number }[];
   description: string;
 }
 
@@ -195,6 +203,7 @@ export interface EquipmentCatalog {
 // ----------------------------------------------------------------------------
 
 export type ROEStatus = 'free' | 'tight' | 'hold';
+export type ThreatLevel = 'low' | 'medium' | 'high' | 'critical';
 
 export interface UnitDoctrine {
   roe: ROEStatus;
@@ -204,12 +213,22 @@ export interface UnitDoctrine {
   autoEvade: boolean;
   engageOpportunityTargets: boolean;
   salvoSize: number;
+  automaticFireRangeFraction: number;
+  minimumWeaponReserve: number;
+  automaticTargetDomains: Domain[];
+  minimumAutomaticThreat: ThreatLevel;
 }
 
 export interface RuntimeWeaponMount extends PlatformMountTemplate {
   weaponName: string;
   currentAmmo: number;
   cooldownRemainingSec: number;
+}
+
+export interface TurnaroundEntry {
+  sortieId: string;
+  previousLoadoutId?: string;
+  readyAtSimTime: number;
 }
 
 export interface RuntimeHangarSlot {
@@ -223,6 +242,45 @@ export interface RuntimeHangarSlot {
   reserveAirframes: number;
   launchCooldownSec: number;
   cooldownRemainingSec: number;
+  turnaroundSec: number;
+  turnaroundSupplies: number;
+  turnaroundQueue: TurnaroundEntry[];
+  activeSortieIds: string[];
+  nextSortieNumber: number;
+}
+
+export interface RouteLeg {
+  position: [number, number];
+  speedKts?: number;
+  altitudeM?: number;
+}
+
+export interface CountermeasureInventory {
+  chaff: number;
+  flares: number;
+  acousticDecoys: number;
+  cooldownUntil: number;
+}
+
+export interface EvasionState {
+  threatContactId: string;
+  untilSimTime: number;
+  resumeStatus: 'operational' | 'engaged';
+  resumeNavigationMode?: RuntimeUnit['navigationMode'];
+  resumeWaypoints: RouteLeg[];
+  resumeMissionTargetId?: string;
+  resumeMissionState?: RuntimeUnit['missionState'];
+  resumeFormationLeaderId?: string;
+  resumeFormationOffset?: RuntimeUnit['formationOffset'];
+}
+
+export interface AirRefuelState {
+  tankerId: string;
+  phase: 'rendezvous' | 'refueling';
+  resumeNavigationMode?: RuntimeUnit['navigationMode'];
+  resumeWaypoints: RouteLeg[];
+  resumeMissionTargetId?: string;
+  resumeMissionState?: RuntimeUnit['missionState'];
 }
 
 export interface RuntimeUnit {
@@ -233,11 +291,17 @@ export interface RuntimeUnit {
   platformId: string;
   activeLoadoutId?: string;     // 当前挂载方案 ID
   hostCarrierId?: string;       // 若由航母/基地放飞，记录母舰 ID
+  hostHangarSlotId?: string;
   recoveryPosition?: [number, number];
-  navigationMode?: 'manual' | 'mission';
+  navigationMode?: 'manual' | 'mission' | 'formation';
+  formationLeaderId?: string;
+  formationOffset?: { relativeBearingDeg: number; distanceKm: number };
   missionTargetId?: string;
+  missionState?: 'ingress' | 'on_station' | 'engaging' | 'egress' | 'recovering';
+  missionRouteIndex?: number;
   nextMissionDecisionTime?: number;
   returnReason?: 'fuel' | 'ammunition';
+  coordinatedAttack?: { contactId: string; releaseAtSimTime: number };
   parentGroupId: string;
   domain: Domain;
   category: UnitCategory;
@@ -249,13 +313,21 @@ export interface RuntimeUnit {
   heading: number;
   speedKts: number;
   targetSpeedKts: number;
-  waypoints: [number, number][];
+  waypoints: RouteLeg[];
 
   hp: number;
   maxHp: number;
   fuelRemainingSec: number;
   maxFuelSec: number;
   status: 'operational' | 'engaged' | 'evading' | 'returning' | 'recovered' | 'destroyed';
+  countermeasures: CountermeasureInventory;
+  countermeasureEffect?: { chaff: boolean; flares: boolean; acoustic: boolean; expiresAtSimTime: number };
+  evasionState?: EvasionState;
+  aarFuelRemainingSec: number;
+  aarQueue: string[];
+  airRefuelState?: AirRefuelState;
+  deployableInventory: Record<string, number>;
+  deployedByUnitId?: string;
 
   doctrine: UnitDoctrine;
   mounts: RuntimeWeaponMount[];
@@ -267,6 +339,14 @@ export interface RuntimeUnit {
 // 情报接触目标 (Contact)
 export type ContactClassification = 'unknown' | 'classified' | 'identified';
 
+export interface BearingObservation {
+  sourceUnitId: string;
+  origin: [number, number];
+  bearingDeg: number;
+  errorDeg: number;
+  maxRangeKm: number;
+}
+
 export interface TacticalContact {
   id: string;
   actualUnitId: string;
@@ -274,12 +354,15 @@ export interface TacticalContact {
   targetSide: SideId;
   domain: Domain;
   classification: ContactClassification;
+  identifiedCategory?: UnitCategory;
   displayName: string;
   sidc: string;
   estimatedPosition: [number, number];
   truePosition: [number, number];
   uncertaintyRadiusKm: number;
+  uncertaintyKind?: 'circle' | 'bearing_corridor' | 'ellipse';
   uncertaintyPolygon?: [number, number][];
+  bearingObservations?: BearingObservation[];
   heading: number;
   speedKts: number;
   altitudeM: number;
@@ -289,7 +372,9 @@ export interface TacticalContact {
   sourceUnitIds?: string[];
   fireControlSourceIds?: string[];
   isJammingDetected?: boolean;  // 是否侦测到对方开启强电磁干扰
-  threatLevel: 'low' | 'medium' | 'high' | 'critical';
+  emitterObserved?: boolean;    // 至少一个己方 ESM 来源当前实际截获了辐射
+  lastEmitterDetectedTime?: number;
+  threatLevel: ThreatLevel;
 }
 
 export interface WeaponInFlight {
@@ -300,7 +385,7 @@ export interface WeaponInFlight {
   shooterId: string;
   shooterName: string;
   targetId: string;
-  targetType: 'unit' | 'missile';
+  targetType: 'unit' | 'missile' | 'area';
   position: [number, number];
   launchPosition: [number, number];
   trail: [number, number][];
@@ -348,7 +433,10 @@ export type MissionType =
   | 'asuw_patrol'
   | 'asw_patrol'
   | 'land_strike'
-  | 'aew_support';
+  | 'aew_support'
+  | 'escort'
+  | 'sead'
+  | 'tanker_support';
 
 export interface MissionDefinition {
   id: string;
@@ -359,6 +447,8 @@ export interface MissionDefinition {
   areaPolygon: [number, number][];
   assignedUnitIds?: string[]; // Legacy input only; normalized to placement.assignedMissionId.
   prosecuteOutsideAreaKm: number;
+  escortUnitId?: string;
+  stationRadiusKm?: number;
   doctrineOverride?: Partial<UnitDoctrine>;
   description: string;
 }
@@ -397,7 +487,7 @@ export interface InitialUnitPlacement {
   altitudeM?: number;
   heading: number;
   speedKts?: number;
-  waypoints?: [number, number][];
+  waypoints?: Array<[number, number] | RouteLeg>;
   doctrine?: Partial<UnitDoctrine>;
   assignedMissionId?: string;
   recoveryPosition?: [number, number];
@@ -442,6 +532,33 @@ export type ScenarioEventAction =
       side: SideId;
       groupId?: string;
       doctrinePatch: Partial<UnitDoctrine>;
+    }
+  | {
+      type: 'LAUNCH_SORTIE';
+      carrierUnitId: string;
+      hangarSlotId: string;
+      loadoutId?: string;
+      assignedMissionId?: string;
+    }
+  | {
+      type: 'ASSIGN_MISSION';
+      side: SideId;
+      unitId?: string;
+      groupId?: string;
+      missionId?: string;
+    }
+  | {
+      type: 'TOGGLE_SIDE_EMCON';
+      side: SideId;
+      groupId?: string;
+      sensor: 'radar' | 'sonar' | 'jamming';
+    }
+  | {
+      type: 'COORDINATE_ATTACK';
+      side: SideId;
+      groupId?: string;
+      targetDomain?: Domain;
+      delaySec: number;
     }
   | {
       type: 'BROADCAST_MESSAGE';
@@ -506,6 +623,22 @@ export interface BattleResult {
   outcomes: Record<'RED' | 'BLUE', 'victory' | 'costly_victory' | 'defeat' | 'draw'>;
 }
 
+export interface EnvironmentPolygon {
+  id: string;
+  name: string;
+  areaPolygon: [number, number][];
+}
+
+export interface AcousticZone extends EnvironmentPolygon {
+  kind: 'shallow' | 'deep';
+  sonarRangeFactor: number;
+}
+
+export interface ScenarioEnvironment {
+  landPolygons: EnvironmentPolygon[];
+  acousticZones: AcousticZone[];
+}
+
 export interface ScenarioDefinition {
   id: string;
   title: string;
@@ -529,6 +662,7 @@ export interface ScenarioDefinition {
   units: InitialUnitPlacement[];
   missions: MissionDefinition[];
   referencePoints: ReferencePoint[];
+  environment?: ScenarioEnvironment;
   events?: ScenarioEventRule[]; // ★ 动态事件触发器列表
   victoryConditions?: VictoryConditionRule; // ★ 胜负评估规则
   objectives?: ScenarioObjective[];
@@ -549,6 +683,8 @@ export type CombatLogCategory =
   | 'EVENT'         // ★ 新增：战役脚本触发事件 (援军抵达/参谋部急电/阶段转换)
   | 'SYSTEM';
 
+export type AarEventKind = 'launch' | 'hit' | 'intercept' | 'loss' | 'sortie' | 'recovery' | 'turnaround' | 'hangar_loss';
+
 export interface CombatLogEntry {
   id: string;
   simTime: number;
@@ -560,6 +696,39 @@ export interface CombatLogEntry {
   position?: [number, number];
   unitId?: string;
   contactId?: string;
+  weaponId?: string;
+  targetUnitId?: string;
+  quantity?: number;
+  aarType?: AarEventKind;
+  aarSide?: SideId;
+}
+
+export interface AarEventRecord {
+  id: string;
+  tick: number;
+  simTime: number;
+  side: SideId | 'SYSTEM';
+  kind: AarEventKind;
+  title: string;
+  unitId?: string;
+  targetUnitId?: string;
+  weaponId?: string;
+  quantity: number;
+}
+
+export interface AarTrackSample {
+  tick: number;
+  simTime: number;
+  unitId: string;
+  side: SideId;
+  position: [number, number];
+  altitudeM: number;
+  status: RuntimeUnit['status'];
+}
+
+export interface BattleAarLedger {
+  events: AarEventRecord[];
+  tracks: AarTrackSample[];
 }
 
 export interface AutoPauseSettings {

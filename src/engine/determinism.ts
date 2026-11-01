@@ -1,8 +1,12 @@
 export const FIXED_DT_SEC = 0.25;
 export const DEFAULT_SEED = 20261028;
-export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypoint', 'clearUnitWaypoints',
+export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypoint', 'updateUnitWaypoint',
+  'removeUnitWaypoint', 'clearUnitWaypoints', 'setGroupFormation', 'requestAirRefuel', 'deployCarriedPlatform',
   'updateUnitDoctrine', 'updateUnitKinematics', 'switchUnitLoadout', 'launchCarrierAircraft',
-  'assignUnitMission', 'toggleMissionActive', 'executeManualEngage', 'addReferencePoint',
+  'assignUnitMission', 'createMissionFromReferencePoints', 'updateMissionFromReferencePoints',
+  'deleteMission', 'toggleMissionActive', 'moveUnitInSandbox', 'updateScenarioGroup', 'assignUnitGroup',
+  'upsertObjective', 'deleteObjective', 'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
+  'executeManualEngage', 'addReferencePoint',
   'removeReferencePoint', 'startSpawnUnitOnMap', 'spawnUnitAtCoordinate'] as const;
 
 export function createRandomStream(initialState: number) {

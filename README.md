@@ -18,10 +18,11 @@ AEGIS-CMO 是一套受现代指挥推演产品启发的实验性 Web 兵棋系�
 | 多域传感器 | 雷达视距、RCS、VHF 反隐身、ESM、主动/被动声呐和温跃层遮蔽 |
 | 可解释火控 | 自动与手动射击共用射程、弹药、冷却、目标域和制导支援判定 |
 | 导弹制导 | 中段数据链、末段导引头、视场角、失锁搜索、拦截和 CIWS 裁决 |
-| 任务与资源 | 燃油、返航、机库批次、挂载、任务配属、目标计分与战后结算 |
-| 确定性重放 | 随机状态、指令 Tick 和执行顺序可记录，支持一致性重放 |
-| 可扩展内容 | 装备四层数据库、想定 JSON、Catalog Overlay 和动态事件规则 |
-| WebGL 态势图 | MapLibre GL、MIL-STD-2525C / APP-6 军标、包线、航迹和特效 |
+| 任务与资源 | RP任务编辑、WRA、分段航路、编队、返航、Turnaround、空中加油和有限库存 |
+| 战术反应 | 事件驱动 OPFOR、Blink EMCON、协同释放、autoEvade、软杀伤与MALD/UAV |
+| 确定性重放 | Recording v2 校验规则/目录/Schema，可按 Tick 跳转并生成独立 AAR 账本 |
+| 可扩展内容 | 四层装备库、Scenario Builder、完整想定导入导出、Catalog Overlay 和事件规则 |
+| WebGL 态势图 | MapLibre、军标、纯函数GeoJSON投影、测距尺、AOU和有限信息威胁圈 |
 
 ## 快速开始
 
@@ -56,6 +57,10 @@ bun run preview
 | 切换观察视角 | 顶栏红方 / 蓝方 / 全局按钮 |
 | 切换控制席位 | 开局且尚未推进 Tick 时选择 |
 | 切换真实/深色/离线底图 | 左侧“包线图层”面板 |
+| 创建/编辑任务 | 左侧“巡逻任务”，勾选至少三个同阵营参考点 |
+| 想定编辑 | 切换沙盒后使用顶栏“想定编辑” |
+| 重放与AAR | “想定管理”生成Recording v2；战后或沙盒打开“战后复盘” |
+| 测距 | 地图右上底图面板“测距尺” |
 
 观察视角与指挥权限相互独立：切换到另一方视角不会自动获得其控制权。跨阵营编辑和实时兵力投放需要显式进入沙盒模式。
 
@@ -74,7 +79,7 @@ bun run preview
 ```text
 src/
 ├── components/              # 指挥 HUD、侧栏、遥测、日志与弹窗
-├── map/                     # MapLibre 底图、战术图层和离线示意图
+├── map/                     # MapLibre 生命周期、纯函数战术投影、底图和离线示意图
 ├── store/                   # Zustand 指挥、UI 与仿真状态
 ├── scenarios/               # 内置想定、编译和导入导出
 ├── db/                      # 传感器、武器、挂载与平台数据库
@@ -97,11 +102,11 @@ src/
 Zustand Store
     ↓
 固定 0.25s World Step
-    ├─ 单位运动与资源
-    ├─ 传感器与接触融合
-    ├─ 自动防御与火力分配
-    ├─ 武器制导与毁伤
-    └─ 动态事件与目标结算
+    ├─ 单位运动、编队、Turnaround与空中加油
+    ├─ 环境、Bearing-only ESM与接触融合
+    ├─ 任务、OPFOR反应、规避与自动防御
+    ├─ 武器制导、软杀伤与毁伤
+    └─ 动态事件、目标、AAR与结算
     ↓
 MapLibre GeoJSON + React HUD
 ```
@@ -135,7 +140,7 @@ Sensor → Weapon → Loadout → Platform
 - 加载失败或超时会提示并回退到离线示意图。
 - 项目不会批量下载或离线缓存第三方瓦片。
 - 切换底图不会重置战场或改变仿真 Tick。
-- 当前没有地形碰撞、陆地遮挡或海深裁决。
+- 仿真只使用想定内版本化的简化海陆禁区和浅/深海声学区；在线瓦片不参与裁决。当前仍没有高精度地形高程、雷达陆地遮挡或全球水深数据库。
 
 底图配置位于 `src/map/basemaps.ts`。
 
@@ -169,9 +174,9 @@ bun run test:e2e
 
 当前基线：
 
-- Bun unit / integration：**97 pass，0 fail**
-- Playwright E2E：**3 pass，0 fail**
-- Engine 聚合行覆盖率：**90.75%**
+- Bun unit / integration：**133 pass，0 fail**
+- Playwright E2E：**13 pass，0 fail**
+- Engine 聚合行覆盖率：**95.10%（2991/3145）**
 
 ## API 文档
 
@@ -187,8 +192,8 @@ bun run docs:api
 
 - 无多人联网、服务端权威状态或持久化战役后端。
 - 装备参数和裁决模型服务于玩法验证，不代表现实机密或实测数据。
-- 在线地图只是地理展示，不参与导航与地形裁决。
+- 在线地图只是地理展示；仿真仅使用随想定分发的简化海陆/声学环境。
 - 想定导出与指令重放用途不同，不能相互替代。
-- Store 已具备分层结构，但旧 `useWargameStore` 兼容入口仍保留。
+- `useWargameStore` 是唯一权威状态源，以保证跨仿真、命令记录和回放的原子更新；显示态通过细粒度 selector 隔离。
 
 优化拆分、测试和文档生成的完成证据见 [OPTIMIZATION_COMPLETE.md](OPTIMIZATION_COMPLETE.md)。

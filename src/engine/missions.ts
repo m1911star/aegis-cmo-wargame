@@ -15,7 +15,11 @@ export function deriveMissionAssignments(
   return missions.map((mission) => ({
     ...mission,
     areaPolygon: mission.areaPolygon.map((p) => [...p] as [number, number]),
-    doctrineOverride: mission.doctrineOverride ? { ...mission.doctrineOverride } : undefined,
+    doctrineOverride: mission.doctrineOverride ? {
+      ...mission.doctrineOverride,
+      automaticTargetDomains: mission.doctrineOverride.automaticTargetDomains
+        ? [...mission.doctrineOverride.automaticTargetDomains] : undefined,
+    } : undefined,
     assignedUnitIds: assigned.get(mission.id) ?? [],
   }));
 }

@@ -25,6 +25,7 @@ export function installTacticalLayers(map: TacticalLayerHost) {
   addSource('rp-source', { type: 'geojson', data: emptyFC });
   addSource('explosions-source', { type: 'geojson', data: emptyFC });
   addSource('units-source', { type: 'geojson', data: emptyFC });
+  addSource('ruler-source', { type: 'geojson', data: emptyFC });
 
   // 1. 巡逻区多边形图层
   addLayer({
@@ -75,6 +76,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
         'rgba(16, 185, 129, 0.05)',
         'horizon',
         'rgba(245, 158, 11, 0.06)',
+        'threat',
+        'rgba(251, 146, 60, 0.055)',
         'rgba(34, 211, 238, 0.02)',
       ],
     },
@@ -95,6 +98,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
         'rgba(16, 185, 129, 0.55)',
         'horizon',
         'rgba(245, 158, 11, 0.75)',
+        'threat',
+        'rgba(251, 146, 60, 0.85)',
         '#22d3ee',
       ],
       'line-width': [
@@ -110,6 +115,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
         ['literal', [6, 3]],
         'horizon',
         ['literal', [2, 2]],
+        'threat',
+        ['literal', [5, 3]],
         ['literal', [1, 0]],
       ],
     },
@@ -297,6 +304,29 @@ export function installTacticalLayers(map: TacticalLayerHost) {
       'text-color': '#fef08a',
       'text-halo-color': '#020617',
       'text-halo-width': 2,
+    },
+  });
+
+  addLayer({
+    id: 'ruler-line-layer',
+    type: 'line',
+    source: 'ruler-source',
+    paint: {
+      'line-color': '#facc15',
+      'line-width': 2.2,
+      'line-dasharray': [3, 2],
+    },
+  });
+  addLayer({
+    id: 'ruler-point-layer',
+    type: 'circle',
+    source: 'ruler-source',
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': 4,
+      'circle-color': '#facc15',
+      'circle-stroke-color': '#020617',
+      'circle-stroke-width': 1.5,
     },
   });
 

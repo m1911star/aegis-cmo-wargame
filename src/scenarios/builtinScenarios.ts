@@ -2,7 +2,13 @@ import type {
   ScenarioDefinition,
   RuntimeUnit,
   EquipmentCatalog,
+  OrbatGroup,
+  ReferencePoint,
+  RuntimeScenarioEvent,
+  ScenarioEnvironment,
   ScenarioEventAction,
+  ScenarioObjective,
+  TacticalMission,
 } from '../types/wargame';
 import { resolveEquipmentCatalog } from '../catalog/equipmentCatalog';
 import { createRuntimeUnitFromPlacement } from '../engine/simulationEngine';
@@ -45,6 +51,43 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
     durationSec: 3600,
     decisiveVictoryThreshold: 350,
     tacticalVictoryThreshold: 120,
+  },
+  objectives: [
+    {
+      id: 'east_red_disable_ishigaki', side: 'RED', title: '压制石垣岛防空节点',
+      type: 'disable', unitIds: ['blue_pac3_ishigaki'], required: true, points: 180,
+    },
+    {
+      id: 'east_red_locate_aegis', side: 'RED', title: '确认蓝方宙斯盾防空舰位置',
+      type: 'observe', unitIds: ['blue_ddg125_lucas'], required: false, points: 40,
+    },
+    {
+      id: 'east_red_preserve_kj500', side: 'RED', title: '保全空警-500H预警指挥能力',
+      type: 'preserve', preserveCapability: true, unitIds: ['red_kj500_eye'], required: false, points: 60,
+    },
+    {
+      id: 'east_blue_hold_ishigaki', side: 'BLUE', title: '守住石垣岛防空节点至推演结束',
+      type: 'preserve', preserveCapability: true, unitIds: ['blue_pac3_ishigaki'], required: true,
+      criticalFailure: true, points: 180,
+    },
+    {
+      id: 'east_blue_disable_h6n', side: 'BLUE', title: '使红方远程轰炸机群失能',
+      type: 'disable', unitIds: ['red_h6n_strike'], required: false, points: 80,
+    },
+    {
+      id: 'east_blue_preserve_e2d', side: 'BLUE', title: '保全E-2D预警指挥能力',
+      type: 'preserve', preserveCapability: true, unitIds: ['blue_e2d_tigertail'], required: false, points: 60,
+    },
+  ],
+  environment: {
+    landPolygons: [
+      { id: 'east_mainland', name: '东海西侧大陆简化禁区', areaPolygon: [[119, 23], [121.5, 23], [121.5, 29], [119, 29]] },
+      { id: 'ishigaki_land', name: '石垣岛简化陆地区', areaPolygon: [[124.08, 24.30], [124.25, 24.30], [124.25, 24.47], [124.08, 24.47]] },
+    ],
+    acousticZones: [
+      { id: 'east_shallow_shelf', name: '东海大陆架浅海', kind: 'shallow', sonarRangeFactor: 0.72,
+        areaPolygon: [[120, 24], [127, 24], [127, 28.5], [120, 28.5]] },
+    ],
   },
   groups: [
     {
@@ -163,6 +206,21 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
         emconJamming: false,
         salvoSize: 1,
       },
+    },
+    {
+      id: 'red_y20u_tanker',
+      name: '运油-20U “长虹-01”空中加油机',
+      callsign: 'RAINBOW-01',
+      side: 'RED',
+      platformId: 'y20u_tanker',
+      parentGroupId: 'red_air_cmd',
+      position: [121.9, 26.3],
+      altitudeM: 8000,
+      heading: 90,
+      speedKts: 430,
+      waypoints: [[122.4, 26.5], [122.4, 26.1]],
+      assignedMissionId: 'mission_red_tanker_support',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 1 },
     },
     {
       id: 'red_h6n_strike',
@@ -365,6 +423,21 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
       },
     },
     {
+      id: 'blue_kc135_tanker',
+      name: 'KC-135R “Shell-51”空中加油机',
+      callsign: 'SHELL-51',
+      side: 'BLUE',
+      platformId: 'kc135_tanker',
+      parentGroupId: 'blue_csg_air',
+      position: [126.1, 25.9],
+      altitudeM: 7800,
+      heading: 270,
+      speedKts: 420,
+      waypoints: [[125.7, 26.1], [125.7, 25.7]],
+      assignedMissionId: 'mission_blue_tanker_support',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 1 },
+    },
+    {
       id: 'blue_p8a_trident',
       name: 'P-8A “VP-16 War Eagles”反潜巡逻机',
       callsign: 'TRIDENT-04',
@@ -488,6 +561,28 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
       description: '歼-20A在巡逻盒内实施电磁静默超音速巡航，自动截击进入东海核心空域的蓝方飞机。',
     },
     {
+      id: 'mission_red_tanker_support',
+      name: '东海西侧空中加油等待航线',
+      side: 'RED',
+      type: 'tanker_support',
+      isActive: true,
+      areaPolygon: [[122.2, 26.6], [122.6, 26.3], [122.2, 26.0]],
+      prosecuteOutsideAreaKm: 0,
+      stationRadiusKm: 20,
+      description: '运油-20U沿固定三角航线等待同阵营受油请求。',
+    },
+    {
+      id: 'mission_blue_tanker_support',
+      name: '宫古东侧空中加油等待航线',
+      side: 'BLUE',
+      type: 'tanker_support',
+      isActive: true,
+      areaPolygon: [[125.5, 26.2], [125.9, 25.9], [125.5, 25.6]],
+      prosecuteOutsideAreaKm: 0,
+      stationRadiusKm: 20,
+      description: 'KC-135R沿固定三角航线等待同阵营受油请求。',
+    },
+    {
       id: 'mission_blue_aaw_barrier',
       name: '宫古海峡防空屏障巡逻区 (BARCAP)',
       side: 'BLUE',
@@ -608,6 +703,41 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
     durationSec: 5400,
     decisiveVictoryThreshold: 400,
     tacticalVictoryThreshold: 150,
+  },
+  objectives: [
+    {
+      id: 'deep_red_disable_cvn', side: 'RED', title: '使蓝方核动力航母失去作战能力',
+      type: 'disable', unitIds: ['blue_cvn78_carrier'], required: true, points: 260,
+    },
+    {
+      id: 'deep_red_preserve_fujian', side: 'RED', title: '保全福建舰作战能力',
+      type: 'preserve', preserveCapability: true, unitIds: ['red_cv18_fujian'], required: false,
+      criticalFailure: true, points: 120,
+    },
+    {
+      id: 'deep_red_locate_cvn', side: 'RED', title: '取得蓝方航母可靠接触',
+      type: 'observe', unitIds: ['blue_cvn78_carrier'], required: false, points: 50,
+    },
+    {
+      id: 'deep_blue_disable_fujian', side: 'BLUE', title: '使福建舰失去作战能力',
+      type: 'disable', unitIds: ['red_cv18_fujian'], required: true, points: 260,
+    },
+    {
+      id: 'deep_blue_preserve_cvn', side: 'BLUE', title: '保全核动力航母作战能力',
+      type: 'preserve', preserveCapability: true, unitIds: ['blue_cvn78_carrier'], required: false,
+      criticalFailure: true, points: 120,
+    },
+    {
+      id: 'deep_blue_disable_wolfpack', side: 'BLUE', title: '使红方核潜艇伏击群失能',
+      type: 'disable', unitIds: ['red_093b_wolf1', 'red_093b_wolf2'], required: false, points: 100,
+    },
+  ],
+  environment: {
+    landPolygons: [],
+    acousticZones: [
+      { id: 'philippine_deep_water', name: '菲律宾海深水声学区', kind: 'deep', sonarRangeFactor: 1.12,
+        areaPolygon: [[121, 19], [128.5, 19], [128.5, 24], [121, 24]] },
+    ],
   },
   groups: [
     {
@@ -915,6 +1045,42 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
           message: '全军综合数据链已分发蓝方核航母坐标，请立即组织055大驱鹰击-21与福建舰歼-35机群实施饱和打击！',
           position: [126.45, 21.55],
         },
+        {
+          type: 'LAUNCH_SORTIE',
+          carrierUnitId: 'red_cv18_fujian',
+          hangarSlotId: 'hangar_j35_vf1',
+          loadoutId: 'loadout_j35_maritime_strike',
+          assignedMissionId: 'mission_red_asuw_hunt',
+        },
+        {
+          type: 'ASSIGN_MISSION',
+          side: 'RED',
+          unitId: 'red_h6n_salvo',
+          missionId: 'mission_red_asuw_hunt',
+        },
+        {
+          type: 'COORDINATE_ATTACK',
+          side: 'RED',
+          groupId: 'red_strike_group_055',
+          targetDomain: 'surface',
+          delaySec: 10,
+        },
+      ],
+    },
+    {
+      id: 'ev_red_csg_blink_emcon',
+      name: '红方航母编队间歇雷达开机',
+      description: '开战30秒后每30秒切换一次航母打击群雷达状态，形成确定性的Blink EMCON节奏。',
+      repeatable: true,
+      repeatIntervalSec: 30,
+      trigger: { type: 'TIME_ELAPSED', elapsedSec: 30 },
+      actions: [
+        {
+          type: 'TOGGLE_SIDE_EMCON',
+          side: 'RED',
+          groupId: 'red_strike_group_055',
+          sensor: 'radar',
+        },
       ],
     },
   ],
@@ -928,7 +1094,7 @@ export const BUILTIN_SCENARIOS: ScenarioDefinition[] = [
 
 /**
  * 将静态 ScenarioDefinition + EquipmentCatalog 实例化为运行时字典
- * @param rng 可选随机数生成器（默认 고정确定性种子以保证开局稳定，也可传入 Math.random 启用每次开局随机散布）
+ * @param rng 可选随机数生成器（默认 0.5 中点采样；随机开局必须显式传入序列化 PRNG）
  */
 export function instantiateScenarioUnits(
   scenario: ScenarioDefinition,
@@ -978,13 +1144,27 @@ export function validateAndParseScenarioJson(jsonText: string): {
  */
 export function exportCurrentStateAsScenarioJson(
   baseScenario: ScenarioDefinition,
-  currentUnits: Record<string, RuntimeUnit>
+  currentUnits: Record<string, RuntimeUnit>,
+  runtime?: {
+    groups?: OrbatGroup[];
+    missions?: TacticalMission[];
+    events?: RuntimeScenarioEvent[];
+    objectives?: ScenarioObjective[];
+    referencePoints?: ReferencePoint[];
+    environment?: ScenarioEnvironment;
+  }
 ): string {
   const exported: ScenarioDefinition = {
     ...structuredClone(baseScenario),
+    groups: structuredClone(runtime?.groups ?? baseScenario.groups),
+    missions: structuredClone(runtime?.missions ?? baseScenario.missions),
+    events: structuredClone(runtime?.events ?? baseScenario.events),
+    objectives: structuredClone(runtime?.objectives ?? baseScenario.objectives),
+    referencePoints: structuredClone(runtime?.referencePoints ?? baseScenario.referencePoints),
+    environment: structuredClone(runtime?.environment ?? baseScenario.environment),
     id: `${baseScenario.id}_custom_${Date.now().toString(36)}`,
     units: Object.values(currentUnits)
-      .filter((u) => u.hp > 0 && u.status !== 'destroyed')
+      .filter((u) => u.hp > 0 && u.status !== 'destroyed' && u.status !== 'recovered')
       .map((u) => ({
         id: u.id,
         name: u.name,
@@ -997,15 +1177,22 @@ export function exportCurrentStateAsScenarioJson(
         altitudeM: u.altitudeM,
         heading: Math.round(u.heading),
         speedKts: u.speedKts,
-        waypoints: u.waypoints.map((w) => [...w]),
+        waypoints: u.waypoints.map((waypoint) => ({
+          ...waypoint,
+          position: [...waypoint.position] as [number, number],
+        })),
         doctrine: { ...u.doctrine },
         assignedMissionId: u.assignedMissionId,
         recoveryPosition: u.recoveryPosition,
       })),
   };
   exported.missions = exported.missions.map(({ assignedUnitIds: _legacy, ...mission }) => mission);
+  exported.events = exported.events?.map((event) => {
+    const { hasFired: _hasFired, fireCount: _fireCount, matchedUnitIds: _matched, ...definition } = event as RuntimeScenarioEvent;
+    return definition;
+  });
   const knownIds = new Set([
-    ...Object.keys(currentUnits),
+    ...exported.units.map((unit) => unit.id),
     ...(exported.events ?? []).flatMap((event) => event.actions.flatMap((action) =>
       action.type === 'SPAWN_REINFORCEMENTS' ? action.units.map((unit) => unit.id) : []
     )),

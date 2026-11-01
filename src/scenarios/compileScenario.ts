@@ -1,4 +1,6 @@
-import type { EquipmentCatalog, InitialUnitPlacement, ScenarioDefinition } from '../types/wargame';
+import * as turf from '@turf/turf';
+import type { EquipmentCatalog, InitialUnitPlacement, RouteLeg, ScenarioDefinition } from '../types/wargame';
+import { cloneEnvironment, isPointOnLand, isRouteAllowed } from '../engine/environment';
 import { resolveEquipmentCatalog, validateCatalogIntegrity } from '../db';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 import { assertScenarioShape } from '../validation/wargameSchemas';
@@ -28,6 +30,15 @@ export function compileScenario(
   const missions = index(scenario.missions, 'scenario.missions');
   index(scenario.referencePoints, 'scenario.referencePoints');
   index(scenario.events ?? [], 'scenario.events');
+  scenario.environment = cloneEnvironment(scenario.environment);
+  index(scenario.environment.landPolygons, 'scenario.environment.landPolygons');
+  index(scenario.environment.acousticZones, 'scenario.environment.acousticZones');
+  for (const polygon of [...scenario.environment.landPolygons, ...scenario.environment.acousticZones]) {
+    const feature = turf.polygon([[...polygon.areaPolygon, polygon.areaPolygon[0]]]);
+    if (turf.area(feature) <= 1 || turf.kinks(feature).features.length > 0) {
+      invalid(`scenario.environment.${polygon.id}`, 'environment polygon must be non-degenerate and non-self-intersecting');
+    }
+  }
   const placements: InitialUnitPlacement[] = [
     ...scenario.units,
     ...(scenario.events ?? []).flatMap((event) => event.actions.flatMap((action) =>
@@ -44,6 +55,17 @@ export function compileScenario(
     }
     if (objective.criticalFailure && objective.type !== 'preserve') invalid(`objective.${objective.id}`, 'immediate failure requires an explicit preservation objective');
     if (objective.preserveCapability && objective.type !== 'preserve') invalid(`objective.${objective.id}`, 'preserveCapability only applies to preservation goals');
+  }
+
+  for (const mission of scenario.missions) {
+    if (mission.type === 'escort') {
+      const escortTarget = mission.escortUnitId ? units.get(mission.escortUnitId) : undefined;
+      if (!escortTarget || escortTarget.side !== mission.side) {
+        invalid(`mission.${mission.id}`, 'escort missions require a same-side escortUnitId');
+      }
+    } else if (mission.escortUnitId) {
+      invalid(`mission.${mission.id}`, 'escortUnitId only applies to escort missions');
+    }
   }
 
   // Legacy mission-side lists are migrated once; unit-side assignments are canonical.
@@ -70,6 +92,31 @@ export function compileScenario(
       configuration = resolveUnitConfiguration(catalog, placement.platformId, placement.loadoutId);
     } catch (error) {
       invalid(path, error instanceof Error ? error.message : 'invalid equipment configuration');
+    }
+    placement.waypoints = placement.waypoints?.map((waypoint, index): RouteLeg => {
+      const leg: RouteLeg = Array.isArray(waypoint)
+        ? { position: [...waypoint] as [number, number] }
+        : { ...waypoint, position: [...waypoint.position] as [number, number] };
+      if (leg.speedKts !== undefined && leg.speedKts > configuration.maxSpeedKts) {
+        invalid(`${path}.waypoints[${index}].speedKts`, 'exceeds the configured platform limit');
+      }
+      if (leg.altitudeM !== undefined &&
+          (leg.altitudeM < configuration.platform.minAltitudeM || leg.altitudeM > configuration.platform.maxAltitudeM)) {
+        invalid(`${path}.waypoints[${index}].altitudeM`, 'outside platform limits');
+      }
+      return leg;
+    });
+    const startsOnLand = isPointOnLand(placement.position, scenario.environment);
+    if ((configuration.platform.domain === 'surface' || configuration.platform.domain === 'subsurface') && startsOnLand ||
+        configuration.platform.domain === 'land' && scenario.environment.landPolygons.length > 0 && !startsOnLand) {
+      invalid(`${path}.position`, 'outside the configured domain environment');
+    }
+    let routeStart = placement.position;
+    for (const [index, leg] of (placement.waypoints ?? []).entries()) {
+      if (Array.isArray(leg) || !isRouteAllowed(configuration.platform.domain, routeStart, leg.position, scenario.environment)) {
+        invalid(`${path}.waypoints[${index}]`, 'route crosses the configured land/sea boundary');
+      }
+      routeStart = leg.position;
     }
     if (placement.speedKts !== undefined && placement.speedKts > configuration.maxSpeedKts) {
       invalid(`${path}.speedKts`, 'exceeds the configured platform limit');
@@ -100,6 +147,34 @@ export function compileScenario(
       if (action.type === 'UPDATE_SIDE_DOCTRINE' && action.groupId) {
         const group = groups.get(action.groupId);
         if (!group || group.side !== action.side) invalid(path, 'unknown doctrine group or side mismatch');
+      }
+      if (action.type === 'LAUNCH_SORTIE') {
+        const carrier = units.get(action.carrierUnitId);
+        const slot = carrier ? catalog.platforms[carrier.platformId]?.hangarSlots?.find((candidate) => candidate.slotId === action.hangarSlotId) : undefined;
+        if (!carrier || !slot) invalid(path, 'unknown carrier or hangar slot');
+        if (action.loadoutId && !slot.availableLoadoutIds.includes(action.loadoutId)) invalid(path, 'unavailable sortie loadout');
+        if (action.assignedMissionId) {
+          const mission = missions.get(action.assignedMissionId);
+          if (!mission || mission.side !== carrier.side) invalid(path, 'unknown sortie mission or side mismatch');
+        }
+      }
+      if (action.type === 'ASSIGN_MISSION') {
+        if (action.side === 'NEUTRAL') invalid(path, 'neutral side cannot receive missions');
+        const targetUnit = action.unitId ? units.get(action.unitId) : undefined;
+        const targetGroup = action.groupId ? groups.get(action.groupId) : undefined;
+        if (action.unitId && (!targetUnit || targetUnit.side !== action.side)) invalid(path, 'unknown assignment unit or side mismatch');
+        if (action.groupId && (!targetGroup || targetGroup.side !== action.side)) invalid(path, 'unknown assignment group or side mismatch');
+        if (action.missionId) {
+          const mission = missions.get(action.missionId);
+          if (!mission || mission.side !== action.side) invalid(path, 'unknown assigned mission or side mismatch');
+        }
+      }
+      if (action.type === 'TOGGLE_SIDE_EMCON' || action.type === 'COORDINATE_ATTACK') {
+        if (action.side === 'NEUTRAL') invalid(path, 'neutral side cannot receive tactical reactions');
+        if (action.groupId) {
+          const group = groups.get(action.groupId);
+          if (!group || group.side !== action.side) invalid(path, 'unknown reaction group or side mismatch');
+        }
       }
       if (action.type === 'AWARD_SCORE' && action.side === 'NEUTRAL') invalid(path, 'neutral side has no score ledger');
     }

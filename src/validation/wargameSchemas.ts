@@ -1,18 +1,33 @@
 import type { EquipmentCatalog, ScenarioDefinition } from '../types/wargame';
-import { array, boolean, coordinate, id, number, object, oneOf, optional, record, taggedUnion, text } from './schema';
+import { array, boolean, coordinate, id, number, object, oneOf, optional, record, taggedUnion, text, isRecord, invalid, type Check } from './schema';
 
 const domain = oneOf(['air', 'surface', 'subsurface', 'land']);
 const side = oneOf(['RED', 'BLUE', 'NEUTRAL']);
-const category = oneOf(['fighter', 'stealth_fighter', 'ew_aircraft', 'awacs', 'bomber', 'mpa_uav', 'carrier', 'destroyer', 'frigate', 'ssn', 'sam_battery', 'asm_battery', 'airbase', 'radar_site']);
+const category = oneOf(['fighter', 'stealth_fighter', 'ew_aircraft', 'awacs', 'tanker', 'bomber', 'mpa_uav', 'decoy', 'carrier', 'destroyer', 'frigate', 'ssn', 'sam_battery', 'asm_battery', 'airbase', 'radar_site']);
 const count = number(0, Number.MAX_SAFE_INTEGER, true);
 const positive = number(Number.MIN_VALUE);
 const identifiers = array(id);
 const metadata = { id, name: text, description: text };
+const waypoint: Check = (value, path) => {
+  if (Array.isArray(value)) {
+    coordinate(value, path);
+    return;
+  }
+  if (!isRecord(value)) invalid(path, 'expected a coordinate or route-leg object');
+  object({
+    position: coordinate,
+    speedKts: optional(number(0)),
+    altitudeM: optional(number()),
+  })(value, path);
+};
 const doctrine = object({
   roe: optional(oneOf(['free', 'tight', 'hold'])),
   emconRadar: optional(boolean), emconSonar: optional(boolean), emconJamming: optional(boolean),
   autoEvade: optional(boolean), engageOpportunityTargets: optional(boolean),
   salvoSize: optional(number(1, Number.MAX_SAFE_INTEGER, true)),
+  automaticFireRangeFraction: optional(number(0.05, 1)),
+  minimumWeaponReserve: optional(count), automaticTargetDomains: optional(array(domain)),
+  minimumAutomaticThreat: optional(oneOf(['low', 'medium', 'high', 'critical'])),
 });
 const mount = object({ mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0) });
 const sensor = object({
@@ -45,6 +60,7 @@ const loadout = object({
 const hangar = object({
   slotId: id, squadronName: text, platformId: id, defaultLoadoutId: id,
   availableLoadoutIds: identifiers, totalAirframes: count, readyAirframes: count, launchCooldownSec: number(0),
+  turnaroundSec: optional(number(0)), turnaroundSupplyBatches: optional(count),
 });
 const platform = object({
   ...metadata, className: text, origin: text, domain, category,
@@ -57,6 +73,9 @@ const platform = object({
   ciwsDefenseProb: number(0, 1), sensorIds: identifiers,
   defaultLoadoutId: optional(id), availableLoadoutIds: optional(identifiers),
   mounts: array(mount), hangarSlots: optional(array(hangar)),
+  aarFuelCapacitySec: optional(number(0)), aarTransferRateSecPerSec: optional(number(0)),
+  canReceiveAar: optional(boolean),
+  deployables: optional(array(object({ platformId: id, count }))),
 });
 const catalogFields = {
   version: id, sensors: record(sensor), weapons: record(weapon),
@@ -70,7 +89,7 @@ const placement = object({
   id, name: text, callsign: text, side, platformId: id, loadoutId: optional(id),
   parentGroupId: id, position: coordinate, spawnJitterKm: optional(number(0)),
   appearProbability: optional(number(0, 1)), altitudeM: optional(number()), heading: number(),
-  speedKts: optional(number(0)), waypoints: optional(array(coordinate)),
+  speedKts: optional(number(0)), waypoints: optional(array(waypoint)),
   doctrine: optional(doctrine), assignedMissionId: optional(id),
   recoveryPosition: optional(coordinate),
 });
@@ -84,11 +103,20 @@ const action = taggedUnion({
   SPAWN_REINFORCEMENTS: object({ units: array(placement) }),
   ACTIVATE_MISSION: object({ missionId: id, isActive: boolean }),
   UPDATE_SIDE_DOCTRINE: object({ side, groupId: optional(id), doctrinePatch: doctrine }),
+  LAUNCH_SORTIE: object({
+    carrierUnitId: id, hangarSlotId: id, loadoutId: optional(id), assignedMissionId: optional(id),
+  }),
+  ASSIGN_MISSION: object({ side, unitId: optional(id), groupId: optional(id), missionId: optional(id) }),
+  TOGGLE_SIDE_EMCON: object({ side, groupId: optional(id), sensor: oneOf(['radar', 'sonar', 'jamming']) }),
+  COORDINATE_ATTACK: object({ side, groupId: optional(id), targetDomain: optional(domain), delaySec: number(0) }),
   BROADCAST_MESSAGE: object({
     side: oneOf(['RED', 'BLUE', 'NEUTRAL', 'SYSTEM']), severity: oneOf(['info', 'warning', 'critical']),
     title: text, message: text, position: optional(coordinate),
   }),
   AWARD_SCORE: object({ side, points: number(), reason: text }),
+});
+const environmentPolygon = object({
+  id, name: text, areaPolygon: array(coordinate, 3),
 });
 const scenario = object({
   id, title: text, subtitle: text, theater: text, difficulty: oneOf(['STANDARD', 'HARD', 'EXTREME']),
@@ -98,11 +126,19 @@ const scenario = object({
   groups: array(object({ ...metadata, side, commandTitle: text })),
   units: array(placement),
   missions: array(object({
-    ...metadata, side, type: oneOf(['aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'aew_support']),
+    ...metadata, side, type: oneOf(['aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'aew_support', 'escort', 'sead', 'tanker_support']),
     isActive: boolean, areaPolygon: array(coordinate, 3), assignedUnitIds: optional(identifiers),
-    prosecuteOutsideAreaKm: number(0), doctrineOverride: optional(doctrine),
+    prosecuteOutsideAreaKm: number(0), escortUnitId: optional(id), stationRadiusKm: optional(number(0)),
+    doctrineOverride: optional(doctrine),
   })),
   referencePoints: array(object({ id, name: text, side, position: coordinate, locked: boolean })),
+  environment: optional(object({
+    landPolygons: array(environmentPolygon),
+    acousticZones: array(object({
+      id, name: text, areaPolygon: array(coordinate, 3), kind: oneOf(['shallow', 'deep']),
+      sonarRangeFactor: number(0.1, 2),
+    })),
+  })),
   events: optional(array(object({
     ...metadata, repeatable: optional(boolean), repeatIntervalSec: optional(number(1)), trigger, actions: array(action),
   }))),

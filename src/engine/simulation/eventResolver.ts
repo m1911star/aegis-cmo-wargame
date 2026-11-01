@@ -10,9 +10,12 @@ import type {
   TacticalMission,
   VictoryConditionRule,
 } from '../../types/wargame';
+import { launchCarrierSortie } from '../carrierOperations';
 import { evaluateObjectives } from '../objectives';
 import { getEventOccurrences } from '../scenarioEvents';
 import { createRuntimeUnitFromPlacement } from './unitFactory';
+
+const THREAT_RANK = { low: 0, medium: 1, high: 2, critical: 3 } as const;
 
 export type EventResolutionContext = {
   events: RuntimeScenarioEvent[];
@@ -116,6 +119,84 @@ export function resolveEventsAndObjectives({
               continue;
             }
             unit.doctrine = { ...unit.doctrine, ...action.doctrinePatch };
+          }
+        } else if (action.type === 'LAUNCH_SORTIE') {
+          const launched = launchCarrierSortie(
+            units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId
+          );
+          if (launched) {
+            if (action.assignedMissionId && missions.some((mission) =>
+              mission.id === action.assignedMissionId && mission.side === launched.side)) {
+              launched.assignedMissionId = action.assignedMissionId;
+              launched.navigationMode = 'mission';
+              launched.missionState = 'ingress';
+            }
+            score.sortiesLaunched = (score.sortiesLaunched ?? 0) + 1;
+            logs.push({
+              id: `log_ev_sortie_${nextSimTime}_${launched.id}`,
+              simTime: nextSimTime,
+              side: launched.side,
+              category: 'EVENT',
+              severity: 'warning',
+              title: `[事件驱动出动] ${launched.callsign} 弹射升空`,
+              message: `${event.name} 触发 ${launched.name}，挂载 ${catalog.loadouts[launched.activeLoadoutId ?? '']?.name ?? launched.activeLoadoutId ?? '默认'}。`,
+              position: [...launched.position],
+              unitId: launched.id,
+              aarType: 'sortie',
+            });
+          }
+        } else if (action.type === 'ASSIGN_MISSION') {
+          for (const unit of Object.values(units)) {
+            if (unit.hp <= 0 || unit.status === 'destroyed' || unit.side !== action.side ||
+                action.unitId && unit.id !== action.unitId ||
+                action.groupId && unit.parentGroupId !== action.groupId) continue;
+            unit.assignedMissionId = action.missionId;
+            unit.navigationMode = action.missionId ? 'mission' : 'manual';
+            unit.missionState = action.missionId ? 'ingress' : undefined;
+            unit.missionRouteIndex = 0;
+            unit.missionTargetId = undefined;
+            unit.formationLeaderId = undefined;
+            unit.formationOffset = undefined;
+            unit.waypoints = [];
+          }
+        } else if (action.type === 'TOGGLE_SIDE_EMCON') {
+          const field = action.sensor === 'radar' ? 'emconRadar'
+            : action.sensor === 'sonar' ? 'emconSonar' : 'emconJamming';
+          for (const unit of Object.values(units)) {
+            if (unit.hp <= 0 || unit.status === 'destroyed' || unit.side !== action.side ||
+                action.groupId && unit.parentGroupId !== action.groupId) continue;
+            unit.doctrine = { ...unit.doctrine, [field]: !unit.doctrine[field] };
+          }
+        } else if (action.type === 'COORDINATE_ATTACK') {
+          const target = Object.values(contacts).filter((contact) =>
+            contact.observerSide === action.side &&
+            (!action.targetDomain || contact.domain === action.targetDomain) &&
+            nextSimTime - contact.lastDetectedTime <= 5000
+          ).sort((a, b) => THREAT_RANK[b.threatLevel] - THREAT_RANK[a.threatLevel] ||
+            b.lastDetectedTime - a.lastDetectedTime || a.id.localeCompare(b.id))[0];
+          if (target) {
+            let coordinatedUnits = 0;
+            for (const unit of Object.values(units)) {
+              if (unit.hp <= 0 || unit.status === 'destroyed' || unit.status === 'returning' ||
+                  unit.side !== action.side || action.groupId && unit.parentGroupId !== action.groupId ||
+                  !unit.mounts.some((mount) => mount.currentAmmo > 0)) continue;
+              unit.coordinatedAttack = {
+                contactId: target.id,
+                releaseAtSimTime: nextSimTime + action.delaySec * 1000,
+              };
+              coordinatedUnits += 1;
+            }
+            logs.push({
+              id: `log_ev_coord_${nextSimTime}_${event.id}_${event.fireCount}_${actionIndex}`,
+              simTime: nextSimTime,
+              side: action.side,
+              category: 'DOCTRINE',
+              severity: 'warning',
+              title: `协同攻击窗口已建立：${coordinatedUnits} 个火力单元`,
+              message: `基于本方接触 ${target.displayName}，将在 ${action.delaySec} 秒后同步释放武器。`,
+              position: [...target.estimatedPosition],
+              contactId: target.id,
+            });
           }
         } else if (action.type === 'BROADCAST_MESSAGE') {
           logs.push({

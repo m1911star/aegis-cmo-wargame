@@ -209,7 +209,7 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
     const units = instantiateScenarioUnits(SCENARIO_EAST_SEA_THUNDER);
     const initialDist = getDistanceKm(
       units.red_j20_alpha.position,
-      units.red_j20_alpha.waypoints[0]
+      units.red_j20_alpha.waypoints[0].position
     );
 
     let world: SimulationWorldState = {
@@ -258,7 +258,7 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
     // 1. 算子应当向航路点机动前进
     const afterDist = getDistanceKm(
       world.units.red_j20_alpha.position,
-      world.units.red_j20_alpha.waypoints[0]
+      world.units.red_j20_alpha.waypoints[0].position
     );
     expect(afterDist).toBeLessThan(initialDist);
 

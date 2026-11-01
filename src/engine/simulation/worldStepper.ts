@@ -1,3 +1,4 @@
+import { createAarLedger, recordAarTick } from '../aar';
 import { createRandomStream, DEFAULT_SEED, FIXED_DT_SEC } from '../determinism';
 import { deriveMissionAssignments } from '../missions';
 import { computeContactsOnly } from '../sensors';
@@ -12,8 +13,10 @@ import type {
   SideId,
   WeaponInFlight,
 } from '../../types/wargame';
+import { advanceAirRefueling } from './airRefueling';
 import { runAutoDefense } from './autoDefense';
 import { resolveEventsAndObjectives } from './eventResolver';
+import { runEvasionAndSoftKill } from './evasion';
 import type {
   PauseTrigger,
   SimulationStepResult,
@@ -55,10 +58,37 @@ export function stepSimulationWorld(
     units[id] = {
       ...unit,
       position: [...unit.position],
-      waypoints: unit.waypoints.map((waypoint) => [...waypoint]),
-      doctrine: { ...unit.doctrine },
+      waypoints: unit.waypoints.map((waypoint) => ({
+        ...waypoint,
+        position: [...waypoint.position] as [number, number],
+      })),
+      doctrine: { ...unit.doctrine, automaticTargetDomains: [...unit.doctrine.automaticTargetDomains] },
+      coordinatedAttack: unit.coordinatedAttack ? { ...unit.coordinatedAttack } : undefined,
+      aarQueue: [...unit.aarQueue],
+      deployableInventory: { ...unit.deployableInventory },
+      airRefuelState: unit.airRefuelState ? {
+        ...unit.airRefuelState,
+        resumeWaypoints: unit.airRefuelState.resumeWaypoints.map((waypoint) => ({
+          ...waypoint, position: [...waypoint.position] as [number, number],
+        })),
+      } : undefined,
+      countermeasures: { ...unit.countermeasures },
+      countermeasureEffect: unit.countermeasureEffect ? { ...unit.countermeasureEffect } : undefined,
+      evasionState: unit.evasionState ? {
+        ...unit.evasionState,
+        resumeWaypoints: unit.evasionState.resumeWaypoints.map((waypoint) => ({
+          ...waypoint,
+          position: [...waypoint.position] as [number, number],
+        })),
+        resumeFormationOffset: unit.evasionState.resumeFormationOffset
+          ? { ...unit.evasionState.resumeFormationOffset } : undefined,
+      } : undefined,
       mounts: unit.mounts.map((mount) => ({ ...mount })),
-      hangar: (unit.hangar || []).map((slot) => ({ ...slot })),
+      hangar: (unit.hangar || []).map((slot) => ({
+        ...slot,
+        turnaroundQueue: slot.turnaroundQueue.map((entry) => ({ ...entry })),
+        activeSortieIds: [...slot.activeSortieIds],
+      })),
     };
   }
 
@@ -82,6 +112,10 @@ export function stepSimulationWorld(
     sortiesLaunched: world.score.sortiesLaunched ?? 0,
   };
   const creditedDamage = { ...world.creditedDamage };
+  const aar = world.aar ? {
+    events: world.aar.events.map((event) => ({ ...event })),
+    tracks: world.aar.tracks.map((sample) => ({ ...sample, position: [...sample.position] as [number, number] })),
+  } : createAarLedger();
   const logs: CombatLogEntry[] = [];
   let shouldAutoPause = false;
   let autoPauseReason: string | undefined;
@@ -107,11 +141,14 @@ export function stepSimulationWorld(
     previousContacts: world.contacts,
     missions,
     catalog,
+    environment: world.environment,
     nextSimTime,
     dtSec,
     score,
     logs,
   });
+
+  advanceAirRefueling(units, catalog, nextSimTime, dtSec, logs);
 
   for (const log of logs) {
     if (log.category === 'DESTROYED') {
@@ -128,7 +165,8 @@ export function stepSimulationWorld(
     catalog,
     world.contacts,
     nextSimTime,
-    dtSec
+    dtSec,
+    world.environment
   );
   const contacts = sensed.contacts;
   logs.push(...sensed.logs);
@@ -148,6 +186,14 @@ export function stepSimulationWorld(
     previousDetectedMissileIds: world.detectedMissileIds,
     autoPauseSettings,
     triggerPause,
+  });
+
+  runEvasionAndSoftKill({
+    units,
+    weaponsInFlight,
+    catalog,
+    nextSimTime,
+    logs,
   });
 
   const explosions = advanceWeaponPhysics({
@@ -187,17 +233,20 @@ export function stepSimulationWorld(
     autoPauseReason = '想定已结束：请查看任务结算与战报';
   }
   logs.push(...objectiveEvaluation.logs);
+  const nextTick = (world.tick ?? 0) + 1;
+  recordAarTick(aar, nextTick, nextSimTime, units, logs, !!objectiveEvaluation.battleResult);
 
   return {
     nextState: {
       startTime,
-      tick: (world.tick ?? 0) + 1,
+      tick: nextTick,
       rngState: random.state(),
       objectives: world.objectives,
       objectiveProgress: objectiveEvaluation.progress,
       battleResult: objectiveEvaluation.battleResult,
       creditedDamage,
       detectedMissileIds,
+      aar,
       simTime: nextSimTime,
       units,
       contacts,
@@ -205,6 +254,7 @@ export function stepSimulationWorld(
       explosions,
       missions: deriveMissionAssignments(missions, units),
       events,
+      environment: world.environment,
       victoryConditions: world.victoryConditions,
       score,
     },
@@ -223,7 +273,9 @@ export function initializeWorldContacts(
     world.units,
     catalog,
     world.contacts,
-    world.simTime
+    world.simTime,
+    undefined,
+    world.environment
   );
   return {
     nextState: {
