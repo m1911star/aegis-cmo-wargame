@@ -196,4 +196,4 @@ bun run docs:api
 - 想定导出与指令重放用途不同，不能相互替代。
 - `useWargameStore` 是唯一权威状态源，以保证跨仿真、命令记录和回放的原子更新；显示态通过细粒度 selector 隔离。
 
-优化拆分、测试和文档生成的完成证据见 [OPTIMIZATION_COMPLETE.md](OPTIMIZATION_COMPLETE.md)。
+最终验收与质量门禁报告见 [docs/FINAL_VERIFICATION.md](docs/FINAL_VERIFICATION.md)。
