@@ -161,15 +161,18 @@ test('runs interactive tutorial checklist and campaign progression controls', as
   await expect(page.getByText('指挥官教学指引 (1/5)')).toBeVisible();
 
   await page.getByRole('button', { name: '战役模式' }).click();
-  await expect(page.getByRole('button', { name: '战役 1/3' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '战役 1/5' })).toBeVisible();
 });
 
-test('captures and restores a resumable battle save in Scenario I/O modal', async ({ page }) => {
+test('captures and restores a resumable battle save and named save slot in Scenario I/O modal', async ({ page }) => {
   await page.getByRole('button', { name: '+5秒' }).click();
   await page.getByRole('button', { name: '想定管理' }).click();
+  await page.getByLabel('存档槽备注名称').fill('E2E 战术断点');
+  await page.getByRole('button', { name: '新建断点存档槽' }).click();
+  await expect(page.getByText('E2E 战术断点')).toBeVisible();
   await page.getByRole('button', { name: '生成断点存档 JSON' }).click();
   await expect(page.getByLabel('想定或重放 JSON')).toContainText('aegis_battle_save');
-  await page.getByRole('button', { name: '恢复断点存档' }).click();
+  await page.getByRole('button', { name: '读档' }).first().click();
   await expect(page.getByRole('button', { name: '开始推演' })).toBeVisible();
 });
 
