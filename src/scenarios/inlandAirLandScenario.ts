@@ -349,11 +349,12 @@ export const SCENARIO_INLAND_AIR_LAND: ScenarioDefinition = {
     {
       id: 'inland_red_control_pass',
       side: 'RED',
-      title: '地面合成旅推进并控制中央山口走廊',
+      title: '地面合成旅推进并持续占控中央山口走廊 3 分钟',
       type: 'control_area',
       unitIds: [],
       areaPolygon: [[104.2, 30.48], [104.7, 30.48], [104.7, 30.82], [104.2, 30.82]],
       controlDomains: ['land'],
+      holdDurationSec: 180,
       required: true,
       points: 200,
     },

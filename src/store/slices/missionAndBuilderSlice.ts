@@ -222,10 +222,14 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
       } else if (draft.unitIds.length === 0) {
         return s;
       }
+      if (draft.holdDurationSec !== undefined && (draft.type !== 'control_area' || !Number.isFinite(draft.holdDurationSec) || draft.holdDurationSec < 1)) {
+        return s;
+      }
       const objective: ScenarioObjective = { id, title, side: draft.side, type: draft.type,
         unitIds: [...draft.unitIds],
         areaPolygon: draft.areaPolygon ? draft.areaPolygon.map((pt) => [...pt] as [number, number]) : undefined,
         controlDomains: draft.controlDomains ? [...draft.controlDomains] : undefined,
+        holdDurationSec: draft.holdDurationSec,
         required: draft.required, points: draft.points,
         criticalFailure: draft.criticalFailure, preserveCapability: draft.preserveCapability };
       const exists = s.objectives.some((candidate) => candidate.id === id);

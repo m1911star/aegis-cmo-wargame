@@ -3,6 +3,7 @@ import type {
   BattleResult,
   CombatLogEntry,
   MissionDefinition,
+  ObjectiveHoldProgress,
   ObjectiveProgress,
   PendingSortieOrder,
   RuntimeScenarioEvent,
@@ -23,6 +24,7 @@ export interface SimulationWorldState {
   rngState?: number;
   objectives?: ScenarioObjective[];
   objectiveProgress?: ObjectiveProgress;
+  objectiveHoldProgress?: ObjectiveHoldProgress;
   battleResult?: BattleResult;
   creditedDamage?: Record<string, number>;
   detectedMissileIds?: string[];

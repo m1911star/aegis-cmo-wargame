@@ -13,6 +13,7 @@ import type {
   Domain,
   EquipmentCatalog,
   MissionType,
+  ObjectiveHoldProgress,
   ObjectiveProgress,
   OrbatGroup,
   PendingSortieOrder,
@@ -62,6 +63,7 @@ export interface ObjectiveDraft {
   unitIds: string[];
   areaPolygon?: [number, number][];
   controlDomains?: Domain[];
+  holdDurationSec?: number;
   required: boolean;
   points: number;
   criticalFailure?: boolean;
@@ -100,6 +102,7 @@ export interface WargameStoreState {
   commandHistory: RecordedCommand[];
   replaySnapshots: BattleSnapshot[];
   objectiveProgress: ObjectiveProgress;
+  objectiveHoldProgress: ObjectiveHoldProgress;
   battleResult?: BattleResult;
   creditedDamage: Record<string, number>;
   detectedMissileIds: string[];

@@ -1,6 +1,7 @@
 import type {
   CombatLogEntry,
   EquipmentCatalog,
+  ObjectiveHoldProgress,
   ObjectiveProgress,
   PendingSortieOrder,
   RuntimeScenarioEvent,
@@ -27,11 +28,13 @@ export type EventResolutionContext = {
   catalog: EquipmentCatalog;
   nextSimTime: number;
   startTime: number;
+  dtSec?: number;
   score: ScoreLedger;
   rng: () => number;
   logs: CombatLogEntry[];
   objectives: ScenarioObjective[];
   objectiveProgress: ObjectiveProgress;
+  objectiveHoldProgress?: ObjectiveHoldProgress;
   victoryConditions?: VictoryConditionRule;
 };
 
@@ -45,11 +48,13 @@ export function resolveEventsAndObjectives({
   catalog,
   nextSimTime,
   startTime,
+  dtSec = 0,
   score,
   rng,
   logs,
   objectives,
   objectiveProgress,
+  objectiveHoldProgress = {},
   victoryConditions,
 }: EventResolutionContext): ReturnType<typeof evaluateObjectives> {
   const elapsedSec = Math.max(0, (nextSimTime - startTime) / 1000);
@@ -262,6 +267,8 @@ export function resolveEventsAndObjectives({
     score,
     nextSimTime,
     startTime,
-    victoryConditions
+    victoryConditions,
+    dtSec,
+    objectiveHoldProgress
   );
 }

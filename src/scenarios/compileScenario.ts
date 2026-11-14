@@ -49,6 +49,9 @@ export function compileScenario(
   index(scenario.objectives ?? [], 'scenario.objectives');
   if (scenario.objectives?.length && !scenario.victoryConditions) invalid('scenario.objectives', 'objectives require a time limit');
   for (const objective of scenario.objectives ?? []) {
+    if (objective.holdDurationSec !== undefined && objective.type !== 'control_area') {
+      invalid(`objective.${objective.id}`, 'holdDurationSec is only valid on control_area objectives');
+    }
     if (objective.type === 'control_area') {
       if (!objective.areaPolygon || objective.areaPolygon.length < 3) {
         invalid(`objective.${objective.id}`, 'control_area objectives require at least 3 polygon vertices');

@@ -1,9 +1,9 @@
 import { memo, useMemo, useState } from 'react';
-import * as turf from '@turf/turf';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-import { isActiveUnit } from '../engine/unitCapabilities';
+import { evaluateAreaControlStatus } from '../engine/objectives';
 import { useWargameStore } from '../store/useWargameStore';
+import { Progress } from './ui/progress';
 
 const OUTCOME_LABELS = {
   victory: '任务胜利',
@@ -19,6 +19,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const units = useWargameStore((state) => state.units);
   const side = useWargameStore((state) => state.playerSide);
   const progress = useShallow ? useWargameStore(useShallow((state) => state.objectiveProgress)) : {};
+  const holdProgress = useShallow ? useWargameStore(useShallow((state) => state.objectiveHoldProgress)) : {};
   const result = useWargameStore((state) => state.battleResult);
   const campaignState = useWargameStore((state) => state.campaignState);
   const advanceCampaignStage = useWargameStore((state) => state.advanceCampaignStage);
@@ -65,13 +66,37 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
           )}
           {objectives.map((objective) => {
             let controlHint = '';
-            if (objective.type === 'control_area' && !result && objective.areaPolygon && objective.areaPolygon.length >= 3) {
-              const area = turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]]);
-              const domains = objective.controlDomains?.length ? objective.controlDomains : ['land', 'surface'];
-              const ownInside = Object.values(units).some((u) =>
-                u.side === side && isActiveUnit(u) && domains.includes(u.domain) && turf.booleanPointInPolygon(u.position, area)
-              );
-              controlHint = ownInside ? ' · 己方力量已进驻' : ' · 待推进进驻';
+            let holdPct: number | null = null;
+            let holdIndicatorClass = 'bg-cyan-400';
+            if (objective.type === 'control_area' && objective.areaPolygon && objective.areaPolygon.length >= 3) {
+              const status = evaluateAreaControlStatus(objective, units);
+              const stateLabel =
+                status.state === 'uncontested'
+                  ? '己方稳固控制'
+                  : status.state === 'suppressing'
+                    ? '优势兵力压制中 (0.5x)'
+                    : status.state === 'contested'
+                      ? '敌我胶着争夺'
+                      : status.state === 'overwhelmed'
+                        ? '遭敌优势兵力压制'
+                        : '待推进进驻';
+              if (objective.holdDurationSec && objective.holdDurationSec > 0) {
+                const heldSec = Math.floor(holdProgress[objective.id] ?? 0);
+                holdPct = Math.min(100, Math.round(((holdProgress[objective.id] ?? 0) / objective.holdDurationSec) * 100));
+                holdIndicatorClass =
+                  progress[objective.id] === 'achieved'
+                    ? 'bg-emerald-400'
+                    : status.state === 'contested'
+                      ? 'bg-amber-400'
+                      : status.state === 'overwhelmed' || status.state === 'vacant'
+                        ? 'bg-rose-400'
+                        : 'bg-cyan-400';
+                controlHint = !result
+                  ? ` · 持续占控 ${heldSec}s/${objective.holdDurationSec}s (${stateLabel})`
+                  : '';
+              } else if (!result) {
+                controlHint = ` · ${stateLabel}`;
+              }
             }
             return (
               <div key={objective.id} className="border-t border-border pt-2">
@@ -96,6 +121,13 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
                   {objective.criticalFailure ? ' · 损失将终止任务' : ''}
                   {controlHint}
                 </p>
+                {holdPct !== null && (
+                  <Progress
+                    value={progress[objective.id] === 'achieved' ? 100 : holdPct}
+                    indicatorClassName={holdIndicatorClass}
+                    className="mt-1.5"
+                  />
+                )}
               </div>
             );
           })}

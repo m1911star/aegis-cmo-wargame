@@ -7,7 +7,7 @@ import { useWargameStore, type WargameStoreState } from './useWargameStore';
 export const BATTLE_RECORDING_VERSION = 2 as const;
 export const BATTLE_SAVE_VERSION = 1 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
-export const RULESET_VERSION = '2026.12-ruleset-22';
+export const RULESET_VERSION = '2026.12-ruleset-23';
 export const SCENARIO_SCHEMA_VERSION = 12;
 export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
 
@@ -75,7 +75,9 @@ export function canonicalBattleState(state: WargameStoreState = useWargameStore.
     pendingSortieOrders: state.pendingSortieOrders,
     groups: state.groups, objectives: state.objectives,
     environment: state.environment, score: state.score,
-    objectiveProgress: state.objectiveProgress, battleResult: state.battleResult,
+    objectiveProgress: state.objectiveProgress,
+    objectiveHoldProgress: state.objectiveHoldProgress,
+    battleResult: state.battleResult,
     creditedDamage: state.creditedDamage, detectedMissileIds: state.detectedMissileIds, aar: state.aar,
     playerSide: state.playerSide, playMode: state.playMode, referencePoints: state.referencePoints,
     commandSequence: state.commandSequence });
@@ -165,6 +167,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
     useWargameStore.setState({
       ...clonedSnapshot,
       pendingSortieOrders: clonedSnapshot.pendingSortieOrders ?? [],
+      objectiveHoldProgress: clonedSnapshot.objectiveHoldProgress ?? {},
       commandHistory: structuredClone(save.commandHistory),
       replaySnapshots: [structuredClone(clonedSnapshot)],
       activePerspective: clonedSnapshot.playerSide,
@@ -247,6 +250,7 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
       useWargameStore.setState({
         ...restored,
         pendingSortieOrders: restored.pendingSortieOrders ?? [],
+        objectiveHoldProgress: restored.objectiveHoldProgress ?? {},
         activePerspective: restored.playerSide,
         commandHistory: structuredClone(validRecording.commands.slice(0, restored.commandSequence)),
       });

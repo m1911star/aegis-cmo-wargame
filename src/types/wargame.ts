@@ -639,6 +639,7 @@ export interface ScenarioObjective {
   unitIds: string[];
   areaPolygon?: [number, number][];
   controlDomains?: Domain[];
+  holdDurationSec?: number;
   required: boolean;
   points: number;
   criticalFailure?: boolean;
@@ -648,6 +649,7 @@ export interface ScenarioObjective {
 }
 
 export type ObjectiveProgress = Record<string, 'pending' | 'achieved' | 'failed'>;
+export type ObjectiveHoldProgress = Record<string, number>;
 export interface BattleResult {
   endedAt: number;
   reason: 'time_limit' | 'critical_objective';

@@ -112,6 +112,7 @@ function cloneWorldForStepping(world: SimulationWorldState): WorkingWorldState {
     creditedDamage: { ...world.creditedDamage },
     detectedMissileIds: world.detectedMissileIds ? [...world.detectedMissileIds] : undefined,
     objectiveProgress: world.objectiveProgress ? { ...world.objectiveProgress } : {},
+    objectiveHoldProgress: world.objectiveHoldProgress ? { ...world.objectiveHoldProgress } : {},
     aar: world.aar
       ? {
           events: [...world.aar.events],
@@ -264,11 +265,13 @@ function stepWorkingWorldInPlace(
     catalog,
     nextSimTime,
     startTime,
+    dtSec,
     score,
     rng,
     logs,
     objectives: world.objectives ?? [],
     objectiveProgress: world.objectiveProgress ?? {},
+    objectiveHoldProgress: world.objectiveHoldProgress ?? {},
     victoryConditions: world.victoryConditions,
   });
   if (objectiveEvaluation.battleResult) {
@@ -283,6 +286,7 @@ function stepWorkingWorldInPlace(
   world.tick = nextTick;
   world.rngState = random.state();
   world.objectiveProgress = objectiveEvaluation.progress;
+  world.objectiveHoldProgress = objectiveEvaluation.holdProgress;
   world.battleResult = objectiveEvaluation.battleResult;
   world.creditedDamage = creditedDamage;
   world.detectedMissileIds = detectedMissileIds;

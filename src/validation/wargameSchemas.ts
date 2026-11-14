@@ -158,6 +158,7 @@ const scenario = object({
     id, side: oneOf(['RED', 'BLUE']), title: text,
     type: oneOf(['destroy', 'disable', 'preserve', 'observe', 'withdraw', 'control_area']),
     unitIds: array(id), areaPolygon: optional(array(coordinate, 3)), controlDomains: optional(array(domain)),
+    holdDurationSec: optional(number(1)),
     required: boolean, points: number(0), criticalFailure: optional(boolean), preserveCapability: optional(boolean),
     withdrawAreaPolygon: optional(array(coordinate, 3)), withdrawUnitDomains: optional(array(domain, 1)),
   }))),

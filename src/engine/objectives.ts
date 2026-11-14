@@ -1,6 +1,53 @@
 import * as turf from '@turf/turf';
-import type { BattleResult, CombatLogEntry, ObjectiveProgress, RuntimeUnit, ScenarioObjective, ScoreLedger, TacticalContact, VictoryConditionRule } from '../types/wargame';
+import type { BattleResult, CombatLogEntry, ObjectiveHoldProgress, ObjectiveProgress, RuntimeUnit, ScenarioObjective, ScoreLedger, TacticalContact, VictoryConditionRule } from '../types/wargame';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
+
+export type AreaControlState = 'uncontested' | 'suppressing' | 'contested' | 'overwhelmed' | 'vacant';
+
+export interface AreaControlEvaluation {
+  state: AreaControlState;
+  ownStrength: number;
+  hostileStrength: number;
+}
+
+export function evaluateAreaControlStatus(
+  objective: ScenarioObjective,
+  units: Record<string, RuntimeUnit>
+): AreaControlEvaluation {
+  if (!objective.areaPolygon || objective.areaPolygon.length < 3) {
+    return { state: 'vacant', ownStrength: 0, hostileStrength: 0 };
+  }
+  const area = turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]]);
+  const domains = objective.controlDomains && objective.controlDomains.length > 0
+    ? objective.controlDomains
+    : ['land', 'surface'];
+  let ownStrength = 0;
+  let hostileStrength = 0;
+  for (const unit of Object.values(units)) {
+    if (!isActiveUnit(unit) || !domains.includes(unit.domain) || unit.side === 'NEUTRAL') continue;
+    if (getUnitCapabilities(unit).state === 'mission_killed') continue;
+    if (!turf.booleanPointInPolygon(unit.position, area)) continue;
+    const weight = unit.category === 'ground_force' ? 1.5 : 1.0;
+    const unitStrength = Math.max(0.25, unit.hp / Math.max(1, unit.maxHp)) * weight;
+    if (unit.side === objective.side) ownStrength += unitStrength;
+    else hostileStrength += unitStrength;
+  }
+  const state: AreaControlState =
+    ownStrength <= 0
+      ? 'vacant'
+      : hostileStrength <= 0
+        ? 'uncontested'
+        : ownStrength >= hostileStrength * 2.5
+          ? 'suppressing'
+          : hostileStrength >= ownStrength * 2.5
+            ? 'overwhelmed'
+            : 'contested';
+  return {
+    state,
+    ownStrength: Number(ownStrength.toFixed(2)),
+    hostileStrength: Number(hostileStrength.toFixed(2)),
+  };
+}
 
 export function creditDamage(
   score: ScoreLedger, victim: RuntimeUnit, ledger: Record<string, number>, fraction: number,
@@ -62,9 +109,10 @@ export function resolveWithdrawalAreas(
 export function evaluateObjectives(
   objectives: ScenarioObjective[], previous: ObjectiveProgress, units: Record<string, RuntimeUnit>,
   contacts: Record<string, TacticalContact>, score: ScoreLedger, simTime: number, startTime: number,
-  victory?: VictoryConditionRule
+  victory?: VictoryConditionRule, dtSec = 0, previousHoldSec: ObjectiveHoldProgress = {}
 ) {
   const progress = { ...previous };
+  const holdProgress: ObjectiveHoldProgress = { ...previousHoldSec };
   const logs: CombatLogEntry[] = [];
   const timedOut = !!victory && simTime - startTime >= victory.durationSec * 1000;
   for (const objective of objectives) {
@@ -77,20 +125,25 @@ export function evaluateObjectives(
     let achieved = false;
     let failed = false;
     if (objective.type === 'control_area') {
-      const area = objective.areaPolygon && objective.areaPolygon.length >= 3
-        ? turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]])
-        : undefined;
-      const domains = objective.controlDomains && objective.controlDomains.length > 0
-        ? objective.controlDomains
-        : ['land', 'surface'];
-      if (timedOut && area) {
-        const inside = Object.values(units).filter((unit) =>
-          isActiveUnit(unit) && domains.includes(unit.domain) &&
-          turf.booleanPointInPolygon(unit.position, area)
+      const control = evaluateAreaControlStatus(objective, units);
+      if (objective.holdDurationSec && objective.holdDurationSec > 0) {
+        const rate =
+          control.state === 'uncontested'
+            ? 1
+            : control.state === 'suppressing'
+              ? 0.5
+              : control.state === 'vacant' || control.state === 'overwhelmed'
+                ? -0.5
+                : 0;
+        const nextHold = Math.min(
+          objective.holdDurationSec,
+          Math.max(0, Number(((holdProgress[objective.id] ?? 0) + dtSec * rate).toFixed(4)))
         );
-        const ownInside = inside.filter((unit) => unit.side === objective.side);
-        const hostileInside = inside.filter((unit) => unit.side !== objective.side && unit.side !== 'NEUTRAL');
-        achieved = ownInside.length > 0 && hostileInside.length === 0;
+        holdProgress[objective.id] = nextHold;
+        achieved = nextHold + 1e-6 >= objective.holdDurationSec;
+        failed = !achieved && timedOut;
+      } else if (timedOut && objective.areaPolygon && objective.areaPolygon.length >= 3) {
+        achieved = control.state === 'uncontested' || control.state === 'suppressing';
         failed = !achieved;
       }
     } else {
@@ -135,5 +188,5 @@ export function evaluateObjectives(
     logs.push({ id: `battle_end_${simTime}`, simTime, side: 'SYSTEM', category: 'EVENT', severity: 'info',
       title: '想定结束', message: '仿真已停止。请核对主要目标、付出的代价与关键战报。' });
   }
-  return { progress, logs, battleResult };
+  return { progress, holdProgress, logs, battleResult };
 }

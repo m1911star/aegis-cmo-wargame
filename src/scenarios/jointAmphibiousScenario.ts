@@ -361,11 +361,12 @@ export const SCENARIO_JOINT_AMPHIBIOUS_ASSAULT: ScenarioDefinition = {
     {
       id: 'joint_red_control_beach',
       side: 'RED',
-      title: '夺控东岸登陆滩头区（清敌并保持存在）',
+      title: '夺控东岸登陆滩头区（压制清敌并持续占控 4 分钟）',
       type: 'control_area',
       unitIds: [],
       areaPolygon: [[120.35, 23.55], [120.85, 23.55], [120.85, 23.95], [120.35, 23.95]],
       controlDomains: ['surface', 'land'],
+      holdDurationSec: 240,
       required: true,
       points: 220,
     },

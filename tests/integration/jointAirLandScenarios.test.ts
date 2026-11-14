@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
 import { launchCarrierSortie } from '../../src/engine/carrierOperations';
 import { hasRadarLineOfSight } from '../../src/engine/environment';
-import { evaluateObjectives } from '../../src/engine/objectives';
+import { evaluateAreaControlStatus, evaluateObjectives } from '../../src/engine/objectives';
 import { recoverySolution } from '../../src/engine/operations';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
 import { createRuntimeUnitFromPlacement, stepSimulationWorld } from '../../src/engine/simulationEngine';
@@ -197,6 +197,58 @@ describe('Joint sea-land-air & inland air-land mechanics', () => {
     expect(evaluateObjectives([obj], {}, { r: redUnit, b: blueUnit }, {}, emptyScore(), 10000, 0, rules).progress.ctrl).toBe('failed');
     // At timeout when uncontested: achieved
     expect(evaluateObjectives([obj], {}, { r: redUnit }, {}, emptyScore(), 10000, 0, rules).progress.ctrl).toBe('achieved');
+  });
+
+  test('control_area with holdDurationSec tracks continuous hold progress, force-ratio suppression, and mission-kill exclusion', () => {
+    const holdObj: ScenarioObjective = {
+      id: 'ctrl_hold',
+      side: 'RED',
+      title: 'Hold Pass 10s',
+      type: 'control_area',
+      unitIds: [],
+      areaPolygon: [[104.2, 30.4], [104.7, 30.4], [104.7, 30.8], [104.2, 30.8]],
+      controlDomains: ['land'],
+      holdDurationSec: 10,
+      required: true,
+      points: 200,
+    };
+    const red1 = createRuntimeUnitFromPlacement(
+      { id: 'r1', name: 'R1', callsign: 'R1', side: 'RED', platformId: 'red_armor_brigade', parentGroupId: 'g', position: [104.4, 30.6], heading: 90 },
+      catalog
+    );
+    const red2 = createRuntimeUnitFromPlacement(
+      { id: 'r2', name: 'R2', callsign: 'R2', side: 'RED', platformId: 'red_armor_brigade', parentGroupId: 'g', position: [104.45, 30.6], heading: 90 },
+      catalog
+    );
+    const blue1 = createRuntimeUnitFromPlacement(
+      { id: 'b1', name: 'B1', callsign: 'B1', side: 'BLUE', platformId: 'blue_armor_brigade', parentGroupId: 'g2', position: [104.5, 30.6], heading: 270 },
+      catalog
+    );
+    const rules = { durationSec: 100, tacticalVictoryThreshold: 100, decisiveVictoryThreshold: 200 };
+
+    // 1. Uncontested advances at 1.0x
+    let res = evaluateObjectives([holdObj], {}, { r1: red1 }, {}, emptyScore(), 4000, 0, rules, 4, {});
+    expect(res.holdProgress.ctrl_hold).toBe(4);
+    expect(res.progress.ctrl_hold).toBe('pending');
+
+    // 2. Contested parity (1v1) pauses progress
+    res = evaluateObjectives([holdObj], res.progress, { r1: red1, b1: blue1 }, {}, emptyScore(), 8000, 0, rules, 4, res.holdProgress);
+    expect(res.holdProgress.ctrl_hold).toBe(4);
+
+    // 3. Force-ratio suppression (>= 2.5x: 2 full brigades = 3.0 vs crippled defender = 0.525) advances at 0.5x
+    blue1.hp = Math.ceil(blue1.maxHp * 0.35);
+    expect(evaluateAreaControlStatus(holdObj, { r1: red1, r2: red2, b1: blue1 }).state).toBe('suppressing');
+    res = evaluateObjectives([holdObj], res.progress, { r1: red1, r2: red2, b1: blue1 }, {}, emptyScore(), 12000, 0, rules, 4, res.holdProgress);
+    expect(res.holdProgress.ctrl_hold).toBe(6);
+
+    // 4. Mission-killed defender (< 30% HP) is fully neutralized -> uncontested 1.0x completes early before timeout!
+    blue1.hp = Math.floor(blue1.maxHp * 0.2);
+    expect(evaluateAreaControlStatus(holdObj, { r1: red1, b1: blue1 }).state).toBe('uncontested');
+    const score = emptyScore();
+    res = evaluateObjectives([holdObj], res.progress, { r1: red1, b1: blue1 }, {}, score, 16000, 0, rules, 4, res.holdProgress);
+    expect(res.progress.ctrl_hold).toBe('achieved');
+    expect(score.redScore).toBe(200);
+    expect(res.battleResult).toBeUndefined();
   });
 
   test('joint amphibious and pure inland air-land scenarios compile, isolate domains, and replay deterministically', () => {
