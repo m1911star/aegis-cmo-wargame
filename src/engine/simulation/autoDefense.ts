@@ -3,6 +3,7 @@ import type {
   CombatLogEntry,
   EquipmentCatalog,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScoreLedger,
   TacticalContact,
   TacticalMission,
@@ -23,6 +24,7 @@ export type AutoDefenseContext = {
   contacts: Record<string, TacticalContact>;
   weaponsInFlight: Record<string, WeaponInFlight>;
   catalog: EquipmentCatalog;
+  environment?: ScenarioEnvironment;
   nextSimTime: number;
   score: ScoreLedger;
   logs: CombatLogEntry[];
@@ -40,6 +42,7 @@ export function runAutoDefense({
   contacts,
   weaponsInFlight,
   catalog,
+  environment,
   nextSimTime,
   score,
   logs,
@@ -92,7 +95,8 @@ export function runAutoDefense({
           units,
           catalog,
           nextSimTime,
-          shooter
+          shooter,
+          environment
         );
         if (!missileContact) continue;
         const solution = evaluateFireControl(

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWargameStore } from './store/useWargameStore';
+import { simulationWorkerClient } from './engine/workerClient';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
 import { RightUnitTelemetryInspector } from './components/RightUnitTelemetryInspector';
@@ -7,6 +8,7 @@ import { BottomCombatLogDock } from './components/BottomCombatLogDock';
 import { TacticalModals } from './components/TacticalModals';
 import { TacticalMapCanvas } from './map/TacticalMapCanvas';
 import { RiskEngagementDialog } from './components/FireControlDiagnostics';
+import { TutorialChecklistOverlay } from './components/TutorialChecklistOverlay';
 
 export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
@@ -48,18 +50,78 @@ export default function App() {
 
     let last = performance.now();
     let backlog = 0;
+    let workerBusy = false;
+    let cancelled = false;
     // Speed changes the time budget, never the engine's atomic step. Keep lag rather than skip ticks.
     const timer = window.setInterval(() => {
       const now = performance.now();
       backlog += (now - last) * timeScale / 1000;
       last = now;
-      if (useWargameStore.getState().timeScale !== timeScale) return;
+      const s = useWargameStore.getState();
+      if (s.timeScale !== timeScale || s.battleResult) return;
+      if (timeScale >= 15 && typeof Worker !== 'undefined') {
+        if (workerBusy) return;
+        const budget = Math.min(15, backlog);
+        if (budget + s.pendingSimSeconds + 1e-9 < 0.25) return;
+        backlog -= budget;
+        workerBusy = true;
+        const expectedTick = s.tick;
+        const expectedSeq = s.commandSequence;
+        const expectedScenarioId = s.currentScenario.id;
+        void simulationWorkerClient
+          .runBatch(
+            {
+              startTime: s.startTime,
+              tick: s.tick,
+              rngState: s.rngState,
+              objectives: s.objectives,
+              objectiveProgress: s.objectiveProgress,
+              creditedDamage: s.creditedDamage,
+              detectedMissileIds: s.detectedMissileIds,
+              aar: s.aar,
+              simTime: s.simTime,
+              units: s.units,
+              contacts: s.contacts,
+              weaponsInFlight: s.weaponsInFlight,
+              explosions: s.explosions,
+              missions: s.missions,
+              events: s.events,
+              environment: s.environment,
+              victoryConditions: s.currentScenario.victoryConditions,
+              score: s.score,
+            },
+            s.catalog,
+            budget + s.pendingSimSeconds,
+            s.autoPause,
+            s.playerSide,
+            expectedSeq
+          )
+          .then((result) => {
+            if (cancelled) return;
+            const applied = useWargameStore
+              .getState()
+              .applySimulationResult(result, expectedTick, expectedSeq, expectedScenarioId);
+            if (!applied) {
+              backlog = 0;
+            }
+          })
+          .catch(() => {
+            if (!cancelled) stepSingleTick(budget);
+          })
+          .finally(() => {
+            workerBusy = false;
+          });
+        return;
+      }
       const budget = Math.min(15, backlog);
       backlog -= budget;
       stepSingleTick(budget);
     }, 100);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [timeScale, stepSingleTick]);
 
   // --------------------------------------------------------------------------
@@ -154,6 +216,7 @@ export default function App() {
         </div>
         <main className="flex-1 h-full relative min-w-0">
           <TacticalMapCanvas />
+          <TutorialChecklistOverlay />
         </main>
         <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!rightOpen}>
           <RightUnitTelemetryInspector />

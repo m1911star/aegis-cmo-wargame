@@ -14,6 +14,7 @@ import { resolveEquipmentCatalog } from '../catalog/equipmentCatalog';
 import { createRuntimeUnitFromPlacement } from '../engine/simulationEngine';
 import { compileScenario } from './compileScenario';
 import { INFORMATION_EXERCISE } from './informationExercise';
+import { SCENARIO_INTERACTIVE_TUTORIAL } from './tutorialScenario';
 
 // ============================================================================
 // AEGIS-CMO // 内置战役想定剧本库 v2.0
@@ -81,8 +82,8 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
   ],
   environment: {
     landPolygons: [
-      { id: 'east_mainland', name: '东海西侧大陆简化禁区', areaPolygon: [[119, 23], [121.5, 23], [121.5, 29], [119, 29]] },
-      { id: 'ishigaki_land', name: '石垣岛简化陆地区', areaPolygon: [[124.08, 24.30], [124.25, 24.30], [124.25, 24.47], [124.08, 24.47]] },
+      { id: 'east_mainland', name: '东海西侧大陆简化禁区', elevationM: 450, areaPolygon: [[119, 23], [121.5, 23], [121.5, 29], [119, 29]] },
+      { id: 'ishigaki_land', name: '石垣岛简化陆地区', elevationM: 350, areaPolygon: [[124.08, 24.30], [124.25, 24.30], [124.25, 24.47], [124.08, 24.47]] },
     ],
     acousticZones: [
       { id: 'east_shallow_shelf', name: '东海大陆架浅海', kind: 'shallow', sonarRangeFactor: 0.72,
@@ -1090,6 +1091,7 @@ export const BUILTIN_SCENARIOS: ScenarioDefinition[] = [
   SCENARIO_EAST_SEA_THUNDER,
   SCENARIO_DEEP_SEA_CARRIER_HUNT,
   INFORMATION_EXERCISE,
+  SCENARIO_INTERACTIVE_TUTORIAL,
 ];
 
 /**

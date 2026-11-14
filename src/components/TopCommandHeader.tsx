@@ -47,6 +47,9 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
   const battleResult = useWargameStore((s) => s.battleResult);
+  const campaignState = useWargameStore((s) => s.campaignState);
+  const startCampaign = useWargameStore((s) => s.startCampaign);
+  const exitCampaign = useWargameStore((s) => s.exitCampaign);
   const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
   const setPlayMode = useWargameStore((s) => s.setPlayMode);
@@ -73,6 +76,17 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           </select>
           <button onClick={() => setActiveModal('briefing')} className="toolbar-button" title="查看想定简报">
             <BookOpen /><span>简报</span>
+          </button>
+          <button
+            onClick={() => (campaignState ? exitCampaign() : startCampaign())}
+            className={`toolbar-button ${campaignState ? 'text-amber-300' : 'text-cyan-300'}`}
+            title={campaignState ? '退出战役连贯模式' : '开启三阶段西太联合战役'}
+          >
+            <span>
+              {campaignState
+                ? `战役 ${campaignState.currentStageIndex + 1}/${campaignState.totalStages}`
+                : '战役模式'}
+            </span>
           </button>
         </div>
         <div className="utility-controls">

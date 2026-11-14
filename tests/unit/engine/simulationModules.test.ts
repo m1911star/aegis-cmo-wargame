@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
+import { hasRadarLineOfSight } from '../../../src/engine/environment';
+import { computeMissileEnergyFactor } from '../../../src/engine/guidance';
 import { evaluateBattleAssessment } from '../../../src/engine/simulation/battleAssessment';
 import { createRuntimeUnitFromPlacement } from '../../../src/engine/simulation/unitFactory';
 import { advanceSimulation, type SimulationWorldState } from '../../../src/engine/simulationEngine';
-import type { InitialUnitPlacement, ScoreLedger } from '../../../src/types/wargame';
+import { SimulationWorkerClient } from '../../../src/engine/workerClient';
+import { handleSimulationWorkerRequest } from '../../../src/engine/workerProtocol';
+import type { InitialUnitPlacement, ScoreLedger, WeaponInFlight } from '../../../src/types/wargame';
 
 const emptyScore = (): ScoreLedger => ({
   redLosses: 0,
@@ -82,5 +86,79 @@ describe('modular simulation boundaries', () => {
         'GOD'
       )
     ).toThrow('Invalid simulation duration');
+  });
+
+  test('terrain elevation blocks low-altitude radar LOS while high-altitude observers clear it', () => {
+    const env = {
+      landPolygons: [
+        {
+          id: 'ridge',
+          name: 'Ridge',
+          elevationM: 400,
+          areaPolygon: [[0.08, -0.2], [0.12, -0.2], [0.12, 0.2], [0.08, 0.2]] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    expect(hasRadarLineOfSight([0, 0], 0, 20, [0.2, 0], 15, env)).toBe(false);
+    expect(hasRadarLineOfSight([0, 0], 9000, 0, [0.2, 0], 15, env)).toBe(true);
+    expect(hasRadarLineOfSight([0.1, 0], 100, 15, [0.2, 0], 15, env)).toBe(true);
+  });
+
+  test('missile energy factor stays at 1.0 inside 55% range and decays smoothly afterward', () => {
+    const weapon = catalog.weapons.pl15_aam;
+    const baseMissile = {
+      traveledKm: weapon.maxRangeKm * 0.4,
+    } as WeaponInFlight;
+    expect(computeMissileEnergyFactor(baseMissile, weapon)).toBe(1);
+    expect(computeMissileEnergyFactor({ ...baseMissile, traveledKm: weapon.maxRangeKm }, weapon)).toBeCloseTo(0.55, 4);
+  });
+
+  test('worker protocol and sync fallback client match advanceSimulation identically', async () => {
+    const unit = createRuntimeUnitFromPlacement(
+      {
+        id: 'w_unit',
+        name: 'W',
+        callsign: 'W1',
+        side: 'RED',
+        platformId: 'j20_mighty_dragon',
+        parentGroupId: 'red_air_cmd',
+        position: [122, 25],
+        heading: 90,
+        speedKts: 500,
+      },
+      catalog
+    );
+    const world: SimulationWorldState = {
+      startTime: 0,
+      simTime: 0,
+      tick: 0,
+      rngState: 42,
+      units: { w_unit: unit },
+      contacts: {},
+      weaponsInFlight: {},
+      explosions: [],
+      missions: [],
+      score: emptyScore(),
+    };
+    const pauses = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
+    const syncResult = advanceSimulation(world, catalog, 2, pauses, 'RED');
+    const protocolResult = handleSimulationWorkerRequest({
+      type: 'ADVANCE_BATCH',
+      requestId: 1,
+      epoch: 0,
+      world,
+      catalog,
+      seconds: 2,
+      autoPause: pauses,
+      playerSide: 'RED',
+    });
+    expect(protocolResult.type).toBe('ADVANCE_BATCH_RESULT');
+    if (protocolResult.type === 'ADVANCE_BATCH_RESULT') {
+      expect(protocolResult.result.nextState).toEqual(syncResult.nextState);
+    }
+    const client = new SimulationWorkerClient();
+    const clientResult = await client.runBatch(world, catalog, 2, pauses, 'RED', 0);
+    expect(clientResult.nextState).toEqual(syncResult.nextState);
   });
 });

@@ -1,11 +1,15 @@
-import { COMMAND_ACTIONS, FIXED_DT_SEC, type RecordedCommand } from '../engine/determinism';
+import { COMMAND_ACTIONS, FIXED_DT_SEC, SNAPSHOT_INTERVAL_TICKS, type RecordedCommand } from '../engine/determinism';
 import { compileScenario } from '../scenarios/compileScenario';
 import type { ScenarioDefinition } from '../types/wargame';
 import { useWargameStore, type WargameStoreState } from './useWargameStore';
 
 export const BATTLE_RECORDING_VERSION = 2 as const;
-export const RULESET_VERSION = '2026.11-ruleset-15';
+export const BATTLE_SAVE_VERSION = 1 as const;
+export { SNAPSHOT_INTERVAL_TICKS };
+export const RULESET_VERSION = '2026.11-ruleset-16';
 export const SCENARIO_SCHEMA_VERSION = 8;
+
+export type BattleSnapshot = ReturnType<typeof canonicalBattleState>;
 
 export interface BattleRecording {
   version: typeof BATTLE_RECORDING_VERSION;
@@ -16,6 +20,34 @@ export interface BattleRecording {
   seed: number;
   untilTick: number;
   commands: RecordedCommand[];
+  snapshots?: BattleSnapshot[];
+}
+
+export interface BattleSaveState {
+  kind: 'aegis_battle_save';
+  version: typeof BATTLE_SAVE_VERSION;
+  rulesetVersion: string;
+  catalogVersion: string;
+  scenarioSchemaVersion: number;
+  scenario: ScenarioDefinition;
+  seed: number;
+  commandHistory: RecordedCommand[];
+  snapshot: BattleSnapshot;
+  digest: string;
+}
+
+export function computeCanonicalDigest(state: BattleSnapshot): string {
+  const payload = JSON.stringify(state);
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < payload.length; i++) {
+    const ch = payload.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 ^= ch + (i & 255);
+    h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
+  }
+  return `${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`;
 }
 
 export function captureBattleRecording(): BattleRecording {
@@ -29,6 +61,7 @@ export function captureBattleRecording(): BattleRecording {
     seed: state.seed,
     untilTick: state.tick,
     commands: state.commandHistory,
+    snapshots: state.replaySnapshots.length > 0 ? state.replaySnapshots : undefined,
   });
 }
 
@@ -43,6 +76,89 @@ export function canonicalBattleState(state: WargameStoreState = useWargameStore.
     creditedDamage: state.creditedDamage, detectedMissileIds: state.detectedMissileIds, aar: state.aar,
     playerSide: state.playerSide, playMode: state.playMode, referencePoints: state.referencePoints,
     commandSequence: state.commandSequence });
+}
+
+export function captureBattleSave(): BattleSaveState {
+  const state = useWargameStore.getState();
+  const snapshot = canonicalBattleState(state);
+  return structuredClone({
+    kind: 'aegis_battle_save',
+    version: BATTLE_SAVE_VERSION,
+    rulesetVersion: RULESET_VERSION,
+    catalogVersion: state.catalog.version,
+    scenarioSchemaVersion: SCENARIO_SCHEMA_VERSION,
+    scenario: state.currentScenario,
+    seed: state.seed,
+    commandHistory: state.commandHistory,
+    snapshot,
+    digest: computeCanonicalDigest(snapshot),
+  });
+}
+
+function validateCommandList(commands: RecordedCommand[], untilTick: number) {
+  for (const [i, command] of commands.entries()) {
+    if (!COMMAND_ACTIONS.includes(command.action as typeof COMMAND_ACTIONS[number]) ||
+        !Number.isSafeInteger(command.tick) || command.tick < 0 || command.tick > untilTick ||
+        command.sequence !== i || !Array.isArray(command.args) ||
+        (i > 0 && command.tick < commands[i - 1].tick)) throw new Error('Invalid command sequence');
+  }
+}
+
+export function restoreBattleSave(input: unknown): BattleSnapshot {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('Invalid battle save header');
+  }
+  const save = input as Partial<BattleSaveState>;
+  if (save.kind !== 'aegis_battle_save' || save.version !== BATTLE_SAVE_VERSION) {
+    throw new Error(`Unsupported save version ${String(save.version ?? 'missing')}; expected v${BATTLE_SAVE_VERSION}`);
+  }
+  if (save.rulesetVersion !== RULESET_VERSION) {
+    throw new Error(`Incompatible ruleset version ${String(save.rulesetVersion ?? 'missing')}; expected ${RULESET_VERSION}`);
+  }
+  if (save.scenarioSchemaVersion !== SCENARIO_SCHEMA_VERSION) {
+    throw new Error(`Incompatible scenario schema version ${String(save.scenarioSchemaVersion ?? 'missing')}; expected ${SCENARIO_SCHEMA_VERSION}`);
+  }
+  if (!Number.isSafeInteger(save.seed) || !Array.isArray(save.commandHistory) || !save.snapshot || typeof save.digest !== 'string') {
+    throw new Error('Invalid battle save payload');
+  }
+  if (!Number.isSafeInteger(save.snapshot.tick) || save.snapshot.tick < 0 || save.snapshot.tick > 200000) {
+    throw new Error('Invalid save snapshot tick');
+  }
+  if (save.snapshot.commandSequence !== save.commandHistory.length) {
+    throw new Error('Save command history length mismatch');
+  }
+  validateCommandList(save.commandHistory, save.snapshot.tick);
+  const compiled = compileScenario(save.scenario);
+  if (save.catalogVersion !== compiled.catalog.version) {
+    throw new Error(`Incompatible catalog version ${String(save.catalogVersion ?? 'missing')}; scenario resolves to ${compiled.catalog.version}`);
+  }
+  const clonedSnapshot = structuredClone(save.snapshot);
+  if (computeCanonicalDigest(clonedSnapshot) !== save.digest) {
+    throw new Error('Battle save digest mismatch (corrupted or tampered state)');
+  }
+
+  const previous = useWargameStore.getState();
+  try {
+    useWargameStore.getState().loadScenario(compiled.scenario, false, save.seed);
+    useWargameStore.setState({
+      ...clonedSnapshot,
+      commandHistory: structuredClone(save.commandHistory),
+      replaySnapshots: [structuredClone(clonedSnapshot)],
+      activePerspective: clonedSnapshot.playerSide,
+      timeScale: 0,
+      pendingSimSeconds: 0,
+      selectedUnitId: null,
+      selectedContactId: null,
+      pendingRiskEngagement: null,
+      pendingSpawnConfig: null,
+      pendingWeaponIdForEngage: null,
+      interactionMode: 'select',
+    });
+    return canonicalBattleState();
+  } catch (error) {
+    useWargameStore.setState(previous, true);
+    throw error;
+  }
 }
 
 export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick?: number) {
@@ -73,17 +189,46 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
     throw new Error(`Incompatible catalog version ${String(recording.catalogVersion ?? 'missing')}; scenario resolves to ${compiled.catalog.version}`);
   }
   const validRecording = recording as BattleRecording;
-  for (const [i, command] of validRecording.commands.entries()) {
-    if (!COMMAND_ACTIONS.includes(command.action as typeof COMMAND_ACTIONS[number]) ||
-        !Number.isSafeInteger(command.tick) || command.tick < 0 || command.tick > validRecording.untilTick ||
-        command.sequence !== i || !Array.isArray(command.args) ||
-        (i > 0 && command.tick < validRecording.commands[i - 1].tick)) throw new Error('Invalid command sequence');
+  validateCommandList(validRecording.commands, validRecording.untilTick);
+
+  let bestSnapshot: BattleSnapshot | undefined;
+  if (Array.isArray(validRecording.snapshots)) {
+    let prevSnapTick = -1;
+    for (const snap of validRecording.snapshots) {
+      if (!snap || typeof snap !== 'object' || !Number.isSafeInteger(snap.tick) ||
+          snap.tick < 0 || snap.tick > validRecording.untilTick || snap.tick <= prevSnapTick ||
+          !Number.isSafeInteger(snap.commandSequence) || snap.commandSequence < 0 ||
+          snap.commandSequence > validRecording.commands.length) {
+        throw new Error('Invalid recording snapshot metadata');
+      }
+      if (snap.commandSequence > 0 && validRecording.commands[snap.commandSequence - 1].tick > snap.tick) {
+        throw new Error('Invalid recording snapshot command alignment');
+      }
+      if (snap.commandSequence < validRecording.commands.length && validRecording.commands[snap.commandSequence].tick < snap.tick) {
+        throw new Error('Invalid recording snapshot future command alignment');
+      }
+      prevSnapTick = snap.tick;
+      if (snap.tick <= replayUntilTick) {
+        bestSnapshot = snap;
+      }
+    }
   }
+
   const previous = useWargameStore.getState();
   try {
     useWargameStore.getState().loadScenario(compiled.scenario, false, validRecording.seed);
     useWargameStore.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
     let index = 0;
+    if (bestSnapshot && bestSnapshot.tick > 0) {
+      const restored = structuredClone(bestSnapshot);
+      useWargameStore.setState({
+        ...restored,
+        activePerspective: restored.playerSide,
+        commandHistory: structuredClone(validRecording.commands.slice(0, restored.commandSequence)),
+      });
+      index = restored.commandSequence;
+    }
+    const collectedSnapshots: BattleSnapshot[] = validRecording.snapshots ? structuredClone(validRecording.snapshots) : [];
     while (true) {
       let state = useWargameStore.getState();
       while (validRecording.commands[index]?.tick === state.tick) {
@@ -99,8 +244,14 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
       const nextCommandTick = validRecording.commands[index]?.tick ?? replayUntilTick;
       const ticks = Math.min(batchTicks, nextCommandTick - state.tick, replayUntilTick - state.tick);
       state.stepSingleTick(ticks * FIXED_DT_SEC);
+      const afterStep = useWargameStore.getState();
+      if (!validRecording.snapshots && afterStep.tick > 0 && afterStep.tick % SNAPSHOT_INTERVAL_TICKS === 0 &&
+          collectedSnapshots.length < 60) {
+        collectedSnapshots.push(canonicalBattleState(afterStep));
+      }
     }
     useWargameStore.setState({ autoPause: previous.autoPause, timeScale: 0,
+      replaySnapshots: collectedSnapshots.length ? collectedSnapshots : useWargameStore.getState().replaySnapshots,
       pendingRiskEngagement: null, pendingSpawnConfig: null, pendingWeaponIdForEngage: null, interactionMode: 'select' });
     return canonicalBattleState();
   } catch (error) {

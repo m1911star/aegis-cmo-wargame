@@ -17,6 +17,8 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
     useShallow((state) => state.objectiveProgress)
   );
   const result = useWargameStore((state) => state.battleResult);
+  const campaignState = useWargameStore((state) => state.campaignState);
+  const advanceCampaignStage = useWargameStore((state) => state.advanceCampaignStage);
   // The display only changes once per whole visible second, not every physics tick.
   const elapsedDisplaySec = useWargameStore((state) =>
     Math.ceil((state.simTime - state.startTime) / 1000)
@@ -72,9 +74,26 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
         </div>
       ))}
       {result && (
-        <p className="text-slate-400">
-          推演已停止。展开战报，回看支援丢失、风险射击、返航与任务完成事件。
-        </p>
+        <div className="space-y-2">
+          <p className="text-slate-400">
+            推演已停止。展开战报，回看支援丢失、风险射击、返航与任务完成事件。
+          </p>
+          {campaignState && !campaignState.finished && (
+            <button
+              onClick={advanceCampaignStage}
+              className="toolbar-button text-cyan-300"
+            >
+              {campaignState.currentStageIndex + 1 < campaignState.totalStages
+                ? `推进至第 ${campaignState.currentStageIndex + 2} 阶段战役`
+                : '结算全部战役战果'}
+            </button>
+          )}
+          {campaignState?.finished && (
+            <p className="text-emerald-300 font-bold">
+              战役已圆满结束！累计积分 {campaignState.carryover.cumulativeScore} · 胜场 {campaignState.carryover.victoryCount}/{campaignState.totalStages}
+            </p>
+          )}
+        </div>
       )}
     </section>
   );

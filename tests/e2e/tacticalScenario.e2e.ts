@@ -148,3 +148,22 @@ test('starts, advances and pauses the simulation from the command header', async
   await page.getByRole('button', { name: '暂停推演' }).click();
   await expect(page.getByRole('button', { name: '开始推演' })).toBeVisible();
 });
+
+test('runs interactive tutorial checklist and campaign progression controls', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('interactive_command_tutorial');
+  await expect(page.getByLabel('新兵互动教学指引')).toBeVisible();
+  await page.keyboard.press('F9');
+  await expect(page.getByText('指挥官教学指引 (1/5)')).toBeVisible();
+
+  await page.getByRole('button', { name: '战役模式' }).click();
+  await expect(page.getByRole('button', { name: '战役 1/3' })).toBeVisible();
+});
+
+test('captures and restores a resumable battle save in Scenario I/O modal', async ({ page }) => {
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await page.getByRole('button', { name: '想定管理' }).click();
+  await page.getByRole('button', { name: '生成断点存档 JSON' }).click();
+  await expect(page.getByLabel('想定或重放 JSON')).toContainText('aegis_battle_save');
+  await page.getByRole('button', { name: '恢复断点存档' }).click();
+  await expect(page.getByRole('button', { name: '开始推演' })).toBeVisible();
+});

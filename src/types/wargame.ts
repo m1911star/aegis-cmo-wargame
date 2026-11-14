@@ -627,6 +627,7 @@ export interface EnvironmentPolygon {
   id: string;
   name: string;
   areaPolygon: [number, number][];
+  elevationM?: number;
 }
 
 export interface AcousticZone extends EnvironmentPolygon {
