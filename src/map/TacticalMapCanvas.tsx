@@ -7,6 +7,7 @@ import { createOfflineBasemap } from './offlineBasemap';
 import { installTacticalLayers } from './tacticalLayers';
 import { BasemapLoader, BASEMAP_PRESETS, initialBasemapState, basemapFallbackImage, type BasemapMode, type BasemapState } from './basemaps';
 import { getBearingDeg, getDistanceKm } from '../engine/simulationEngine';
+import { evaluateFireControl } from '../engine/fireControl';
 
 // ============================================================================
 // AEGIS-CMO // MapLibre GL + milsymbol 高性能 WebGL 战术态势沙盘组件
@@ -30,6 +31,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   const rulerRef = useRef<{ start?: [number, number]; end?: [number, number] }>({});
   const [rulerMeasurement, setRulerMeasurement] = useState<{ distanceKm: number; bearingDeg: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [hoverEngageSummary, setHoverEngageSummary] = useState<string | null>(null);
+  const hoveredContactIdRef = useRef<string | null>(null);
   const suppressNextClickRef = useRef(false);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
@@ -260,6 +263,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         selectedUnitId: state.selectedUnitId,
         selectedUnitIds: state.selectedUnitIds,
         selectedContactId: state.selectedContactId,
+        hoveredContactId: hoveredContactIdRef.current,
+        pendingWeaponIdForEngage: state.pendingWeaponIdForEngage,
         mapLayers: state.mapLayers,
         catalog: state.catalog,
         simTime: state.simTime,
@@ -305,6 +310,9 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       (map.getSource('explosions-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.explosions,
       });
+      (map.getSource('fire-control-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection', features: projection.fireControlLinks,
+      });
       syncRulerLayer();
     };
 
@@ -321,6 +329,39 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         Number(e.lngLat.lng.toFixed(3)),
         Number(e.lngLat.lat.toFixed(3)),
       ]);
+      const state = useWargameStore.getState();
+      if (state.interactionMode === 'manual_engage' && map.getLayer('units-symbol-layer')) {
+        const hits = map.queryRenderedFeatures(e.point, { layers: ['units-symbol-layer'] });
+        const contactHit = hits.find((f) => f.properties?.entityType === 'contact');
+        const nextHoverId = contactHit?.properties?.id ? String(contactHit.properties.id) : null;
+        if (nextHoverId !== hoveredContactIdRef.current) {
+          hoveredContactIdRef.current = nextHoverId;
+          syncStoreToLayers();
+          if (nextHoverId && state.selectedUnitId) {
+            const shooter = state.units[state.selectedUnitId];
+            const contact = state.contacts[nextHoverId];
+            const mount = shooter?.mounts.find(
+              (m) => (!state.pendingWeaponIdForEngage || m.weaponId === state.pendingWeaponIdForEngage) && m.currentAmmo > 0
+            ) ?? shooter?.mounts[0];
+            const weapon = mount ? state.catalog.weapons[mount.weaponId] : undefined;
+            if (shooter && contact && mount && weapon) {
+              const sol = evaluateFireControl(shooter, contact, mount, weapon, state.catalog, state.units, state.simTime, 'manual');
+              const relay = sol.supportSourceIds.map((id) => state.units[id]?.callsign).filter(Boolean).join('/') || '自主盲飞';
+              setHoverEngageSummary(
+                `${weapon.codeName} → ${contact.displayName} · ${(sol.distanceKm ?? 0).toFixed(0)}km (${sol.withinNez ? 'NEZ高杀伤区' : `NEZ ${sol.nezRangeKm}km外`}) · 预计TOF ${sol.estimatedTofSec ?? 0}s · 中继:${relay}`
+              );
+            } else {
+              setHoverEngageSummary(null);
+            }
+          } else {
+            setHoverEngageSummary(null);
+          }
+        }
+      } else if (hoveredContactIdRef.current) {
+        hoveredContactIdRef.current = null;
+        setHoverEngageSummary(null);
+        syncStoreToLayers();
+      }
     });
 
     map.on('click', (e) => {
@@ -501,6 +542,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         selectedUnitId: s.selectedUnitId,
         selectedUnitIds: s.selectedUnitIds,
         selectedContactId: s.selectedContactId,
+        pendingWeaponIdForEngage: s.pendingWeaponIdForEngage,
+        interactionMode: s.interactionMode,
         mapLayers: s.mapLayers,
         environment: s.environment,
         objectives: s.objectives,
@@ -640,8 +683,10 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
             </span>
           )}
           {interactionMode === 'manual_engage' && (
-            <span className="text-rose-200">
-              [F1 手动火力分配模式] 请在态势图上点击敌方目标 实施导弹齐射 · 右键取消
+            <span className="text-rose-200 truncate">
+              {hoverEngageSummary
+                ? `[F1 火控解算] ${hoverEngageSummary}`
+                : '[F1 手动火力分配模式] 悬停或点击敌方目标预览 NEZ 不可逃逸区、CEC 中继链路与预计命中 TOF · 右键取消'}
             </span>
           )}
           {interactionMode === 'place_ref_point' && (

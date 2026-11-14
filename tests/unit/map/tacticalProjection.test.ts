@@ -7,6 +7,7 @@ import type { TacticalContact } from '../../../src/types/wargame';
 test('pure tactical projection builds every GeoJSON family without exposing hidden unit IDs', () => {
   const units = instantiateScenarioUnits(east);
   const target = units.blue_ddg125_lucas;
+  const awacsId = Object.values(units).find((u) => u.platformId === 'kj500_awacs')!.id;
   const contact: TacticalContact = {
     id: 'RED_CONTACT_blue_ddg125_lucas', actualUnitId: target.id, observerSide: 'RED', targetSide: 'BLUE',
     domain: 'surface', classification: 'identified', identifiedCategory: 'destroyer', displayName: 'Identified destroyer',
@@ -14,7 +15,11 @@ test('pure tactical projection builds every GeoJSON family without exposing hidd
     uncertaintyRadiusKm: 3, uncertaintyKind: 'circle',
     uncertaintyPolygon: [[125.4, 26], [125.5, 26], [125.5, 26.1], [125.4, 26.1], [125.4, 26]],
     heading: target.heading, speedKts: target.speedKts, altitudeM: target.altitudeM,
-    firstDetectedTime: 0, lastDetectedTime: 0, detectedBySources: ['SKYEYE-01'], threatLevel: 'critical',
+    firstDetectedTime: 0, lastDetectedTime: 0,
+    detectedBySources: ['SKYEYE-01'],
+    sourceUnitIds: [awacsId],
+    fireControlSourceIds: [awacsId],
+    threatLevel: 'critical',
   };
   const input = {
     units,
@@ -42,6 +47,10 @@ test('pure tactical projection builds every GeoJSON family without exposing hidd
   expect(projection.controlZones).toHaveLength(0);
   expect(projection.missions.length).toBeGreaterThan(0);
   expect(projection.envelopes.some((feature) => feature.properties?.ringKind === 'threat')).toBe(true);
+  expect(projection.envelopes.some((feature) => feature.properties?.ringKind === 'nez')).toBe(true);
+  expect(projection.fireControlLinks.some((feature) => String(feature.properties?.linkKind).startsWith('aim_'))).toBe(true);
+  expect(projection.fireControlLinks.some((feature) => feature.properties?.linkKind === 'datalink')).toBe(true);
+  expect(projection.fireControlLinks.some((feature) => String(feature.properties?.label ?? '').includes('TOF'))).toBe(true);
   expect(projection.aou).toHaveLength(1);
   expect(projection.waypointLines.length).toBeGreaterThan(0);
   expect(projection.units.some((feature) => feature.properties?.entityType === 'unit')).toBe(true);

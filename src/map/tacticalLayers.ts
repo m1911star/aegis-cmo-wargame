@@ -26,6 +26,7 @@ export function installTacticalLayers(map: TacticalLayerHost) {
   addSource('missiles-point-source', { type: 'geojson', data: emptyFC });
   addSource('rp-source', { type: 'geojson', data: emptyFC });
   addSource('explosions-source', { type: 'geojson', data: emptyFC });
+  addSource('fire-control-source', { type: 'geojson', data: emptyFC });
   addSource('units-source', { type: 'geojson', data: emptyFC });
   addSource('ruler-source', { type: 'geojson', data: emptyFC });
 
@@ -128,6 +129,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
         'rgba(34, 211, 238, 0.035)',
         'weapon',
         'rgba(244, 63, 94, 0.04)',
+        'nez',
+        'rgba(251, 113, 133, 0.085)',
         'sonar',
         'rgba(16, 185, 129, 0.05)',
         'horizon',
@@ -150,6 +153,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
         'rgba(34, 211, 238, 0.45)',
         'weapon',
         'rgba(244, 63, 94, 0.58)',
+        'nez',
+        'rgba(251, 113, 133, 0.92)',
         'sonar',
         'rgba(16, 185, 129, 0.55)',
         'horizon',
@@ -169,6 +174,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
         ['get', 'ringKind'],
         'weapon',
         ['literal', [6, 3]],
+        'nez',
+        ['literal', [3, 1.5]],
         'horizon',
         ['literal', [2, 2]],
         'threat',
@@ -383,6 +390,58 @@ export function installTacticalLayers(map: TacticalLayerHost) {
       'circle-color': '#facc15',
       'circle-stroke-color': '#020617',
       'circle-stroke-width': 1.5,
+    },
+  });
+
+  addLayer({
+    id: 'fire-control-line-layer',
+    type: 'line',
+    source: 'fire-control-source',
+    filter: ['==', ['geometry-type'], 'LineString'],
+    paint: {
+      'line-color': [
+        'match',
+        ['get', 'linkKind'],
+        'datalink',
+        '#38bdf8',
+        'aim_executable',
+        '#34d399',
+        'aim_risky',
+        '#fbbf24',
+        '#f87171',
+      ],
+      'line-width': [
+        'match',
+        ['get', 'linkKind'],
+        'datalink',
+        1.5,
+        2.2,
+      ],
+      'line-dasharray': [
+        'match',
+        ['get', 'linkKind'],
+        'datalink',
+        ['literal', [2, 2]],
+        ['literal', [5, 2]],
+      ],
+    },
+  });
+  addLayer({
+    id: 'fire-control-label-layer',
+    type: 'symbol',
+    source: 'fire-control-source',
+    filter: ['==', ['geometry-type'], 'Point'],
+    layout: {
+      'text-font': ['Noto Sans Regular'],
+      'text-field': ['get', 'label'],
+      'text-size': 10,
+      'text-offset': [0, -0.8],
+      'text-allow-overlap': true,
+    },
+    paint: {
+      'text-color': '#fef08a',
+      'text-halo-color': '#020617',
+      'text-halo-width': 2,
     },
   });
 

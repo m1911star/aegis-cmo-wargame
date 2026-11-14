@@ -55,12 +55,42 @@ export function weaponLaunchRangeKm(weapon: WeaponSpec): number {
   return weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm ?? 0 : weapon.maxRangeKm;
 }
 
+export function weaponNoEscapeRangeKm(weapon: WeaponSpec): number {
+  const launchMax = weaponLaunchRangeKm(weapon);
+  if (!Number.isFinite(launchMax) || launchMax <= 0) return 0;
+  const factor = weapon.launchMedium === 'air_drop' ? 0.65 : 0.55;
+  return Number(Math.max(weapon.minRangeKm, launchMax * factor).toFixed(1));
+}
+
+export function estimateWeaponTimeOfFlightSec(distanceKm: number, weapon: WeaponSpec): number {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return 0;
+  if (weapon.launchMedium === 'air_drop') {
+    const dropSpeedKmph = Math.max(50, weapon.airDropSpeedKts ?? weapon.speedKts) * 1.852;
+    return Math.max(1, Math.round((distanceKm / dropSpeedKmph) * 3600 + 8));
+  }
+  const baseSpeedKmph = Math.max(50, weapon.speedKts) * 1.852;
+  const nezKm = weapon.maxRangeKm * 0.55;
+  if (distanceKm <= nezKm || weapon.maxRangeKm <= 0) {
+    return Math.max(1, Math.round((distanceKm / baseSpeedKmph) * 3600));
+  }
+  const boostSec = (nezKm / baseSpeedKmph) * 3600;
+  const tailKm = distanceKm - nezKm;
+  const ratio = Math.min(1, distanceKm / weapon.maxRangeKm);
+  const endFactor = Math.max(0.55, 1 - ((ratio - 0.55) / 0.45) * 0.45);
+  const avgTailFactor = (1 + endFactor) * 0.5;
+  const tailSec = (tailKm / (baseSpeedKmph * avgTailFactor)) * 3600;
+  return Math.max(1, Math.round(boostSec + tailSec));
+}
+
 export interface FireControlSolution {
   status: 'executable' | 'risky' | 'blocked';
   hardBlockReasons: string[];
   riskWarnings: string[];
   trackAgeSec?: number;
   distanceKm?: number;
+  nezRangeKm?: number;
+  withinNez?: boolean;
+  estimatedTofSec?: number;
   supportSourceIds: string[];
 }
 
@@ -87,9 +117,14 @@ export function evaluateFireControl(
   }
   let trackAgeSec: number | undefined;
   let distanceKm: number | undefined;
+  const nezRangeKm = weaponNoEscapeRangeKm(weapon);
+  let withinNez: boolean | undefined;
+  let estimatedTofSec: number | undefined;
   if (contact) {
     distanceKm = getDistanceKm(attacker.position, contact.estimatedPosition);
     trackAgeSec = Math.max(0, (simTime - contact.lastDetectedTime) / 1000);
+    withinNez = distanceKm >= weapon.minRangeKm && distanceKm <= nezRangeKm;
+    estimatedTofSec = estimateWeaponTimeOfFlightSec(distanceKm, weapon);
     if (!weapon.targetDomains.includes(contact.domain)) hardBlockReasons.push('武器与目标域不匹配');
     if (distanceKm > weaponLaunchRangeKm(weapon) || distanceKm < weapon.minRangeKm) hardBlockReasons.push('已知瞄准点不在武器射程内');
     if (trackAgeSec > profile.maxTrackAgeSec) riskWarnings.push(`情报已陈旧（${trackAgeSec.toFixed(1)} 秒未更新）`);
@@ -109,5 +144,5 @@ export function evaluateFireControl(
     hardBlockReasons.push('条令要求识别目标后方可自动开火');
   }
   return { status: hardBlockReasons.length ? 'blocked' : riskWarnings.length ? 'risky' : 'executable',
-    hardBlockReasons, riskWarnings, distanceKm, trackAgeSec, supportSourceIds };
+    hardBlockReasons, riskWarnings, distanceKm, trackAgeSec, nezRangeKm, withinNez, estimatedTofSec, supportSourceIds };
 }

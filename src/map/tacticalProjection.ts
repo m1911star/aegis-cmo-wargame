@@ -12,7 +12,7 @@ import type {
   WeaponInFlight,
 } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
-import { weaponLaunchRangeKm } from '../engine/fireControl';
+import { evaluateFireControl, weaponLaunchRangeKm, weaponNoEscapeRangeKm } from '../engine/fireControl';
 import { calculateRadarHorizonKm } from '../engine/geometry';
 import { observeMissile } from '../engine/sensors';
 import { getUnitCapabilities, isActiveUnit } from '../engine/unitCapabilities';
@@ -39,6 +39,8 @@ export type TacticalProjectionInput = {
   selectedUnitId: string | null;
   selectedUnitIds?: readonly string[];
   selectedContactId: string | null;
+  hoveredContactId?: string | null;
+  pendingWeaponIdForEngage?: string | null;
   mapLayers: ProjectionLayers;
   catalog: EquipmentCatalog;
   simTime: number;
@@ -59,12 +61,14 @@ export type TacticalProjection = {
   units: GeoJSON.Feature[];
   referencePoints: GeoJSON.Feature[];
   explosions: GeoJSON.Feature[];
+  fireControlLinks: GeoJSON.Feature[];
 };
 
 export function projectTacticalState(input: TacticalProjectionInput): TacticalProjection {
   const {
     units, contacts, weaponsInFlight, explosions, missions, referencePoints,
-    activePerspective, selectedUnitId, selectedUnitIds, selectedContactId, mapLayers, catalog, simTime,
+    activePerspective, selectedUnitId, selectedUnitIds, selectedContactId, hoveredContactId,
+    pendingWeaponIdForEngage, mapLayers, catalog, simTime,
     environment, objectives,
   } = input;
   const selectedSet = new Set<string>(selectedUnitIds ?? (selectedUnitId ? [selectedUnitId] : []));
@@ -144,15 +148,28 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       }
     }
     if (mapLayers.showWeaponRings || isSelected) {
-      const mount = [...unit.mounts].filter((candidate) => candidate.currentAmmo > 0)
+      const preferredMount = isSelected && pendingWeaponIdForEngage
+        ? unit.mounts.find((candidate) => candidate.weaponId === pendingWeaponIdForEngage && candidate.currentAmmo > 0)
+        : undefined;
+      const mount = preferredMount ?? [...unit.mounts].filter((candidate) => candidate.currentAmmo > 0)
         .sort((a, b) => (catalog.weapons[b.weaponId] ? weaponLaunchRangeKm(catalog.weapons[b.weaponId]) : 0) -
           (catalog.weapons[a.weaponId] ? weaponLaunchRangeKm(catalog.weapons[a.weaponId]) : 0))[0];
       const weapon = mount ? catalog.weapons[mount.weaponId] : undefined;
       if (weapon && (isSelected || unit.category === 'sam_battery' || unit.category === 'destroyer')) {
-        envelopeFeatures.push(turf.circle(unit.position, weaponLaunchRangeKm(weapon), {
+        const maxKm = weaponLaunchRangeKm(weapon);
+        envelopeFeatures.push(turf.circle(unit.position, maxKm, {
           steps: 64, units: 'kilometers', properties: { ringKind: 'weapon', side: unit.side, isSelected,
-            label: `${weapon.codeName} 发射包线 (${weaponLaunchRangeKm(weapon)}km)` },
+            label: `${weapon.codeName} 最大射程 (${maxKm}km)` },
         }));
+        if (isSelected) {
+          const nezKm = weaponNoEscapeRangeKm(weapon);
+          if (nezKm > 0 && nezKm < maxKm) {
+            envelopeFeatures.push(turf.circle(unit.position, nezKm, {
+              steps: 48, units: 'kilometers', properties: { ringKind: 'nez', side: unit.side, isSelected: true,
+                label: `${weapon.codeName} NEZ不可逃逸区 (${nezKm}km)` },
+            }));
+          }
+        }
       }
     }
     if ((mapLayers.showSonarRings || isSelected) && (unit.domain === 'subsurface' || unit.domain === 'surface')) {
@@ -242,6 +259,85 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
     .map((effect) => ({ type: 'Feature', properties: { id: effect.id, type: effect.type, label: effect.label },
       geometry: { type: 'Point', coordinates: effect.position } }));
 
+  const fireControlLinks: GeoJSON.Feature[] = [];
+  // 1. Active midcourse datalink lines for friendly missiles in flight
+  for (const missile of Object.values(weaponsInFlight)) {
+    if (!missile.datalinkSupported || !missile.seekerState?.startsWith('midcourse')) continue;
+    if (activePerspective !== 'GOD' && missile.side !== activePerspective) continue;
+    const shooter = units[missile.shooterId];
+    if (shooter && isActiveUnit(shooter)) {
+      fireControlLinks.push({
+        type: 'Feature',
+        properties: { linkKind: 'datalink', id: `dl_missile_${missile.id}` },
+        geometry: { type: 'LineString', coordinates: [shooter.position, missile.position] },
+      });
+    }
+  }
+
+  // 2. Live fire-control aim vector, TOF label, and CEC datalink support lines for hovered/selected target contact
+  const previewContactId = hoveredContactId ?? selectedContactId;
+  const previewContact = previewContactId ? visibleContacts.find((c) => c.id === previewContactId) : undefined;
+  const previewShooter = selectedUnitId ? visibleUnits.find((u) => u.id === selectedUnitId) : undefined;
+  if (previewShooter && previewContact && previewShooter.side === previewContact.observerSide) {
+    const candidateMounts = pendingWeaponIdForEngage
+      ? previewShooter.mounts.filter((m) => m.weaponId === pendingWeaponIdForEngage)
+      : previewShooter.mounts.filter((m) => catalog.weapons[m.weaponId]?.targetDomains.includes(previewContact.domain));
+    const chosenMount = candidateMounts.find((m) => m.currentAmmo > 0) ?? candidateMounts[0] ?? previewShooter.mounts[0];
+    const chosenWeapon = chosenMount ? catalog.weapons[chosenMount.weaponId] : undefined;
+    if (chosenMount && chosenWeapon) {
+      const solution = evaluateFireControl(
+        previewShooter,
+        previewContact,
+        chosenMount,
+        chosenWeapon,
+        catalog,
+        units,
+        simTime,
+        'manual'
+      );
+      const linkKind =
+        solution.status === 'executable'
+          ? 'aim_executable'
+          : solution.status === 'risky'
+            ? 'aim_risky'
+            : 'aim_blocked';
+      fireControlLinks.push({
+        type: 'Feature',
+        properties: { linkKind, id: `fc_aim_${previewShooter.id}_${previewContact.id}` },
+        geometry: {
+          type: 'LineString',
+          coordinates: [previewShooter.position, previewContact.estimatedPosition],
+        },
+      });
+      const midPoint: [number, number] = [
+        (previewShooter.position[0] + previewContact.estimatedPosition[0]) * 0.5,
+        (previewShooter.position[1] + previewContact.estimatedPosition[1]) * 0.5,
+      ];
+      const zoneTag = solution.withinNez ? 'NEZ内' : 'Rmax区';
+      fireControlLinks.push({
+        type: 'Feature',
+        properties: {
+          id: `fc_lbl_${previewShooter.id}_${previewContact.id}`,
+          label: `${chosenWeapon.codeName} · ${(solution.distanceKm ?? 0).toFixed(0)}km [${zoneTag}] · TOF ${solution.estimatedTofSec ?? 0}s`,
+        },
+        geometry: { type: 'Point', coordinates: midPoint },
+      });
+      for (const supportId of solution.supportSourceIds) {
+        if (supportId === previewShooter.id) continue;
+        const supportUnit = visibleUnits.find((u) => u.id === supportId);
+        if (!supportUnit) continue;
+        fireControlLinks.push({
+          type: 'Feature',
+          properties: { linkKind: 'datalink', id: `fc_cec_${supportUnit.id}_${previewContact.id}` },
+          geometry: {
+            type: 'LineString',
+            coordinates: [supportUnit.position, previewContact.estimatedPosition],
+          },
+        });
+      }
+    }
+  }
+
   return {
     terrainRidges,
     controlZones,
@@ -255,5 +351,6 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
     units: [...unitFeatures, ...contactFeatures],
     referencePoints: referencePointFeatures,
     explosions: explosionFeatures,
+    fireControlLinks,
   };
 }

@@ -36,7 +36,16 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
         const risky = solution.status === 'risky';
         return <article key={mount.mountId} className="border-t border-border pt-2.5 space-y-1.5 text-xs">
           <div className="font-semibold text-foreground">{weapon.name} · {mount.currentAmmo} 发</div>
-          <div className="text-[11px] text-muted-foreground">估计距离 {solution.distanceKm?.toFixed(1)} km · 中继 / 火控：{solution.supportSourceIds.map((id) => units[id]?.callsign).join('、') || '无有效支援'}</div>
+          <div className="text-[11px] text-muted-foreground">
+            估计距离 {solution.distanceKm?.toFixed(1)} km · NEZ {solution.nezRangeKm?.toFixed(0)} km (
+            <span className={solution.withinNez ? 'text-emerald-300 font-medium' : 'text-amber-300'}>
+              {solution.withinNez ? 'NEZ高杀伤区内' : '末端能量衰减区'}
+            </span>
+            ) · 预计 TOF {solution.estimatedTofSec ?? 0}s
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            中继 / 火控：{solution.supportSourceIds.map((id) => units[id]?.callsign).join('、') || '无有效支援'}
+          </div>
           {solution.hardBlockReasons.map((reason) => <p key={reason} className="text-[11px] text-rose-300">不可执行：{reason}</p>)}
           {solution.riskWarnings.map((reason) => <p key={reason} className="text-[11px] text-amber-300">风险：{reason}</p>)}
           <Button
