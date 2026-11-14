@@ -10,6 +10,20 @@ export { SNAPSHOT_INTERVAL_TICKS };
 export const RULESET_VERSION = '2026.12-ruleset-23';
 export const SCENARIO_SCHEMA_VERSION = 12;
 export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
+export const SAVE_SLOTS_STORAGE_KEY = 'aegis_cmo_save_slots_v1';
+export const MAX_BATTLE_SAVE_SLOTS = 8;
+
+export interface SavedBattleSlot {
+  slotId: string;
+  label: string;
+  savedAtIso: string;
+  scenarioId: string;
+  scenarioTitle: string;
+  playerSide: 'RED' | 'BLUE' | 'NEUTRAL';
+  tick: number;
+  elapsedSec: number;
+  save: BattleSaveState;
+}
 
 export type BattleSnapshot = ReturnType<typeof canonicalBattleState>;
 
@@ -287,4 +301,85 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
     useWargameStore.setState(previous, true);
     throw error;
   }
+}
+
+type MinimalStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+function defaultBrowserStorage(): MinimalStorage | undefined {
+  try {
+    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function listBattleSaveSlots(storage: Pick<Storage, 'getItem'> | undefined = defaultBrowserStorage()): SavedBattleSlot[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(SAVE_SLOTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is SavedBattleSlot =>
+        !!item &&
+        typeof item === 'object' &&
+        typeof item.slotId === 'string' &&
+        typeof item.label === 'string' &&
+        typeof item.savedAtIso === 'string' &&
+        !!item.save &&
+        item.save.kind === 'aegis_battle_save'
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function saveBattleToSlot(
+  label?: string,
+  overwriteSlotId?: string,
+  storage: MinimalStorage | undefined = defaultBrowserStorage()
+): SavedBattleSlot {
+  if (!storage) throw new Error('当前环境不支持本地持久化存储');
+  const state = useWargameStore.getState();
+  const save = captureBattleSave();
+  const elapsedSec = Math.max(0, Math.round((state.simTime - state.startTime) / 1000));
+  const cleanTitle = state.currentScenario.title.split('//').pop()?.trim() || state.currentScenario.title;
+  const resolvedLabel = (label?.trim() || `${cleanTitle} · T+${Math.floor(elapsedSec / 60)}m`).slice(0, 64);
+  const slotId = overwriteSlotId || `slot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const entry: SavedBattleSlot = {
+    slotId,
+    label: resolvedLabel,
+    savedAtIso: new Date().toISOString(),
+    scenarioId: state.currentScenario.id,
+    scenarioTitle: state.currentScenario.title,
+    playerSide: state.playerSide,
+    tick: state.tick,
+    elapsedSec,
+    save,
+  };
+  const existing = listBattleSaveSlots(storage).filter((s) => s.slotId !== slotId);
+  const nextSlots = [entry, ...existing].slice(0, MAX_BATTLE_SAVE_SLOTS);
+  storage.setItem(SAVE_SLOTS_STORAGE_KEY, JSON.stringify(nextSlots));
+  return entry;
+}
+
+export function loadBattleFromSlot(
+  slotId: string,
+  storage: Pick<Storage, 'getItem'> | undefined = defaultBrowserStorage()
+): BattleSnapshot {
+  const slots = listBattleSaveSlots(storage);
+  const found = slots.find((s) => s.slotId === slotId);
+  if (!found) throw new Error('未找到指定的存档槽位');
+  return restoreBattleSave(found.save);
+}
+
+export function deleteBattleSaveSlot(
+  slotId: string,
+  storage: MinimalStorage | undefined = defaultBrowserStorage()
+): SavedBattleSlot[] {
+  if (!storage) return [];
+  const next = listBattleSaveSlots(storage).filter((s) => s.slotId !== slotId);
+  storage.setItem(SAVE_SLOTS_STORAGE_KEY, JSON.stringify(next));
+  return next;
 }

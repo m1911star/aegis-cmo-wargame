@@ -21,8 +21,13 @@ import {
   captureBattleSave,
   captureShareableAarPackage,
   canonicalBattleState,
+  deleteBattleSaveSlot,
+  listBattleSaveSlots,
+  loadBattleFromSlot,
+  MAX_BATTLE_SAVE_SLOTS,
   replayBattleRecording,
   restoreBattleSave,
+  saveBattleToSlot,
   SNAPSHOT_INTERVAL_TICKS,
 } from '../../src/store/battleRecording';
 import { evaluateFireControl } from '../../src/engine/fireControl';
@@ -279,6 +284,46 @@ describe('Snapshot-accelerated replay and resumable full-state save', () => {
       store.getState().applySimulationResult(workerResult, s.tick, s.commandSequence, s.currentScenario.id)
     ).toBe(true);
     expect(canonicalBattleState()).toEqual(syncCanonical);
+  });
+
+  test('multi-slot battle save manager creates, overwrites, caps at MAX_BATTLE_SAVE_SLOTS, loads, and deletes slots', () => {
+    const map = new Map<string, string>();
+    const memStorage = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        map.set(k, v);
+      },
+    };
+
+    store.getState().loadScenario(SCENARIO_INTERACTIVE_TUTORIAL, false, 707);
+    store.setState({ autoPause: pausesOff });
+    store.getState().stepSingleTick(6);
+    const expectedSlot1 = canonicalBattleState();
+    const slot1 = saveBattleToSlot('Alpha Checkpoint', undefined, memStorage);
+    expect(slot1.label).toBe('Alpha Checkpoint');
+    expect(listBattleSaveSlots(memStorage)).toHaveLength(1);
+
+    // Advance further and overwrite same slot
+    store.getState().stepSingleTick(4);
+    const expectedUpdated = canonicalBattleState();
+    saveBattleToSlot('Alpha Overwritten', slot1.slotId, memStorage);
+    expect(listBattleSaveSlots(memStorage)).toHaveLength(1);
+    expect(listBattleSaveSlots(memStorage)[0].label).toBe('Alpha Overwritten');
+
+    // Switch scenario, then load slot1 and verify state matches expectedUpdated (not expectedSlot1)
+    store.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 1);
+    expect(expectedUpdated.tick).toBeGreaterThan(expectedSlot1.tick);
+    expect(loadBattleFromSlot(slot1.slotId, memStorage)).toEqual(expectedUpdated);
+
+    // Verify cap at MAX_BATTLE_SAVE_SLOTS (8) and deletion
+    for (let i = 0; i < MAX_BATTLE_SAVE_SLOTS + 3; i++) {
+      saveBattleToSlot(`Slot ${i}`, `slot_fixed_${i}`, memStorage);
+    }
+    expect(listBattleSaveSlots(memStorage)).toHaveLength(MAX_BATTLE_SAVE_SLOTS);
+    const firstId = listBattleSaveSlots(memStorage)[0].slotId;
+    const afterDelete = deleteBattleSaveSlot(firstId, memStorage);
+    expect(afterDelete).toHaveLength(MAX_BATTLE_SAVE_SLOTS - 1);
+    expect(afterDelete.some((s) => s.slotId === firstId)).toBe(false);
   });
 });
 

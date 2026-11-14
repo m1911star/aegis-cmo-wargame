@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { AlertCircle, Check, Download, FileJson, Play, Upload } from 'lucide-react';
+import { AlertCircle, Check, Download, FileJson, HardDrive, Play, Trash2, Upload } from 'lucide-react';
 import {
   exportCurrentStateAsScenarioJson,
   validateAndParseScenarioJson,
@@ -7,10 +7,16 @@ import {
 import {
   BATTLE_RECORDING_VERSION,
   BATTLE_SAVE_VERSION,
+  MAX_BATTLE_SAVE_SLOTS,
   captureBattleRecording,
   captureBattleSave,
+  deleteBattleSaveSlot,
+  listBattleSaveSlots,
+  loadBattleFromSlot,
   replayBattleRecording,
   restoreBattleSave,
+  saveBattleToSlot,
+  type SavedBattleSlot,
 } from '../../store/battleRecording';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Button } from '../ui/button';
@@ -50,6 +56,8 @@ export const ScenarioIoModal: React.FC = () => {
   const [replayTick, setReplayTick] = useState(0);
   const [customSeedInput, setCustomSeedInput] = useState(String(seed));
   const [randomizeSpawns, setRandomizeSpawns] = useState(false);
+  const [saveSlots, setSaveSlots] = useState<SavedBattleSlot[]>(() => listBattleSaveSlots());
+  const [slotNameInput, setSlotNameInput] = useState('');
 
   const displayedJson = jsonText || exportCurrentStateAsScenarioJson(currentScenario, units, {
     groups, missions, events, objectives, referencePoints, environment,
@@ -63,7 +71,19 @@ export const ScenarioIoModal: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${currentScenario.id}_export.json`;
+    const isBattleSave = displayedJson.includes('"aegis_battle_save"');
+    link.download = isBattleSave ? `${currentScenario.id}.save.json` : `${currentScenario.id}_export.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadSaveSlotFile = (slot: SavedBattleSlot) => {
+    if (typeof document === 'undefined') return;
+    const blob = new Blob([JSON.stringify(slot.save, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${slot.scenarioId}_${slot.slotId}.save.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -101,6 +121,113 @@ export const ScenarioIoModal: React.FC = () => {
       />
 
       <div className="p-4 space-y-3 text-xs overflow-y-auto flex-1">
+        <div className="p-3 rounded-lg bg-muted/40 border border-border space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-primary flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5" />
+              <span>本地多槽位断点存档库 ({saveSlots.length}/{MAX_BATTLE_SAVE_SLOTS})</span>
+            </span>
+            <span className="text-[11px] text-muted-foreground">摘要防篡改校验 · 精确恢复实时交战状态</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              aria-label="存档槽备注名称"
+              placeholder="输入存档名称（留空自动生成想定+推进时长）"
+              value={slotNameInput}
+              onChange={(e) => setSlotNameInput(e.target.value)}
+              className="flex-1 min-w-[200px] h-7 text-[11px]"
+            />
+            <Button
+              size="sm"
+              variant="success"
+              onClick={() => {
+                try {
+                  saveBattleToSlot(slotNameInput);
+                  setSaveSlots(listBattleSaveSlots());
+                  setSlotNameInput('');
+                  setJsonError(null);
+                } catch (error) {
+                  setJsonError(error instanceof Error ? error.message : '保存存档槽失败');
+                }
+              }}
+            >
+              新建断点存档槽
+            </Button>
+          </div>
+          {saveSlots.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground py-1">
+              暂无手动存档槽位。点击「新建断点存档槽」可随时保存当前推演进度。
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {saveSlots.map((slot) => (
+                <div
+                  key={slot.slotId}
+                  className="p-2 rounded-md bg-card/85 border border-border flex flex-wrap items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold text-foreground truncate">{slot.label}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">
+                      席位:{slot.playerSide} · Tick {slot.tick} ({Math.floor(slot.elapsedSec / 60)}m{slot.elapsedSec % 60}s) ·{' '}
+                      {slot.savedAtIso.slice(0, 19).replace('T', ' ')}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="xs"
+                      variant="default"
+                      onClick={() => {
+                        try {
+                          loadBattleFromSlot(slot.slotId);
+                          setActiveModal('none');
+                        } catch (error) {
+                          setJsonError(error instanceof Error ? error.message : '读档失败');
+                        }
+                      }}
+                    >
+                      读档
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        try {
+                          saveBattleToSlot(slot.label, slot.slotId);
+                          setSaveSlots(listBattleSaveSlots());
+                          setJsonError(null);
+                        } catch (error) {
+                          setJsonError(error instanceof Error ? error.message : '覆盖存档失败');
+                        }
+                      }}
+                    >
+                      覆盖
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => downloadSaveSlotFile(slot)}
+                      title="导出独立 .save.json 文件"
+                    >
+                      <Download className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="text-rose-300 hover:text-rose-200"
+                      onClick={() => {
+                        setSaveSlots(deleteBattleSaveSlot(slot.slotId));
+                      }}
+                      title="删除该存档槽"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <p className="text-muted-foreground">
           当前战场实时态势已序列化为标准 <code>ScenarioDefinition</code> JSON。你可以直接修改算子坐标、添加自定义{' '}
           <code>customCatalogOverlay</code> 武器参数，或保存为外部剧本文件。
