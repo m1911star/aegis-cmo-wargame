@@ -473,12 +473,21 @@ describe('Joint sea-land-air & inland air-land mechanics', () => {
     for (const scenario of [SCENARIO_JOINT_AMPHIBIOUS_ASSAULT, SCENARIO_INLAND_AIR_LAND]) {
       store.getState().loadScenario(scenario, false, 2027);
       store.setState({ autoPause: pausesOff });
-      store.getState().stepSingleTick(45);
+      store.getState().stepSingleTick(125);
       const expected = canonicalBattleState();
       const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
       for (const batch of [1, 5, 15, 60]) {
         expect(replayBattleRecording(recording, batch)).toEqual(expected);
       }
     }
+
+    // Verify Inland Mountain Strike executes composite decoy -> SEAD -> bomber wave by 125s
+    store.getState().loadScenario(SCENARIO_INLAND_AIR_LAND, false, 9595);
+    store.setState({ autoPause: pausesOff });
+    store.getState().stepSingleTick(125);
+    const inlandState = store.getState();
+    expect(Object.values(inlandState.units).some((u) => u.platformId === 'wz8_recon_uav' && u.deployedByUnitId === 'inland_red_j16d')).toBe(true);
+    expect(inlandState.missions.find((m) => m.id === 'inland_red_sead')?.isActive).toBe(true);
+    expect(Object.values(inlandState.units).some((u) => u.platformId === 'h6n_bomber')).toBe(true);
   });
 });

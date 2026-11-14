@@ -170,7 +170,8 @@ export const RED_FORCE_PLATFORMS: Record<string, PlatformSpec> = {
       { mountId: 'pylon_ld10', weaponId: 'ld10_arm', maxAmmo: 6, reloadTimeSec: 8 },
       { mountId: 'wing_pl15', weaponId: 'pl15_aam', maxAmmo: 2, reloadTimeSec: 8 },
     ],
-    description: '重型专用电子战攻击机。开启OECM有源干扰后可大幅压缩敌方相控阵雷达对友军机群的烧穿距离，并携行LD-10反辐射导弹猎杀防空雷达。',
+    deployables: [{ platformId: 'wz8_recon_uav', count: 1 }],
+    description: '重型专用电子战攻击机。开启OECM有源干扰后可大幅压缩敌方相控阵雷达对友军机群的烧穿距离，并携行LD-10反辐射导弹与无人侦察诱饵。',
   },
   kj500_awacs: {
     id: 'kj500_awacs',

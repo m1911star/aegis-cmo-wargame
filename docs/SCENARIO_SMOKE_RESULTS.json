@@ -283,25 +283,35 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 1,
-        "blue": 3
+        "red": 2,
+        "blue": 2
       },
       "missilesFired": {
-        "red": 48,
-        "blue": 50
+        "red": 128,
+        "blue": 88
       },
       "interceptions": {
-        "red": 11,
-        "blue": 6
+        "red": 42,
+        "blue": 7
       },
       "score": {
-        "red": 450,
-        "blue": 530
+        "red": 300,
+        "blue": 1034
       },
-      "sortiesLaunched": 1,
+      "sortiesLaunched": 3,
       "events": [
         {
+          "id": "ev_joint_red_standoff_wave",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
           "id": "ev_joint_blue_scramble",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_joint_blue_coordinated_denial",
           "fireCount": 1,
           "lastFiredElapsedSec": null
         },
@@ -321,7 +331,7 @@
         "joint_blue_hold_beach": "achieved",
         "joint_blue_preserve_airbase": "achieved"
       },
-      "aarEvents": 75,
+      "aarEvents": 179,
       "finiteState": true
     },
     {
@@ -337,25 +347,35 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 1,
+        "red": 3,
         "blue": 1
       },
       "missilesFired": {
-        "red": 22,
-        "blue": 16
+        "red": 44,
+        "blue": 38
       },
       "interceptions": {
-        "red": 5,
-        "blue": 3
+        "red": 12,
+        "blue": 5
       },
       "score": {
         "red": 150,
-        "blue": 530
+        "blue": 830
       },
-      "sortiesLaunched": 1,
+      "sortiesLaunched": 3,
       "events": [
         {
+          "id": "ev_inland_red_decoy_sead_wave",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
           "id": "ev_inland_red_second_wave",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_inland_blue_opfor_counter",
           "fireCount": 1,
           "lastFiredElapsedSec": null
         }
@@ -370,7 +390,7 @@
         "inland_blue_hold_pass": "achieved",
         "inland_blue_preserve_airbase": "achieved"
       },
-      "aarEvents": 30,
+      "aarEvents": 67,
       "finiteState": true
     },
     {
