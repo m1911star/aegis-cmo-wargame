@@ -2,7 +2,7 @@ import * as turf from '@turf/turf';
 import { resolveUnitConfiguration } from '../../db/unitConfiguration';
 import { launchCarrierSortie } from '../../engine/carrierOperations';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
-import { isRouteAllowed } from '../../engine/environment';
+import { findShootAndScootDestination, isRouteAllowed } from '../../engine/environment';
 import { evaluateFireControl } from '../../engine/fireControl';
 import { launchGuidance } from '../../engine/guidance';
 import { effectiveDoctrine } from '../../engine/operations';
@@ -569,6 +569,26 @@ export function createCommandSlice(set: StoreSet) {
       const updatedAttacker = { ...attacker, status: 'engaged' as const, mounts: attacker.mounts.map((m) =>
         m.mountId === mount.mountId ? { ...m, currentAmmo: m.currentAmmo - salvo,
           cooldownRemainingSec: m.reloadTimeSec * getUnitCapabilities(attacker).reloadFactor } : m) };
+      if (
+        updatedAttacker.domain === 'land' &&
+        updatedAttacker.doctrine.shootAndScoot &&
+        updatedAttacker.waypoints.length === 0 &&
+        updatedAttacker.navigationMode !== 'formation'
+      ) {
+        const maxSpeed = s.catalog.platforms[updatedAttacker.platformId]?.maxSpeedKts ?? 0;
+        if (maxSpeed > 0) {
+          const scootTarget = findShootAndScootDestination(
+            updatedAttacker.position,
+            s.environment,
+            4.5,
+            Math.round(updatedAttacker.heading + 90)
+          );
+          if (scootTarget) {
+            updatedAttacker.waypoints = [{ position: scootTarget, speedKts: maxSpeed }];
+            updatedAttacker.targetSpeedKts = maxSpeed;
+          }
+        }
+      }
       recordWeaponLaunch(updatedAttacker, mount, salvo, s.simTime);
       const score = { ...s.score };
       if (attacker.side === 'RED') score.redMissilesFired += salvo; else score.blueMissilesFired += salvo;

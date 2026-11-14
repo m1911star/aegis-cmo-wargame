@@ -23,7 +23,7 @@ export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = {
 };
 
 export const MASTER_EQUIPMENT_CATALOG: EquipmentCatalog = {
-  version: '2026.11-TANKER-DECOY-1',
+  version: '2026.11-JOINT-AIR-LAND-1',
   sensors: MODULAR_SENSORS,
   weapons: MODULAR_WEAPONS,
   loadouts: MODULAR_LOADOUTS,

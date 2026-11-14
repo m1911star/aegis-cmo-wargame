@@ -7,8 +7,8 @@ import { useWargameStore, type WargameStoreState } from './useWargameStore';
 export const BATTLE_RECORDING_VERSION = 2 as const;
 export const BATTLE_SAVE_VERSION = 1 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
-export const RULESET_VERSION = '2026.11-ruleset-17';
-export const SCENARIO_SCHEMA_VERSION = 8;
+export const RULESET_VERSION = '2026.11-ruleset-18';
+export const SCENARIO_SCHEMA_VERSION = 9;
 export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
 
 export type BattleSnapshot = ReturnType<typeof canonicalBattleState>;

@@ -1,5 +1,6 @@
+import * as turf from '@turf/turf';
 import type { BattleResult, CombatLogEntry, ObjectiveProgress, RuntimeUnit, ScenarioObjective, ScoreLedger, TacticalContact, VictoryConditionRule } from '../types/wargame';
-import { getUnitCapabilities } from './unitCapabilities';
+import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 
 export function creditDamage(
   score: ScoreLedger, victim: RuntimeUnit, ledger: Record<string, number>, fraction: number,
@@ -34,12 +35,33 @@ export function evaluateObjectives(
     const preservationLost = (unit: RuntimeUnit | undefined) => destroyed(unit) ||
       (!!unit && objective.preserveCapability === true && getUnitCapabilities(unit).state === 'mission_killed');
     const allPresent = targets.every(Boolean);
-    const achieved = objective.type === 'destroy' ? targets.every(destroyed)
-      : objective.type === 'disable' ? allPresent && targets.every((unit) => getUnitCapabilities(unit).state === 'mission_killed')
-      : objective.type === 'preserve' ? timedOut && allPresent && targets.every((unit) => !preservationLost(unit))
-      : objective.type === 'withdraw' ? allPresent && targets.every((unit) => unit.status === 'recovered')
-      : objective.unitIds.every((id) => Object.values(contacts).some((contact) => contact.observerSide === objective.side && contact.actualUnitId === id));
-    const failed = !achieved && (timedOut || (objective.type === 'preserve' && targets.some(preservationLost)));
+    let achieved = false;
+    let failed = false;
+    if (objective.type === 'control_area') {
+      const area = objective.areaPolygon && objective.areaPolygon.length >= 3
+        ? turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]])
+        : undefined;
+      const domains = objective.controlDomains && objective.controlDomains.length > 0
+        ? objective.controlDomains
+        : ['land', 'surface'];
+      if (timedOut && area) {
+        const inside = Object.values(units).filter((unit) =>
+          isActiveUnit(unit) && domains.includes(unit.domain) &&
+          turf.booleanPointInPolygon(unit.position, area)
+        );
+        const ownInside = inside.filter((unit) => unit.side === objective.side);
+        const hostileInside = inside.filter((unit) => unit.side !== objective.side && unit.side !== 'NEUTRAL');
+        achieved = ownInside.length > 0 && hostileInside.length === 0;
+        failed = !achieved;
+      }
+    } else {
+      achieved = objective.type === 'destroy' ? targets.every(destroyed)
+        : objective.type === 'disable' ? allPresent && targets.every((unit) => getUnitCapabilities(unit).state === 'mission_killed')
+        : objective.type === 'preserve' ? timedOut && allPresent && targets.every((unit) => !preservationLost(unit))
+        : objective.type === 'withdraw' ? allPresent && targets.every((unit) => unit.status === 'recovered')
+        : objective.unitIds.every((id) => Object.values(contacts).some((contact) => contact.observerSide === objective.side && contact.actualUnitId === id));
+      failed = !achieved && (timedOut || (objective.type === 'preserve' && targets.some(preservationLost)));
+    }
     progress[objective.id] = achieved ? 'achieved' : failed ? 'failed' : 'pending';
     if (achieved) {
       if (objective.side === 'RED') score.redScore += objective.points;

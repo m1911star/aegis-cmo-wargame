@@ -8,11 +8,13 @@ const IDENTIFIED_CATEGORY_RANGE_KM: Partial<Record<UnitCategory, number>> = {
   bomber: 400,
   mpa_uav: 80,
   carrier: 120,
+  amphibious: 60,
   destroyer: 250,
   frigate: 180,
   ssn: 50,
   sam_battery: 260,
   asm_battery: 400,
+  ground_force: 45,
   airbase: 220,
   radar_site: 0,
 };

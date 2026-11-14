@@ -196,3 +196,14 @@ test('filters equipment catalog and triggers manual countermeasure from inspecto
   await page.getByRole('button', { name: /箔条\(/ }).click();
   await expect(page.getByText(/已投放箔条干扰/)).toBeVisible();
 });
+
+test('loads sea-land-air amphibious and pure inland air-land scenarios and launches from airbase', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_joint_amphibious_assault_2027');
+  await expect(page.getByLabel('选择战役想定')).toHaveValue('op_joint_amphibious_assault_2027');
+
+  await page.getByLabel('选择战役想定').selectOption('op_inland_mountain_strike_2027');
+  await expect(page.getByLabel('选择战役想定')).toHaveValue('op_inland_mountain_strike_2027');
+  await page.locator('#order-panel').getByText('INLAND-AB-W', { exact: true }).click();
+  await page.getByRole('button', { name: '弹射升空' }).first().click();
+  await expect(page.locator('#inspector-panel').getByText(/基地歼-20A 航空兵大队 #1波次/)).toBeVisible();
+});

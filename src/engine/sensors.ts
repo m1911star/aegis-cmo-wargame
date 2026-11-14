@@ -540,9 +540,10 @@ export function computeContactsOnly(
           : target.category === 'decoy' || target.category === 'tanker'
             ? 'low'
             : target.category === 'stealth_fighter' || target.category === 'destroyer' ||
-              target.category === 'ssn' || target.category === 'sam_battery'
+              target.category === 'ssn' || target.category === 'sam_battery' || target.category === 'airbase'
               ? 'critical'
-              : target.category === 'bomber' || target.category === 'carrier' || target.category === 'ew_aircraft'
+              : target.category === 'bomber' || target.category === 'carrier' || target.category === 'ew_aircraft' ||
+                target.category === 'amphibious' || target.category === 'ground_force' || target.category === 'radar_site'
                 ? 'high' : 'medium';
 
         nextContacts[contactKey] = {
