@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useWargameStore } from './store/useWargameStore';
+import { extractSimulationWorldState, useWargameStore } from './store/useWargameStore';
 import { simulationWorkerClient } from './engine/workerClient';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
@@ -81,26 +81,7 @@ export default function App() {
         const expectedScenarioId = s.currentScenario.id;
         void simulationWorkerClient
           .runBatch(
-            {
-              startTime: s.startTime,
-              tick: s.tick,
-              rngState: s.rngState,
-              objectives: s.objectives,
-              objectiveProgress: s.objectiveProgress,
-              creditedDamage: s.creditedDamage,
-              detectedMissileIds: s.detectedMissileIds,
-              aar: s.aar,
-              simTime: s.simTime,
-              units: s.units,
-              contacts: s.contacts,
-              weaponsInFlight: s.weaponsInFlight,
-              explosions: s.explosions,
-              missions: s.missions,
-              events: s.events,
-              environment: s.environment,
-              victoryConditions: s.currentScenario.victoryConditions,
-              score: s.score,
-            },
+            extractSimulationWorldState(s),
             s.catalog,
             budget + s.pendingSimSeconds,
             s.autoPause,

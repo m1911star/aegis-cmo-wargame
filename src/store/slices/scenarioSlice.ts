@@ -139,6 +139,30 @@ function readHasAutosave(): boolean {
   }
 }
 
+export function extractSimulationWorldState(s: WargameStoreState): SimulationWorldState {
+  return {
+    startTime: s.startTime,
+    tick: s.tick,
+    rngState: s.rngState,
+    objectives: s.objectives,
+    objectiveProgress: s.objectiveProgress,
+    creditedDamage: s.creditedDamage,
+    detectedMissileIds: s.detectedMissileIds,
+    aar: s.aar,
+    simTime: s.simTime,
+    units: s.units,
+    contacts: s.contacts,
+    weaponsInFlight: s.weaponsInFlight,
+    explosions: s.explosions,
+    missions: s.missions,
+    events: s.events,
+    pendingSortieOrders: s.pendingSortieOrders,
+    environment: s.environment,
+    victoryConditions: s.currentScenario.victoryConditions,
+    score: s.score,
+  };
+}
+
 export function createScenarioSlice(set: StoreSet, get: StoreGet) {
   const initialBoot = createInitialStateFromScenario(INFORMATION_EXERCISE);
 
@@ -447,27 +471,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     stepSingleTick: (dtSec = 2) => {
       const s = get();
       if (s.battleResult) return;
-      const world: SimulationWorldState = {
-        startTime: s.startTime,
-        tick: s.tick,
-        rngState: s.rngState,
-        objectives: s.objectives,
-        objectiveProgress: s.objectiveProgress,
-        creditedDamage: s.creditedDamage,
-        detectedMissileIds: s.detectedMissileIds,
-        aar: s.aar,
-        simTime: s.simTime,
-        units: s.units,
-        contacts: s.contacts,
-        weaponsInFlight: s.weaponsInFlight,
-        explosions: s.explosions,
-        missions: s.missions,
-        events: s.events,
-        pendingSortieOrders: s.pendingSortieOrders,
-        environment: s.environment,
-        victoryConditions: s.currentScenario.victoryConditions,
-        score: s.score,
-      };
+      const world = extractSimulationWorldState(s);
       const result = advanceSimulation(
         world,
         s.catalog,
@@ -475,14 +479,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         s.autoPause,
         s.playerSide
       );
-      const prevTick = s.tick;
-      const applied = get().applySimulationResult(result);
-      if (applied && typeof window !== 'undefined' && !s.replayPlayer) {
-        const after = get();
-        if (after.battleResult || Math.floor(after.tick / 120) > Math.floor(prevTick / 120)) {
-          get().saveAutosaveCheckpoint();
-        }
-      }
+      get().applySimulationResult(result);
     },
 
     applySimulationResult: (
@@ -492,6 +489,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       expectedScenarioId?: string
     ) => {
       let applied = false;
+      const prevTick = get().tick;
       set((prev) => {
         if (prev.battleResult) return prev;
         if (expectedTick !== undefined && prev.tick !== expectedTick) return prev;
@@ -515,6 +513,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
             explosions: result.nextState.explosions,
             missions: result.nextState.missions,
             events: result.nextState.events || prev.events,
+            pendingSortieOrders: result.nextState.pendingSortieOrders ?? prev.pendingSortieOrders,
             groups: prev.groups,
             objectives: result.nextState.objectives ?? prev.objectives,
             environment: result.nextState.environment ?? prev.environment,
@@ -562,6 +561,12 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
               : prev.logs,
         };
       });
+      if (applied && typeof window !== 'undefined' && !get().replayPlayer) {
+        const after = get();
+        if (after.battleResult || Math.floor(after.tick / 120) > Math.floor(prevTick / 120)) {
+          get().saveAutosaveCheckpoint();
+        }
+      }
       return applied;
     },
 

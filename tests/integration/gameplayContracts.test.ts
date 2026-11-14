@@ -1224,7 +1224,7 @@ describe('Deterministic replay and scenario contracts', () => {
       catalogVersion: store.getState().catalog.version,
       scenarioSchemaVersion: SCENARIO_SCHEMA_VERSION,
     });
-    expect(canonicalBattleState()).not.toHaveProperty('pendingSortieOrders');
+    expect(canonicalBattleState().pendingSortieOrders).toEqual([]);
   });
 
   test('legacy and mismatched recording headers are rejected before replacing the battle', () => {

@@ -7,7 +7,7 @@ import { useWargameStore, type WargameStoreState } from './useWargameStore';
 export const BATTLE_RECORDING_VERSION = 2 as const;
 export const BATTLE_SAVE_VERSION = 1 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
-export const RULESET_VERSION = '2026.12-ruleset-21';
+export const RULESET_VERSION = '2026.12-ruleset-22';
 export const SCENARIO_SCHEMA_VERSION = 12;
 export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
 
@@ -72,6 +72,7 @@ export function canonicalBattleState(state: WargameStoreState = useWargameStore.
   return structuredClone({ tick: state.tick, startTime: state.startTime, simTime: state.simTime,
     rngState: state.rngState, units: state.units, contacts: state.contacts, weaponsInFlight: state.weaponsInFlight,
     explosions: state.explosions, missions: state.missions, events: state.events,
+    pendingSortieOrders: state.pendingSortieOrders,
     groups: state.groups, objectives: state.objectives,
     environment: state.environment, score: state.score,
     objectiveProgress: state.objectiveProgress, battleResult: state.battleResult,
@@ -163,6 +164,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
     useWargameStore.getState().loadScenario(compiled.scenario, false, save.seed);
     useWargameStore.setState({
       ...clonedSnapshot,
+      pendingSortieOrders: clonedSnapshot.pendingSortieOrders ?? [],
       commandHistory: structuredClone(save.commandHistory),
       replaySnapshots: [structuredClone(clonedSnapshot)],
       activePerspective: clonedSnapshot.playerSide,
@@ -244,6 +246,7 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
       const restored = structuredClone(bestSnapshot);
       useWargameStore.setState({
         ...restored,
+        pendingSortieOrders: restored.pendingSortieOrders ?? [],
         activePerspective: restored.playerSide,
         commandHistory: structuredClone(validRecording.commands.slice(0, restored.commandSequence)),
       });

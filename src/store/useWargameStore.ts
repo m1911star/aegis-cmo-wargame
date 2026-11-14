@@ -4,8 +4,10 @@ import { recordAarTick } from '../engine/aar';
 import { COMMAND_ACTIONS } from '../engine/determinism';
 import { createCommandSlice } from './slices/commandSlice';
 import { createMissionAndBuilderSlice } from './slices/missionAndBuilderSlice';
-import { createScenarioSlice } from './slices/scenarioSlice';
+import { createScenarioSlice, extractSimulationWorldState } from './slices/scenarioSlice';
 import type { WargameStoreState } from './types';
+
+export { extractSimulationWorldState };
 
 export type {
   AreaEventDraft,

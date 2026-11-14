@@ -21,7 +21,8 @@ import {
 } from '../../src/store/battleRecording';
 import { evaluateFireControl } from '../../src/engine/fireControl';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
-import { useWargameStore as store } from '../../src/store/useWargameStore';
+import { simulationWorkerClient } from '../../src/engine/workerClient';
+import { extractSimulationWorldState, useWargameStore as store } from '../../src/store/useWargameStore';
 import type { InitialUnitPlacement, TacticalContact, WeaponInFlight } from '../../src/types/wargame';
 
 const pausesOff = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
@@ -231,6 +232,47 @@ describe('Snapshot-accelerated replay and resumable full-state save', () => {
     const beforeTamper = store.getState();
     expect(() => restoreBattleSave({ ...save, digest: 'deadbeef00000000' })).toThrow('digest');
     expect(store.getState()).toBe(beforeTamper);
+  });
+
+  test('worker batching, battle saves and replay snapshots preserve pendingSortieOrders identically to stepSingleTick', async () => {
+    store.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 2048);
+    const queuedOrder = {
+      orderId: 'sortie_order_retry_test',
+      eventId: 'ev_retry_test',
+      carrierUnitId: 'red_054b_screen',
+      hangarSlotId: 'hangar_z20f_ffg',
+      loadoutId: 'loadout_z20f_asw_prosecute',
+      assignedMissionId: 'mission_red_shallow_asw',
+      earliestLaunchTime: store.getState().startTime + 2000,
+      status: 'pending' as const,
+      attempts: 1,
+    };
+    store.setState({ autoPause: pausesOff, pendingSortieOrders: [queuedOrder] });
+    const saveWithQueue = JSON.parse(JSON.stringify(captureBattleSave()));
+    expect(saveWithQueue.snapshot.pendingSortieOrders).toEqual([queuedOrder]);
+
+    // Step via synchronous main-thread path — queued helicopter launches at +2s
+    store.getState().stepSingleTick(5);
+    const syncCanonical = canonicalBattleState();
+    expect(syncCanonical.score.sortiesLaunched).toBe(1);
+    expect(syncCanonical.pendingSortieOrders).toEqual([]);
+
+    // Restore save and step via Worker client path using extractSimulationWorldState
+    restoreBattleSave(saveWithQueue);
+    expect(store.getState().pendingSortieOrders).toEqual([queuedOrder]);
+    const s = store.getState();
+    const workerResult = await simulationWorkerClient.runBatch(
+      extractSimulationWorldState(s),
+      s.catalog,
+      5 + s.pendingSimSeconds,
+      s.autoPause,
+      s.playerSide,
+      s.commandSequence
+    );
+    expect(
+      store.getState().applySimulationResult(workerResult, s.tick, s.commandSequence, s.currentScenario.id)
+    ).toBe(true);
+    expect(canonicalBattleState()).toEqual(syncCanonical);
   });
 });
 
