@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Compass, Crosshair, Layers, Radar } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
+import { cn } from '../lib/utils';
 import { BattleObjectivesPanel } from './BattleObjectivesPanel';
 import { ContactsListTab } from './sidebar/ContactsListTab';
 import { MapLayersTab } from './sidebar/MapLayersTab';
@@ -19,53 +20,37 @@ export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSideb
     [contacts, activePerspective]
   );
 
+  const tabs = [
+    { id: 'orbat' as const, label: '编制序列', icon: Radar, activeClass: 'bg-secondary text-cyan-300 shadow-xs border-border' },
+    { id: 'contacts' as const, label: `情报(${visibleContacts.length})`, icon: Crosshair, activeClass: 'bg-secondary text-amber-300 shadow-xs border-border' },
+    { id: 'missions' as const, label: '巡逻任务', icon: Compass, activeClass: 'bg-secondary text-emerald-300 shadow-xs border-border' },
+    { id: 'layers' as const, label: '包线图层', icon: Layers, activeClass: 'bg-secondary text-sky-300 shadow-xs border-border' },
+  ];
+
   return (
-    <aside className="z-20 w-full h-full tactical-panel border-r border-cyan-500/25 flex flex-col overflow-hidden">
-      <div className="grid grid-cols-4 border-b border-cyan-500/25 bg-slate-950/70 text-[11px]">
-        <button
-          onClick={() => setActiveTab('orbat')}
-          className={`py-2.5 flex flex-col items-center gap-1 cursor-pointer transition border-b-2 ${
-            activeTab === 'orbat'
-              ? 'border-cyan-400 text-cyan-300 bg-cyan-950/30 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Radar className="w-3.5 h-3.5" />
-          <span>编制序列</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('contacts')}
-          className={`py-2.5 flex flex-col items-center gap-1 cursor-pointer transition border-b-2 ${
-            activeTab === 'contacts'
-              ? 'border-amber-400 text-amber-300 bg-amber-950/30 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Crosshair className="w-3.5 h-3.5" />
-          <span>情报({visibleContacts.length})</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('missions')}
-          className={`py-2.5 flex flex-col items-center gap-1 cursor-pointer transition border-b-2 ${
-            activeTab === 'missions'
-              ? 'border-emerald-400 text-emerald-300 bg-emerald-950/30 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Compass className="w-3.5 h-3.5" />
-          <span>巡逻任务</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('layers')}
-          className={`py-2.5 flex flex-col items-center gap-1 cursor-pointer transition border-b-2 ${
-            activeTab === 'layers'
-              ? 'border-sky-400 text-sky-300 bg-sky-950/30 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-          <span>包线图层</span>
-        </button>
+    <aside className="z-20 w-full h-full flex flex-col overflow-hidden">
+      <div className="p-1.5 border-b border-border bg-muted/40">
+        <div className="grid grid-cols-4 gap-1 rounded-lg bg-background/70 p-1 border border-border/60">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'py-1.5 px-1 rounded-md flex flex-col items-center gap-1 text-[10px] font-medium cursor-pointer transition-all border border-transparent',
+                  active
+                    ? cn('font-semibold', tab.activeClass)
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                )}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span className="truncate max-w-full">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">

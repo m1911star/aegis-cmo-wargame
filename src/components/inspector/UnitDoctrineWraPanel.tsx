@@ -3,6 +3,8 @@ import { Radio } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 import { domainLabels } from '../../ui/labels';
 import type { Domain, PlatformSpec, ROEStatus, RuntimeUnit, TacticalMission, ThreatLevel } from '../../types/wargame';
+import { Input } from '../ui/input';
+import { Select } from '../ui/select';
 
 interface Props {
   unit: RuntimeUnit;
@@ -175,7 +177,7 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
             disabled={loadoutLocked || unitDead}
             value={unit.activeLoadoutId || ''}
             onChange={(e) => switchUnitLoadout(unit.id, e.target.value)}
-            className="w-full h-7 bg-slate-900/90 border border-amber-500/40 rounded px-2 text-[11px] text-amber-200 cursor-pointer disabled:opacity-45"
+            className="w-full h-7 bg-background/90 border border-amber-500/40 rounded-md px-2 text-[11px] text-amber-200 cursor-pointer disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {platformSpec.availableLoadoutIds.map((lid) => {
               const lSpec = catalog.loadouts[lid];
@@ -185,15 +187,15 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         </div>
       )}
 
-      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-800/80">
-        <span className="text-slate-400">单次齐射</span>
-        <div className="inline-flex p-0.5 rounded bg-slate-900/90 border border-slate-800 gap-0.5">
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border/80">
+        <span className="text-muted-foreground">单次齐射</span>
+        <div className="inline-flex p-0.5 rounded-md bg-background/85 border border-border gap-0.5">
           {[1, 2, 4].map((num) => (
             <button
               key={num}
               onClick={() => updateUnitDoctrine(unit.id, { salvoSize: num })}
-              className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition ${
-                unit.doctrine.salvoSize === num ? 'bg-cyan-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'
+              className={`px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition-colors ${
+                unit.doctrine.salvoSize === num ? 'bg-primary text-primary-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {num}枚
@@ -202,47 +204,48 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-[10px] pt-1.5 border-t border-slate-800/80">
-        <label className="space-y-1 text-slate-400">
+      <div className="grid grid-cols-2 gap-2 text-[10px] pt-1.5 border-t border-border/80">
+        <label className="space-y-1 text-muted-foreground">
           <span className="block">自动开火距离</span>
-          <select
+          <Select
             aria-label="自动开火最大射程比例"
             value={unit.doctrine.automaticFireRangeFraction}
             onChange={(event) => updateUnitDoctrine(unit.id, { automaticFireRangeFraction: Number(event.target.value) })}
-            className="w-full h-7 bg-slate-900/90 border border-slate-700/80 rounded px-1.5 text-[11px] text-slate-200 cursor-pointer"
+            className="h-7 text-[11px] pl-2 pr-6"
           >
             <option value={0.5}>最大射程 50%</option>
             <option value={0.75}>最大射程 75%</option>
             <option value={1}>最大射程 100%</option>
-          </select>
+          </Select>
         </label>
-        <label className="space-y-1 text-slate-400">
+        <label className="space-y-1 text-muted-foreground">
           <span className="block">最低弹药保留</span>
-          <input
+          <Input
             aria-label="自动开火最低弹药保留"
             type="number"
             min={0}
             max={999}
             value={unit.doctrine.minimumWeaponReserve}
             onChange={(event) => updateUnitDoctrine(unit.id, { minimumWeaponReserve: Number(event.target.value) })}
-            className="w-full h-7 bg-slate-900/90 border border-slate-700/80 rounded px-2 text-[11px] text-slate-200 font-mono tabular-nums"
+            className="h-7 text-[11px] font-mono tabular-nums"
           />
         </label>
-        <label className="col-span-2 flex items-center justify-between gap-2 text-slate-400">
+        <label className="col-span-2 flex items-center justify-between gap-2 text-muted-foreground">
           <span>最低目标威胁</span>
-          <select
+          <Select
             aria-label="自动开火最低威胁等级"
             value={unit.doctrine.minimumAutomaticThreat}
             onChange={(event) => updateUnitDoctrine(unit.id, { minimumAutomaticThreat: event.target.value as ThreatLevel })}
-            className="min-w-[88px] h-7 bg-slate-900/90 border border-slate-700/80 rounded px-2 text-[11px] text-slate-200 cursor-pointer"
+            wrapperClassName="min-w-[88px]"
+            className="h-7 text-[11px] pl-2 pr-6"
           >
             <option value="low">低</option>
             <option value="medium">中</option>
             <option value="high">高</option>
             <option value="critical">危急</option>
-          </select>
+          </Select>
         </label>
-        <div className="col-span-2 space-y-1 text-slate-400">
+        <div className="col-span-2 space-y-1 text-muted-foreground">
           <span className="block">允许自动交战目标域</span>
           <div className="grid grid-cols-4 gap-1">
             {(['air', 'surface', 'subsurface', 'land'] as Domain[]).map((domain) => {
@@ -256,8 +259,8 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
                       ? unit.doctrine.automaticTargetDomains.filter((candidate) => candidate !== domain)
                       : [...unit.doctrine.automaticTargetDomains, domain],
                   })}
-                  className={`h-7 px-1 rounded border cursor-pointer transition ${
-                    enabled ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/70 font-medium' : 'bg-slate-900/90 text-slate-500 border-slate-800 hover:text-slate-300'
+                  className={`h-7 px-1 rounded-md border cursor-pointer transition-colors ${
+                    enabled ? 'bg-cyan-500/15 text-cyan-200 border-cyan-400/50 font-medium' : 'bg-secondary/50 text-muted-foreground border-border hover:text-foreground'
                   }`}
                 >
                   {domainLabels[domain]}
@@ -268,17 +271,17 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         </div>
       </div>
 
-      <label className="block space-y-1 pt-1.5 border-t border-slate-800/80 text-[10px]">
-        <span className="block text-slate-400">配属任务</span>
-        <select
+      <label className="block space-y-1 pt-1.5 border-t border-border/80 text-[10px]">
+        <span className="block text-muted-foreground">配属任务</span>
+        <Select
           aria-label="配属任务"
           value={unit.assignedMissionId || ''}
           onChange={(e) => assignUnitMission(unit.id, e.target.value ? e.target.value : undefined)}
-          className="w-full h-7 bg-slate-900/90 border border-slate-700/80 rounded px-2 text-[11px] text-slate-200 cursor-pointer"
+          className="h-7 text-[11px] pl-2 pr-6"
         >
           <option value="">-- 人工直接指挥 --</option>
           {eligibleMissions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        </Select>
       </label>
     </div>
   );

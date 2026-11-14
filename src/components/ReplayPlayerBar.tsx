@@ -30,18 +30,18 @@ export const ReplayPlayerBar: React.FC = () => {
   return (
     <section
       aria-label="地图航迹回放播放器"
-      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 w-[min(92%,560px)] rounded-lg border border-amber-400/60 bg-slate-950/92 backdrop-blur-md px-3 py-2 text-xs font-mono shadow-[0_0_30px_rgba(245,158,11,0.25)] space-y-2"
+      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 w-[min(92%,560px)] rounded-xl border border-amber-500/40 bg-card/95 backdrop-blur-xl px-3.5 py-2.5 text-xs shadow-2xl space-y-2"
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-amber-300 font-bold">
+        <div className="flex items-center gap-2 text-amber-300 font-semibold">
           <span>REPLAY // 地图航迹回放</span>
-          <span className="text-slate-300 font-normal">
+          <span className="text-muted-foreground font-mono font-normal">
             Tick {currentTick}/{recording.untilTick} · {utc}
           </span>
         </div>
         <button
           onClick={exitReplayPlayer}
-          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1 cursor-pointer"
+          className="px-2 py-1 rounded-md bg-secondary hover:bg-accent text-foreground border border-border flex items-center gap-1 cursor-pointer transition-colors"
         >
           <X className="w-3 h-3" />
           <span>退出回放</span>

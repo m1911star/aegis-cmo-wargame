@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { PlusCircle, X } from 'lucide-react';
+import { PlusCircle } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 import type { SideId } from '../../types/wargame';
+import { Button } from '../ui/button';
+import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
+import { Input } from '../ui/input';
+import { Select } from '../ui/select';
 
 export const UnitSpawnerModal: React.FC = () => {
   const catalog = useWargameStore((s) => s.catalog);
@@ -15,23 +19,16 @@ export const UnitSpawnerModal: React.FC = () => {
   const [spawnCallsign, setSpawnCallsign] = useState<string>('DRAGON-09');
 
   return (
-    <div className="w-full max-w-lg tactical-panel rounded-lg border border-emerald-400/50 overflow-hidden">
-      <div className="px-4 py-3 bg-emerald-950/50 border-b border-emerald-500/30 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
-          <PlusCircle className="w-4 h-4" />
-          <span>DYNAMIC FORCE SPAWNER // 战场实时增援算子投放</span>
-        </div>
-        <button
-          onClick={() => setActiveModal('none')}
-          className="text-slate-400 hover:text-white cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+    <ModalShell className="max-w-lg">
+      <ModalHeader
+        icon={<PlusCircle className="w-4 h-4 text-emerald-400" />}
+        title="DYNAMIC FORCE SPAWNER // 战场实时增援算子投放"
+        onClose={() => setActiveModal('none')}
+      />
 
-      <div className="p-4 space-y-3 text-xs">
+      <div className="p-4 space-y-3.5 text-xs">
         <div>
-          <label className="block text-slate-400 mb-1">所属阵营 (Side):</label>
+          <label className="block text-[11px] text-muted-foreground mb-1.5">所属阵营 (Side)</label>
           <div className="grid grid-cols-2 gap-2">
             {(['RED', 'BLUE'] as SideId[]).map((side) => (
               <button
@@ -47,12 +44,12 @@ export const UnitSpawnerModal: React.FC = () => {
                     setSpawnCallsign(`${side}-${Object.keys(units).length + 100}`);
                   }
                 }}
-                className={`py-2 rounded font-bold border cursor-pointer ${
+                className={`h-8 rounded-md font-semibold border cursor-pointer transition-colors ${
                   spawnSide === side
                     ? side === 'RED'
-                      ? 'bg-rose-600 text-white border-rose-400'
-                      : 'bg-sky-600 text-white border-sky-400'
-                    : 'bg-slate-900 text-slate-400 border-slate-800'
+                      ? 'bg-rose-600 text-white border-rose-500'
+                      : 'bg-sky-600 text-white border-sky-500'
+                    : 'bg-secondary/60 text-muted-foreground border-border hover:text-foreground'
                 }`}
               >
                 {side === 'RED' ? '红方联指 (RED FORCE)' : '蓝方联指 (BLUE FORCE)'}
@@ -62,10 +59,10 @@ export const UnitSpawnerModal: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-slate-400 mb-1">
-            选择装备平台模板 (Platform Template):
+          <label className="block text-[11px] text-muted-foreground mb-1.5">
+            选择装备平台模板 (Platform Template)
           </label>
-          <select
+          <Select
             value={spawnPlatformId}
             onChange={(e) => {
               const pid = e.target.value;
@@ -73,59 +70,53 @@ export const UnitSpawnerModal: React.FC = () => {
               const sp = catalog.platforms[pid];
               if (sp) setSpawnName(sp.name);
             }}
-            className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-2 text-slate-100"
           >
             {Object.values(catalog.platforms).map((p) => (
               <option key={p.id} value={p.id}>
                 [{p.domain.toUpperCase()}] {p.name} ({p.className})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2.5">
           <div>
-            <label className="block text-slate-400 mb-1">部队番/舷号名称:</label>
-            <input
+            <label className="block text-[11px] text-muted-foreground mb-1.5">部队番/舷号名称</label>
+            <Input
               type="text"
               value={spawnName}
               onChange={(e) => setSpawnName(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
             />
           </div>
           <div>
-            <label className="block text-slate-400 mb-1">战术呼号 (Callsign):</label>
-            <input
+            <label className="block text-[11px] text-muted-foreground mb-1.5">战术呼号 (Callsign)</label>
+            <Input
               type="text"
               value={spawnCallsign}
               onChange={(e) => setSpawnCallsign(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
             />
           </div>
         </div>
-
-        <div className="pt-2 flex justify-end gap-2">
-          <button
-            onClick={() => setActiveModal('none')}
-            className="px-3 py-1.5 rounded bg-slate-800 text-slate-300 cursor-pointer"
-          >
-            取消
-          </button>
-          <button
-            onClick={() =>
-              startSpawnUnitOnMap({
-                platformId: spawnPlatformId,
-                side: spawnSide,
-                name: spawnName,
-                callsign: spawnCallsign,
-              })
-            }
-            className="px-4 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer"
-          >
-            点击海图坐标投放算子
-          </button>
-        </div>
       </div>
-    </div>
+
+      <ModalFooter>
+        <Button variant="outline" onClick={() => setActiveModal('none')}>
+          取消
+        </Button>
+        <Button
+          variant="success"
+          onClick={() =>
+            startSpawnUnitOnMap({
+              platformId: spawnPlatformId,
+              side: spawnSide,
+              name: spawnName,
+              callsign: spawnCallsign,
+            })
+          }
+        >
+          点击海图坐标投放算子
+        </Button>
+      </ModalFooter>
+    </ModalShell>
   );
 };

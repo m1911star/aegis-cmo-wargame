@@ -39,27 +39,27 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const showDetails = expanded || !!result;
 
   return (
-    <section className="p-2.5 mb-2 rounded border border-cyan-500/30 bg-slate-950/70 text-xs space-y-2" aria-label="任务目标">
+    <section className="p-2.5 rounded-lg border border-border bg-card/90 text-xs space-y-2 shadow-xs" aria-label="任务目标">
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={showDetails}
         className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
       >
-        <span className="font-bold text-cyan-300 flex items-center gap-1">
-          {showDetails ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-          {outcome ? OUTCOME_LABELS[outcome] : `任务目标 (${achievedCount}/${objectives.length})`}
+        <span className="font-semibold text-foreground flex items-center gap-1.5">
+          {showDetails ? <ChevronDown className="w-3.5 h-3.5 text-primary" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
+          <span>{outcome ? OUTCOME_LABELS[outcome] : `任务目标 (${achievedCount}/${objectives.length})`}</span>
         </span>
         {scenario.victoryConditions && (
-          <span className="text-[11px] text-slate-300 font-mono">
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-mono tabular-nums">
             {Math.floor(remaining / 60)}:{Math.floor(remaining % 60).toString().padStart(2, '0')}
           </span>
         )}
       </button>
       {showDetails && (
-        <>
+        <div className="space-y-2 pt-1">
           {!objectives.length && (
-            <p className="text-slate-400">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
               本想定按时间与积分结算；目标型体验请选择「有限信息演练」。
             </p>
           )}
@@ -74,14 +74,14 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
               controlHint = ownInside ? ' · 己方力量已进驻' : ' · 待推进进驻';
             }
             return (
-              <div key={objective.id} className="border-t border-slate-800 pt-2">
+              <div key={objective.id} className="border-t border-border pt-2">
                 <span
                   className={
                     progress[objective.id] === 'achieved'
-                      ? 'text-emerald-300'
+                      ? 'text-emerald-300 font-medium'
                       : progress[objective.id] === 'failed'
-                        ? 'text-rose-300'
-                        : 'text-slate-200'
+                        ? 'text-rose-300 font-medium'
+                        : 'text-foreground font-medium'
                   }
                 >
                   {progress[objective.id] === 'achieved'
@@ -91,7 +91,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
                       : '进行中'}{' '}
                   · {objective.title}
                 </span>
-                <p className="text-slate-400 mt-1">
+                <p className="text-[11px] text-muted-foreground mt-0.5">
                   {objective.required ? '主要目标' : '次要目标'} · {objective.points} 分
                   {objective.criticalFailure ? ' · 损失将终止任务' : ''}
                   {controlHint}
@@ -100,8 +100,8 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
             );
           })}
           {result && (
-            <div className="space-y-2">
-              <p className="text-slate-400">
+            <div className="space-y-2 pt-1">
+              <p className="text-[11px] text-muted-foreground">
                 推演已停止。展开战报，回看支援丢失、风险射击、返航与任务完成事件。
               </p>
               {campaignState && !campaignState.finished && (
@@ -115,13 +115,13 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
                 </button>
               )}
               {campaignState?.finished && (
-                <p className="text-emerald-300 font-bold">
+                <p className="text-emerald-300 font-semibold">
                   战役已圆满结束！累计积分 {campaignState.carryover.cumulativeScore} · 胜场 {campaignState.carryover.victoryCount}/{campaignState.totalStages}
                 </p>
               )}
             </div>
           )}
-        </>
+        </div>
       )}
     </section>
   );

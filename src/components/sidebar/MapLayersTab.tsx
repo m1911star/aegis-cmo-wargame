@@ -1,6 +1,7 @@
 import React from 'react';
 import { BASEMAP_PRESETS, type BasemapMode } from '../../map/basemaps';
 import { useWargameStore, type MapLayerVisibility } from '../../store/useWargameStore';
+import { Select } from '../ui/select';
 
 const LAYER_ITEMS: {
   key: keyof MapLayerVisibility;
@@ -24,36 +25,37 @@ export const MapLayersTab: React.FC = () => {
 
   return (
     <div className="space-y-2">
-      <label className="block p-2.5 rounded border border-cyan-500/30 bg-slate-950/70 text-xs space-y-2">
-        <span className="block text-cyan-300 font-semibold">地理底图</span>
-        <select
+      <label className="block p-2.5 rounded-lg border border-border bg-card/85 text-xs space-y-2 shadow-xs">
+        <span className="block text-foreground font-semibold">地理底图</span>
+        <Select
           aria-label="地理底图"
           value={basemapMode}
           onChange={(e) => setBasemapMode(e.target.value as BasemapMode)}
-          className="w-full bg-slate-900 rounded p-2 text-slate-100"
         >
           {Object.entries(BASEMAP_PRESETS).map(([id, preset]) => (
             <option key={id} value={id}>{preset.label}</option>
           ))}
-        </select>
-        <span className="block text-slate-400 leading-relaxed">{BASEMAP_PRESETS[basemapMode].description}</span>
+        </Select>
+        <span className="block text-[11px] text-muted-foreground leading-relaxed">{BASEMAP_PRESETS[basemapMode].description}</span>
       </label>
-      <div className="text-[10px] text-slate-400 px-1">地图显示设置</div>
+      <div className="text-[10px] text-muted-foreground font-medium px-1 pt-0.5">地图显示设置</div>
       {LAYER_ITEMS.map((item) => {
         const active = mapLayers[item.key];
         return (
           <div
             key={item.key}
             onClick={() => toggleMapLayer(item.key)}
-            className={`p-2.5 rounded border flex items-center justify-between gap-2 cursor-pointer transition ${
-              active ? 'bg-cyan-950/35 border-cyan-500/45 text-slate-100' : 'bg-slate-950/50 border-slate-800 text-slate-500'
+            className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+              active ? 'bg-cyan-500/10 border-cyan-500/35 text-foreground' : 'bg-card/60 border-border text-muted-foreground hover:bg-accent/40'
             }`}
           >
-            <div>
-              <div className="text-xs font-bold">{item.label}</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">{item.desc}</div>
+            <div className="min-w-0">
+              <div className="text-xs font-medium">{item.label}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{item.desc}</div>
             </div>
-            <div className={`px-2 py-0.5 rounded text-[10px] font-bold ${active ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+            <div className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+              active ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary text-muted-foreground border-border'
+            }`}>
               {active ? '开' : '关'}
             </div>
           </div>

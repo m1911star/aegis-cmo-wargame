@@ -21,10 +21,10 @@ export const ActionFeedbackToast: React.FC = () => {
 
   const toneClass =
     feedback.severity === 'error'
-      ? 'bg-rose-950/95 border-rose-500 text-rose-100'
+      ? 'bg-card/98 border-rose-500/60 text-rose-200'
       : feedback.severity === 'warning'
-        ? 'bg-amber-950/95 border-amber-400 text-amber-100'
-        : 'bg-cyan-950/95 border-cyan-400 text-cyan-100';
+        ? 'bg-card/98 border-amber-500/60 text-amber-200'
+        : 'bg-card/98 border-cyan-500/50 text-cyan-200';
 
   const Icon =
     feedback.severity === 'error'
@@ -37,7 +37,7 @@ export const ActionFeedbackToast: React.FC = () => {
     <div
       role={feedback.severity === 'error' ? 'alert' : 'status'}
       aria-live="polite"
-      className={`fixed top-20 right-4 z-50 max-w-md rounded-md border px-3 py-2 shadow-xl flex items-center gap-2 text-xs font-mono ${toneClass}`}
+      className={`fixed top-20 right-4 z-50 max-w-md rounded-lg border px-3.5 py-2.5 shadow-2xl backdrop-blur-xl flex items-center gap-2.5 text-xs ${toneClass}`}
     >
       <Icon className="w-4 h-4 shrink-0" />
       <span className="flex-1 leading-relaxed">{feedback.message}</span>

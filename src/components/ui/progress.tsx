@@ -1,0 +1,31 @@
+import * as React from 'react';
+import { cn } from '../../lib/utils';
+
+interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
+  value?: number;
+  indicatorClassName?: string;
+}
+
+export const Progress: React.FC<ProgressProps> = ({
+  value = 0,
+  className,
+  indicatorClassName,
+  ...props
+}) => {
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={clamped}
+      className={cn('relative h-1.5 w-full overflow-hidden rounded-full bg-secondary', className)}
+      {...props}
+    >
+      <div
+        className={cn('h-full rounded-full bg-primary transition-all duration-200', indicatorClassName)}
+        style={{ width: `${clamped}%` }}
+      />
+    </div>
+  );
+};

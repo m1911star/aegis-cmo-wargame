@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import { PencilRuler } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 import type { SideId } from '../../types/wargame';
+import { Button } from '../ui/button';
+import { ModalHeader, ModalShell } from '../ui/dialog';
+import { Input } from '../ui/input';
+import { Select } from '../ui/select';
+import { Textarea } from '../ui/textarea';
 
 export const ScenarioBuilderModal: React.FC = () => {
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
@@ -35,31 +40,31 @@ export const ScenarioBuilderModal: React.FC = () => {
   const selectedBuilderUnit = units[builderUnitId] ?? Object.values(units)[0];
 
   return (
-    <div className="w-full max-w-5xl max-h-[92dvh] tactical-panel rounded-lg border border-emerald-400/50 overflow-y-auto">
-      <div className="px-4 py-3 bg-emerald-950/40 border-b border-emerald-500/30 flex items-center justify-between">
-        <div className="text-emerald-300 font-bold text-sm">SCENARIO BUILDER // 可视化想定编辑</div>
-        <button onClick={() => setActiveModal('none')} className="text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
-      </div>
-      <div className="p-4 grid md:grid-cols-2 gap-4 text-xs">
-        <section className="p-3 rounded bg-slate-950/80 border border-slate-700 space-y-3">
-          <h3 className="text-cyan-300 font-bold">单位与编组</h3>
-          <select aria-label="Builder 单位" value={selectedBuilderUnit?.id ?? ''} onChange={(event) => setBuilderUnitId(event.target.value)}
-            className="w-full bg-slate-900 rounded p-2">
+    <ModalShell className="max-w-5xl max-h-[92dvh] flex flex-col">
+      <ModalHeader
+        icon={<PencilRuler className="w-4 h-4 text-emerald-400" />}
+        title="SCENARIO BUILDER // 可视化想定编辑"
+        onClose={() => setActiveModal('none')}
+      />
+      <div className="p-4 grid md:grid-cols-2 gap-4 text-xs overflow-y-auto flex-1">
+        <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-3">
+          <h3 className="text-primary font-semibold">单位与编组</h3>
+          <Select aria-label="Builder 单位" value={selectedBuilderUnit?.id ?? ''} onChange={(event) => setBuilderUnitId(event.target.value)}>
             {Object.values(units).map((unit) => <option key={unit.id} value={unit.id}>{unit.callsign} · {unit.name}</option>)}
-          </select>
+          </Select>
           {selectedBuilderUnit && <>
-            <select aria-label="Builder 编组" value={selectedBuilderUnit.parentGroupId}
-              onChange={(event) => assignUnitGroup(selectedBuilderUnit.id, event.target.value)} className="w-full bg-slate-900 rounded p-2">
+            <Select aria-label="Builder 编组" value={selectedBuilderUnit.parentGroupId}
+              onChange={(event) => assignUnitGroup(selectedBuilderUnit.id, event.target.value)}>
               {groups.filter((group) => group.side === selectedBuilderUnit.side).map((group) =>
                 <option key={group.id} value={group.id}>{group.name}</option>)}
-            </select>
-            <button onClick={() => { selectUnit(selectedBuilderUnit.id); setInteractionMode('move_unit'); setActiveModal('none'); }}
-              className="toolbar-button bg-emerald-700 text-white">关闭面板并在地图移动单位</button>
+            </Select>
+            <Button variant="success" size="sm" onClick={() => { selectUnit(selectedBuilderUnit.id); setInteractionMode('move_unit'); setActiveModal('none'); }}>
+              关闭面板并在地图移动单位
+            </Button>
           </>}
-          <select aria-label="Builder 选择编组" value={selectedBuilderGroup?.id ?? ''} onChange={(event) => setBuilderGroupId(event.target.value)}
-            className="w-full bg-slate-900 rounded p-2">
+          <Select aria-label="Builder 选择编组" value={selectedBuilderGroup?.id ?? ''} onChange={(event) => setBuilderGroupId(event.target.value)}>
             {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-          </select>
+          </Select>
           {selectedBuilderGroup && (
             <form key={selectedBuilderGroup.id} className="space-y-2" onSubmit={(event) => {
               event.preventDefault();
@@ -69,54 +74,57 @@ export const ScenarioBuilderModal: React.FC = () => {
                 description: String(data.get('description') ?? ''),
               });
             }}>
-              <input name="name" aria-label="编组名称" defaultValue={selectedBuilderGroup.name} className="w-full bg-slate-900 rounded p-2" />
-              <input name="commandTitle" aria-label="编组指挥代号" defaultValue={selectedBuilderGroup.commandTitle} className="w-full bg-slate-900 rounded p-2" />
-              <textarea name="description" aria-label="编组说明" defaultValue={selectedBuilderGroup.description} className="w-full bg-slate-900 rounded p-2" />
-              <button className="toolbar-button" type="submit">保存编组</button>
+              <Input name="name" aria-label="编组名称" defaultValue={selectedBuilderGroup.name} />
+              <Input name="commandTitle" aria-label="编组指挥代号" defaultValue={selectedBuilderGroup.commandTitle} />
+              <Textarea name="description" aria-label="编组说明" defaultValue={selectedBuilderGroup.description} />
+              <Button size="sm" variant="outline" type="submit">保存编组</Button>
             </form>
           )}
-          <p className="text-slate-500">任务区继续使用左侧“由参考点创建任务”，两者共享同一可重放命令模型。</p>
+          <p className="text-[11px] text-muted-foreground">任务区继续使用左侧“由参考点创建任务”，两者共享同一可重放命令模型。</p>
         </section>
 
-        <section className="p-3 rounded bg-slate-950/80 border border-slate-700 space-y-3">
-          <h3 className="text-cyan-300 font-bold">胜负目标</h3>
+        <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-3">
+          <h3 className="text-primary font-semibold">胜负目标</h3>
           <div className="max-h-32 overflow-y-auto space-y-1">
-            {objectives.map((objective) => <div key={objective.id} className="flex justify-between gap-2 p-1 bg-slate-900 rounded">
+            {objectives.map((objective) => <div key={objective.id} className="flex justify-between items-center gap-2 px-2.5 py-1.5 bg-background/60 border border-border/60 rounded-md">
               <span>{objective.side} · {objective.title}</span>
-              <button aria-label={`删除目标 ${objective.title}`} onClick={() => deleteObjective(objective.id)} className="text-rose-300">删除</button>
+              <button aria-label={`删除目标 ${objective.title}`} onClick={() => deleteObjective(objective.id)} className="text-rose-300 hover:text-rose-200 cursor-pointer">删除</button>
             </div>)}
           </div>
-          <input aria-label="目标标题" value={objectiveTitle} onChange={(event) => setObjectiveTitle(event.target.value)} className="w-full bg-slate-900 rounded p-2" />
+          <Input aria-label="目标标题" value={objectiveTitle} onChange={(event) => setObjectiveTitle(event.target.value)} />
           <div className="grid grid-cols-2 gap-2">
-            <select aria-label="目标阵营" value={objectiveSide} onChange={(event) => { setObjectiveSide(event.target.value as 'RED' | 'BLUE'); setObjectiveReferenceIds([]); }} className="bg-slate-900 rounded p-2">
+            <Select aria-label="目标阵营" value={objectiveSide} onChange={(event) => { setObjectiveSide(event.target.value as 'RED' | 'BLUE'); setObjectiveReferenceIds([]); }}>
               <option value="RED">RED</option><option value="BLUE">BLUE</option>
-            </select>
-            <select aria-label="目标类型" value={objectiveType} onChange={(event) => setObjectiveType(event.target.value as typeof objectiveType)} className="bg-slate-900 rounded p-2">
+            </Select>
+            <Select aria-label="目标类型" value={objectiveType} onChange={(event) => setObjectiveType(event.target.value as typeof objectiveType)}>
               <option value="destroy">摧毁</option><option value="disable">失能</option><option value="preserve">保全</option><option value="observe">发现</option><option value="withdraw">撤出</option><option value="control_area">区域夺控</option>
-            </select>
+            </Select>
           </div>
           {objectiveType === 'control_area' ? (
             <div className="grid grid-cols-2 gap-1 max-h-24 overflow-y-auto">
               {referencePoints.filter((point) => point.side === objectiveSide).map((point) => (
-                <label key={point.id} className="flex gap-1 items-center">
+                <label key={point.id} className="flex gap-1.5 items-center">
                   <input
                     type="checkbox"
                     checked={objectiveReferenceIds.includes(point.id)}
                     onChange={(event) => setObjectiveReferenceIds((current) => event.target.checked
                       ? [...current, point.id]
                       : current.filter((id) => id !== point.id))}
+                    className="accent-emerald-400"
                   />
                   <span>{point.name}</span>
                 </label>
               ))}
             </div>
           ) : (
-            <select aria-label="目标单位" value={objectiveUnitId} onChange={(event) => setObjectiveUnitId(event.target.value)} className="w-full bg-slate-900 rounded p-2">
+            <Select aria-label="目标单位" value={objectiveUnitId} onChange={(event) => setObjectiveUnitId(event.target.value)}>
               <option value="">选择目标单位</option>
               {Object.values(units).map((unit) => <option key={unit.id} value={unit.id}>{unit.side} · {unit.callsign}</option>)}
-            </select>
+            </Select>
           )}
-          <button
+          <Button
+            size="sm"
+            variant="outline"
             disabled={!objectiveTitle.trim() || (objectiveType === 'control_area' ? objectiveReferenceIds.length < 3 : !objectiveUnitId)}
             onClick={() => {
               if (objectiveType === 'control_area') {
@@ -134,39 +142,39 @@ export const ScenarioBuilderModal: React.FC = () => {
                 });
               }
             }}
-            className="toolbar-button disabled:opacity-35"
-          >添加主要目标</button>
+          >添加主要目标</Button>
         </section>
 
-        <section className="md:col-span-2 p-3 rounded bg-slate-950/80 border border-slate-700 space-y-3">
-          <h3 className="text-cyan-300 font-bold">区域触发事件</h3>
+        <section className="md:col-span-2 p-3.5 rounded-lg bg-muted/35 border border-border space-y-3">
+          <h3 className="text-primary font-semibold">区域触发事件</h3>
           <div className="grid md:grid-cols-2 gap-3">
             <div className="space-y-2">
-              <input aria-label="区域事件名称" value={areaEventName} onChange={(event) => setAreaEventName(event.target.value)} className="w-full bg-slate-900 rounded p-2" />
-              <textarea aria-label="区域事件消息" value={areaEventMessage} onChange={(event) => setAreaEventMessage(event.target.value)} className="w-full bg-slate-900 rounded p-2" />
-              <select aria-label="区域事件阵营" value={areaEventSide} onChange={(event) => { setAreaEventSide(event.target.value as SideId); setAreaEventReferenceIds([]); }} className="w-full bg-slate-900 rounded p-2">
+              <Input aria-label="区域事件名称" value={areaEventName} onChange={(event) => setAreaEventName(event.target.value)} />
+              <Textarea aria-label="区域事件消息" value={areaEventMessage} onChange={(event) => setAreaEventMessage(event.target.value)} />
+              <Select aria-label="区域事件阵营" value={areaEventSide} onChange={(event) => { setAreaEventSide(event.target.value as SideId); setAreaEventReferenceIds([]); }}>
                 <option value="RED">RED</option><option value="BLUE">BLUE</option>
-              </select>
-              <div className="grid grid-cols-2 gap-1">
-                {referencePoints.filter((point) => point.side === areaEventSide).map((point) => <label key={point.id} className="flex gap-1">
+              </Select>
+              <div className="grid grid-cols-2 gap-1.5">
+                {referencePoints.filter((point) => point.side === areaEventSide).map((point) => <label key={point.id} className="flex gap-1.5 items-center">
                   <input type="checkbox" aria-label={`事件参考点 ${point.name}`} checked={areaEventReferenceIds.includes(point.id)}
-                    onChange={(event) => setAreaEventReferenceIds((current) => event.target.checked ? [...current, point.id] : current.filter((id) => id !== point.id))} />
-                  {point.name}
+                    onChange={(event) => setAreaEventReferenceIds((current) => event.target.checked ? [...current, point.id] : current.filter((id) => id !== point.id))}
+                    className="accent-emerald-400" />
+                  <span>{point.name}</span>
                 </label>)}
               </div>
-              <button disabled={areaEventReferenceIds.length < 3} onClick={() => createAreaEventFromReferencePoints({
+              <Button size="sm" variant="outline" disabled={areaEventReferenceIds.length < 3} onClick={() => createAreaEventFromReferencePoints({
                 name: areaEventName, side: areaEventSide, referencePointIds: areaEventReferenceIds, message: areaEventMessage,
-              })} className="toolbar-button disabled:opacity-35">创建区域事件</button>
+              })}>创建区域事件</Button>
             </div>
-            <div className="max-h-48 overflow-y-auto space-y-1">
-              {events.map((event) => <div key={event.id} className="flex justify-between gap-2 p-2 bg-slate-900 rounded">
+            <div className="max-h-48 overflow-y-auto space-y-1.5">
+              {events.map((event) => <div key={event.id} className="flex justify-between items-center gap-2 p-2 bg-background/60 border border-border/60 rounded-md">
                 <span>{event.name} · {event.trigger.type}</span>
-                <button aria-label={`删除事件 ${event.name}`} onClick={() => deleteScenarioEvent(event.id)} className="text-rose-300">删除</button>
+                <button aria-label={`删除事件 ${event.name}`} onClick={() => deleteScenarioEvent(event.id)} className="text-rose-300 hover:text-rose-200 cursor-pointer">删除</button>
               </div>)}
             </div>
           </div>
         </section>
       </div>
-    </div>
+    </ModalShell>
   );
 };

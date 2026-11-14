@@ -9,30 +9,30 @@ interface Props {
 }
 
 export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml }) => (
-  <aside className="z-20 w-full h-full tactical-panel border-l border-cyan-500/25 flex flex-col overflow-y-auto p-3 space-y-4 inspector-content">
-    <div className="flex items-center gap-3 p-2.5 rounded bg-amber-950/30 border border-amber-500/40">
+  <aside className="z-20 w-full h-full flex flex-col overflow-y-auto p-3 space-y-3 inspector-content">
+    <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/35">
       <div
-        className="w-12 h-12 flex items-center justify-center shrink-0"
+        className="w-11 h-11 flex items-center justify-center rounded-md bg-background/60 border border-border shrink-0"
         dangerouslySetInnerHTML={{ __html: symbolSvgHtml }}
       />
       <div className="min-w-0">
-        <div className="text-[10px] text-amber-400 uppercase font-bold">情报目标</div>
-        <div className="text-sm font-bold text-slate-100 truncate">{contact.displayName}</div>
+        <div className="text-[10px] text-amber-400 uppercase font-semibold">情报目标</div>
+        <div className="text-sm font-semibold text-foreground truncate">{contact.displayName}</div>
         <div className="text-[11px] text-amber-300">
           分类等级: {classificationLabels[contact.classification]} · 威胁: {threatLabels[contact.threatLevel]}
         </div>
       </div>
     </div>
 
-    <div className="p-2.5 rounded bg-slate-950/80 border border-slate-800 space-y-1.5 text-xs">
-      <div className="text-cyan-400 font-bold text-[11px] mb-1">目标状态与定位误差</div>
+    <div className="bg-card/85 border border-border space-y-1.5 text-xs">
+      <div className="text-primary font-semibold text-[11px] mb-1">目标状态与定位误差</div>
       <div className="flex justify-between">
-        <span className="text-slate-400">观测坐标:</span>
-        <span>{contact.estimatedPosition[1].toFixed(3)}°N, {contact.estimatedPosition[0].toFixed(3)}°E</span>
+        <span className="text-muted-foreground">观测坐标:</span>
+        <span className="font-mono tabular-nums">{contact.estimatedPosition[1].toFixed(3)}°N, {contact.estimatedPosition[0].toFixed(3)}°E</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-slate-400">定位几何:</span>
-        <span className="text-amber-400 font-bold">
+        <span className="text-muted-foreground">定位几何:</span>
+        <span className="text-amber-300 font-semibold">
           {contact.uncertaintyKind === 'bearing_corridor'
             ? '方位走廊'
             : contact.uncertaintyKind === 'ellipse'
@@ -42,14 +42,14 @@ export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml 
         </span>
       </div>
       <div className="flex justify-between">
-        <span className="text-slate-400">解算航速 / 航向:</span>
-        <span>{contact.speedKts} kts / {contact.heading}°</span>
+        <span className="text-muted-foreground">解算航速 / 航向:</span>
+        <span className="font-mono tabular-nums">{contact.speedKts} kts / {contact.heading}°</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-slate-400">高度 / 深度:</span>
-        <span>{contact.altitudeM} m</span>
+        <span className="text-muted-foreground">高度 / 深度:</span>
+        <span className="font-mono tabular-nums">{contact.altitudeM} m</span>
       </div>
-      <div className="pt-1 border-t border-slate-900 text-[11px] text-cyan-300">
+      <div className="pt-1.5 border-t border-border text-[11px] text-cyan-300">
         探测传感器: {contact.detectedBySources.join(' , ')}
       </div>
     </div>

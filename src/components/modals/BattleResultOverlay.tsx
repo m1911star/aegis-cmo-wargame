@@ -1,7 +1,9 @@
 import React from 'react';
-import { Award, ChartColumn, RotateCcw, X } from 'lucide-react';
+import { Award, ChartColumn, RotateCcw } from 'lucide-react';
 import { evaluateBattleAssessment } from '../../engine/simulation/battleAssessment';
 import { useWargameStore } from '../../store/useWargameStore';
+import { Button } from '../ui/button';
+import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
 
 const OUTCOME_LABELS = {
   victory: '战役/任务胜利 (VICTORY)',
@@ -39,60 +41,53 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
       role="dialog"
       aria-modal="true"
       aria-label="战后结算与评估"
-      className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 font-mono"
+      className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
     >
-      <div className="w-full max-w-2xl tactical-panel rounded-lg border border-amber-400/60 overflow-hidden shadow-[0_0_50px_rgba(245,158,11,0.25)]">
-        <div className="px-4 py-3 bg-amber-950/50 border-b border-amber-500/35 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
-            <Award className="w-4 h-4" />
-            <span>BATTLE ASSESSMENT // 战局终局结算</span>
-          </div>
-          <button
-            aria-label="关闭终局结算"
-            onClick={onDismiss}
-            className="text-slate-400 hover:text-white cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+      <ModalShell className="max-w-2xl border-amber-500/40">
+        <ModalHeader
+          icon={<Award className="w-4 h-4 text-amber-300" />}
+          title="BATTLE ASSESSMENT // 战局终局结算"
+          onClose={onDismiss}
+          closeLabel="关闭终局结算"
+        />
 
-        <div className="p-5 space-y-4 text-xs max-h-[80dvh] overflow-y-auto">
-          <div className="p-3 rounded bg-slate-950/90 border border-amber-500/30 space-y-1">
-            <div className="text-base font-bold text-amber-300">{OUTCOME_LABELS[outcome]}</div>
+        <div className="p-5 space-y-4 text-xs max-h-[78dvh] overflow-y-auto">
+          <div className="p-3.5 rounded-lg bg-amber-500/8 border border-amber-500/25 space-y-1">
+            <div className="text-base font-semibold text-amber-300">{OUTCOME_LABELS[outcome]}</div>
             <div className="text-cyan-300">积分评级：{assessment.summary}（红 {score.redScore} : 蓝 {score.blueScore}）</div>
-            <div className="text-slate-400">
+            <div className="text-muted-foreground">
               终止原因：{battleResult.reason === 'critical_objective' ? '关键目标决定终局' : '到达想定预设时间上限'}
               {failedRequired.length > 0 && ` · 未达成主要目标：${failedRequired.map((o) => o.title).join('；')}`}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded bg-rose-950/25 border border-rose-500/30 space-y-1">
-              <div className="text-rose-300 font-bold">红方统计</div>
+            <div className="p-3.5 rounded-lg bg-rose-500/8 border border-rose-500/25 space-y-1">
+              <div className="text-rose-300 font-semibold">红方统计</div>
               <div>发射：{score.redMissilesFired} · 拦截：{score.redInterceptions}</div>
               <div>损失：{score.redLosses} · 积分：{score.redScore}</div>
             </div>
-            <div className="p-3 rounded bg-sky-950/25 border border-sky-500/30 space-y-1">
-              <div className="text-sky-300 font-bold">蓝方统计</div>
+            <div className="p-3.5 rounded-lg bg-sky-500/8 border border-sky-500/25 space-y-1">
+              <div className="text-sky-300 font-semibold">蓝方统计</div>
               <div>发射：{score.blueMissilesFired} · 拦截：{score.blueInterceptions}</div>
               <div>损失：{score.blueLosses} · 积分：{score.blueScore}</div>
             </div>
           </div>
 
-          <div className="p-3 rounded bg-slate-950/85 border border-slate-800 space-y-2">
-            <div className="text-cyan-300 font-bold">本方任务目标对账 ({side})</div>
+          <div className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-2">
+            <div className="text-primary font-semibold">本方任务目标对账 ({side})</div>
             {sideObjectives.length === 0 ? (
-              <p className="text-slate-400">本想定按综合积分与战损裁决。</p>
+              <p className="text-muted-foreground">本想定按综合积分与战损裁决。</p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {sideObjectives.map((obj) => {
                   const status = objectiveProgress[obj.id];
                   return (
-                    <li key={obj.id} className="flex items-center justify-between gap-2 border-b border-slate-900 pb-1">
+                    <li key={obj.id} className="flex items-center justify-between gap-2 border-b border-border/70 pb-1.5 last:border-0 last:pb-0">
                       <span className={status === 'achieved' ? 'text-emerald-300' : 'text-rose-300'}>
                         {status === 'achieved' ? '✓ 已达成' : '✗ 未达成'} · {obj.title} ({obj.required ? '主要' : '次要'})
                       </span>
-                      <span className="text-slate-400">{obj.points} 分</span>
+                      <span className="text-muted-foreground font-mono">{obj.points} 分</span>
                     </li>
                   );
                 })}
@@ -101,40 +96,41 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
           </div>
         </div>
 
-        <div className="px-4 py-3 bg-slate-950/90 border-t border-slate-800 flex flex-wrap items-center justify-end gap-2">
-          <button
+        <ModalFooter>
+          <Button
+            variant="outline"
             onClick={() => {
               onDismiss();
               setActiveModal('aar');
             }}
-            className="toolbar-button text-amber-300"
+            className="text-amber-300"
           >
-            <ChartColumn /><span>查看完整复盘 (AAR)</span>
-          </button>
-          <button
+            <ChartColumn className="w-3.5 h-3.5" /><span>查看完整复盘 (AAR)</span>
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => {
               onDismiss();
               resetScenario(true);
             }}
-            className="toolbar-button text-cyan-300"
+            className="text-cyan-300"
           >
-            <RotateCcw /><span>随机种子再来一局</span>
-          </button>
+            <RotateCcw className="w-3.5 h-3.5" /><span>随机种子再来一局</span>
+          </Button>
           {campaignState && !campaignState.finished && (
-            <button
+            <Button
               onClick={() => {
                 onDismiss();
                 advanceCampaignStage();
               }}
-              className="px-3 py-1.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer"
             >
               {campaignState.currentStageIndex + 1 < campaignState.totalStages
                 ? `推进至第 ${campaignState.currentStageIndex + 2} 阶段战役`
                 : '完成战役结算'}
-            </button>
+            </Button>
           )}
-        </div>
-      </div>
+        </ModalFooter>
+      </ModalShell>
     </div>
   );
 };

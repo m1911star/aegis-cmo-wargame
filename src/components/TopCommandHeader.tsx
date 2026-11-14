@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import type { ActivePerspective, TimeScale } from '../types/wargame';
+import { Select } from './ui/select';
 
 const TIME_SCALES: TimeScale[] = [1, 5, 15, 60];
 const PERSPECTIVES: { id: ActivePerspective; label: string; activeClass: string }[] = [
@@ -89,17 +90,18 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
       <div className="command-row command-primary">
         <div className="scenario-controls">
           <div className="brand-mark"><i /> <span>AEGIS-CMO</span></div>
-          <select
+          <Select
             aria-label="选择战役想定"
             title={currentScenario.title}
             value={currentScenario.id}
             onChange={(e) => handleScenarioChange(e.target.value)}
-            className="scenario-select"
+            wrapperClassName="scenario-select"
+            className="h-7 text-[11px]"
           >
             {availableScenarios.map((sc) => (
               <option key={sc.id} value={sc.id}>{sc.title.replace(' // ', ' · ')}</option>
             ))}
-          </select>
+          </Select>
           <button onClick={() => setActiveModal('briefing')} className="toolbar-button" title="查看想定简报">
             <BookOpen /><span>简报</span>
           </button>
@@ -114,7 +116,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           )}
           <button
             onClick={() => (campaignState ? exitCampaign() : startCampaign())}
-            className={`toolbar-button ${campaignState ? 'text-amber-300' : 'text-cyan-300'}`}
+            className={`toolbar-button ${campaignState ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-cyan-300'}`}
             title={campaignState ? '退出战役连贯模式' : '开启三阶段西太联合战役'}
           >
             <span>
@@ -125,10 +127,16 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           </button>
         </div>
         <div className="utility-controls">
-          <select aria-label="控制席位" title="开局选择控制席位；观察视角不会改变控制权" disabled={hasStarted || timeScale !== 0}
-            value={playerSide} onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')} className="bg-slate-900 rounded p-1 text-xs">
+          <Select
+            aria-label="控制席位"
+            title="开局选择控制席位；观察视角不会改变控制权"
+            disabled={hasStarted || timeScale !== 0}
+            value={playerSide}
+            onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')}
+            className="h-7 text-[11px]"
+          >
             <option value="RED">指挥红方</option><option value="BLUE">指挥蓝方</option>
-          </select>
+          </Select>
           <button className="toolbar-button" aria-pressed={playMode === 'sandbox'} title="沙盒模式可编辑双方；与观察视角独立"
             onClick={() => setPlayMode(playMode === 'command' ? 'sandbox' : 'command')}>{playMode === 'sandbox' ? '沙盒编辑中' : '指挥模式'}</button>
           <button disabled={playMode !== 'sandbox'} onClick={() => setActiveModal('unit_spawner')} className="toolbar-button text-emerald-300 disabled:opacity-40">

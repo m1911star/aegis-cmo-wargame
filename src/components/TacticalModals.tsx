@@ -19,27 +19,27 @@ export const TacticalModals: React.FC = () => {
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center p-4 font-mono gap-2"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center p-4 gap-2.5"
     >
       {isUgcMode && (
-        <div className="flex items-center gap-1.5 bg-slate-950/90 border border-cyan-500/30 rounded-md p-1 text-xs">
+        <div className="flex items-center gap-1 bg-card/95 border border-border rounded-lg p-1 text-xs shadow-lg">
           <button
             onClick={() => setActiveModal('scenario_io')}
-            className={`px-3 py-1 rounded cursor-pointer ${activeModal === 'scenario_io' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-300 hover:text-white'}`}
+            className={`px-3 py-1.5 rounded-md font-medium cursor-pointer transition-colors ${activeModal === 'scenario_io' ? 'bg-primary text-primary-foreground font-semibold' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
           >
             想定与回放 I/O
           </button>
           <button
             disabled={playMode !== 'sandbox'}
             onClick={() => setActiveModal('builder')}
-            className={`px-3 py-1 rounded cursor-pointer disabled:opacity-35 ${activeModal === 'builder' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-300 hover:text-white'}`}
+            className={`px-3 py-1.5 rounded-md font-medium cursor-pointer transition-colors disabled:opacity-35 ${activeModal === 'builder' ? 'bg-emerald-500 text-slate-950 font-semibold' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
           >
             想定编辑 (沙盒)
           </button>
           <button
             disabled={playMode !== 'sandbox'}
             onClick={() => setActiveModal('unit_spawner')}
-            className={`px-3 py-1 rounded cursor-pointer disabled:opacity-35 ${activeModal === 'unit_spawner' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-300 hover:text-white'}`}
+            className={`px-3 py-1.5 rounded-md font-medium cursor-pointer transition-colors disabled:opacity-35 ${activeModal === 'unit_spawner' ? 'bg-emerald-500 text-slate-950 font-semibold' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
           >
             兵力投放 (沙盒)
           </button>

@@ -42,9 +42,9 @@ export const OrbatTreeTab: React.FC = () => {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between px-1 text-[10px] text-slate-400">
+      <div className="flex items-center justify-between px-1 text-[10px] text-muted-foreground">
         <span>点击单元定位到地图</span>
-        <span className="text-cyan-400">{perspectiveLabels[activePerspective]}视角</span>
+        <span className="text-primary font-medium">{perspectiveLabels[activePerspective]}视角</span>
       </div>
 
       {visibleGroups.map((group) => {
@@ -53,30 +53,30 @@ export const OrbatTreeTab: React.FC = () => {
         const isRed = group.side === 'RED';
 
         return (
-          <div key={group.id} className="rounded border border-slate-800/90 bg-slate-950/65 overflow-hidden">
+          <div key={group.id} className="rounded-lg border border-border bg-card/75 overflow-hidden shadow-xs">
             <button
               onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group.id]: !isCollapsed }))}
-              className={`w-full px-2.5 py-2 flex items-center justify-between text-left cursor-pointer ${
+              className={`w-full px-2.5 py-2 flex items-center justify-between text-left cursor-pointer transition-colors ${
                 isRed
-                  ? 'bg-rose-950/35 border-b border-rose-500/20 text-rose-200'
-                  : 'bg-sky-950/35 border-b border-sky-500/20 text-sky-200'
+                  ? 'bg-rose-500/10 hover:bg-rose-500/15 border-b border-border text-rose-200'
+                  : 'bg-sky-500/10 hover:bg-sky-500/15 border-b border-border text-sky-200'
               }`}
             >
               <div className="flex items-center gap-1.5 min-w-0">
                 {isCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-75" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                  <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-75" />
                 )}
-                <span className="text-xs font-bold truncate">{group.name}</span>
+                <span className="text-xs font-semibold truncate">{group.name}</span>
               </div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900/90">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-background/70 border border-border font-mono tabular-nums text-foreground">
                 {groupUnits.filter((u) => u.hp > 0).length}/{groupUnits.length}
               </span>
             </button>
 
             {!isCollapsed && (
-              <div className="divide-y divide-slate-900">
+              <div className="divide-y divide-border/60">
                 {groupUnits.map((unit) => {
                   const isSelected = unit.id === selectedUnitId;
                   const isDead = unit.hp <= 0 || unit.status === 'destroyed';
@@ -101,7 +101,7 @@ export const OrbatTreeTab: React.FC = () => {
                           <span>{Math.round(unit.speedKts)} 节 · {unit.doctrine.emconRadar ? '雷达开启' : '静默'}</span>
                         </div>
                         <div className="unit-roster-meta">
-                          <span className={isDead ? 'text-rose-400' : 'text-emerald-400/80'}>
+                          <span className={isDead ? 'text-rose-400' : 'text-emerald-400/90'}>
                             耐久 {Math.round(unit.hp)}/{unit.maxHp}
                           </span>
                           <span>弹药 {totalAmmo}</span>
