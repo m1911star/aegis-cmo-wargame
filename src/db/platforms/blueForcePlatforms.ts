@@ -371,7 +371,8 @@ export const BLUE_FORCE_PLATFORMS: Record<string, PlatformSpec> = {
       totalAirframes: 2, readyAirframes: 1, launchCooldownSec: 24,
       turnaroundSec: 100, turnaroundSupplyBatches: 2,
     }],
-    description: '慢速高价值两栖核心，搭载有限F-35B与MH-60R联队，并以ESSM构成中近程自卫层。',
+    deployables: [{ platformId: 'blue_armor_brigade', count: 2 }],
+    description: '慢速高价值两栖核心，搭载F-35B/MH-60R联队与2个两栖陆战突击营，支持近岸抵滩投送。',
   },
   cvn_carrier: {
     id: 'cvn_carrier',

@@ -101,6 +101,30 @@ export function hasRadarLineOfSight(
   return true;
 }
 
+export const MAX_AMPHIBIOUS_STANDOFF_KM = 18;
+
+export function findAmphibiousLandingPoint(
+  shipOrigin: [number, number],
+  headingDeg: number,
+  environment?: ScenarioEnvironment,
+  maxStandOffKm = MAX_AMPHIBIOUS_STANDOFF_KM
+): [number, number] | undefined {
+  if (!environment?.landPolygons.length) return undefined;
+  const bearingOffsets = [0, -25, 25, -50, 50, -90, 90, -135, 135, 180];
+  for (let distKm = 2; distKm <= maxStandOffKm + 1e-6; distKm += 2) {
+    for (const offset of bearingOffsets) {
+      const bearing = (headingDeg + offset + 360) % 360;
+      const candidate = turf.destination(shipOrigin, distKm, bearing, {
+        units: 'kilometers',
+      }).geometry.coordinates as [number, number];
+      if (isPointOnLand(candidate, environment)) {
+        return [Number(candidate[0].toFixed(4)), Number(candidate[1].toFixed(4))];
+      }
+    }
+  }
+  return undefined;
+}
+
 export function findShootAndScootDestination(
   origin: [number, number],
   environment?: ScenarioEnvironment,

@@ -1,11 +1,15 @@
+import * as turf from '@turf/turf';
 import type {
   CombatLogEntry,
   EquipmentCatalog,
   PendingSortieOrder,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScoreLedger,
   TacticalMission,
 } from '../types/wargame';
+import { findAmphibiousLandingPoint, isRouteAllowed, MAX_AMPHIBIOUS_STANDOFF_KM } from './environment';
+import { getBearingDeg } from './geometry';
 import { createRuntimeUnitFromPlacement } from './simulation/unitFactory';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 
@@ -173,4 +177,142 @@ export function processPendingSortieOrders(
     });
   }
   return remaining;
+}
+
+export interface DeployCarriedResult {
+  deployed?: RuntimeUnit;
+  log?: CombatLogEntry;
+  errorReason?: string;
+}
+
+export function deployCarriedUnitFromLauncher(
+  units: Record<string, RuntimeUnit>,
+  launcher: RuntimeUnit | undefined,
+  platformId: string,
+  catalog: EquipmentCatalog,
+  environment: ScenarioEnvironment | undefined,
+  simTime: number,
+  idSuffix: string,
+  callsignSeq: number,
+  targetWaypoint?: [number, number]
+): DeployCarriedResult {
+  if (!launcher || !isActiveUnit(launcher) || !getUnitCapabilities(launcher).canFire) {
+    return { errorReason: '投送母舰/载机已失能，无法执行释放或抵滩卸载' };
+  }
+  const deployableSpec = catalog.platforms[platformId];
+  const remaining = launcher.deployableInventory[platformId] ?? 0;
+  if (remaining <= 0 || !deployableSpec) {
+    return { errorReason: '所选搭载单位库存已耗尽' };
+  }
+  const id = `deployable_${launcher.id}_${platformId}_${idSuffix}`;
+  if (units[id]) {
+    return { errorReason: '投送编号冲突，请稍后重试' };
+  }
+
+  // Branch A: Airborne unmanned / decoy deployable
+  if (deployableSpec.domain === 'air' && ['decoy', 'mpa_uav'].includes(deployableSpec.category)) {
+    const deployed = createRuntimeUnitFromPlacement({
+      id,
+      name: `${deployableSpec.name} #${remaining}`,
+      callsign: `${deployableSpec.category === 'decoy' ? 'DECOY' : 'UAV'}-${callsignSeq}`,
+      side: launcher.side,
+      platformId,
+      parentGroupId: launcher.parentGroupId,
+      position: [...launcher.position],
+      altitudeM: Math.max(deployableSpec.minAltitudeM, Math.min(deployableSpec.maxAltitudeM, launcher.altitudeM)),
+      heading: targetWaypoint ? getBearingDeg(launcher.position, targetWaypoint) : launcher.heading,
+      speedKts: deployableSpec.cruiseSpeedKts,
+    }, catalog);
+    deployed.deployedByUnitId = launcher.id;
+    const destination = targetWaypoint
+      ? ([...targetWaypoint] as [number, number])
+      : (turf.destination(launcher.position, 250, launcher.heading, { units: 'kilometers' })
+          .geometry.coordinates as [number, number]);
+    deployed.waypoints = [{
+      position: destination,
+      speedKts: deployableSpec.cruiseSpeedKts,
+      altitudeM: deployed.altitudeM,
+    }];
+    return {
+      deployed,
+      log: {
+        id: `deployable_launch_${id}`,
+        simTime,
+        side: launcher.side,
+        category: 'EVENT',
+        severity: 'info',
+        title: `${launcher.callsign} 释放 ${deployableSpec.name}`,
+        message: `剩余库存 ${remaining - 1}；平台作为独立可观测实体进入战场。`,
+        position: [...launcher.position],
+        unitId: deployed.id,
+        aarType: 'sortie',
+      },
+    };
+  }
+
+  // Branch B: Amphibious beach landing of embarked ground force
+  if (
+    deployableSpec.domain === 'land' &&
+    deployableSpec.category === 'ground_force' &&
+    launcher.domain === 'surface' &&
+    ['carrier', 'amphibious'].includes(launcher.category)
+  ) {
+    const landingPos = findAmphibiousLandingPoint(
+      launcher.position,
+      launcher.heading,
+      environment,
+      MAX_AMPHIBIOUS_STANDOFF_KM
+    );
+    if (!landingPos) {
+      return {
+        errorReason: `需抵近海岸线 ${MAX_AMPHIBIOUS_STANDOFF_KM} km 以内方可实施两栖卸载登滩`,
+      };
+    }
+    const advanceTarget = targetWaypoint
+      ? ([...targetWaypoint] as [number, number])
+      : (turf.destination(landingPos, 6, getBearingDeg(launcher.position, landingPos), {
+          units: 'kilometers',
+        }).geometry.coordinates as [number, number]);
+    const canAdvanceInland = isRouteAllowed('land', landingPos, advanceTarget, environment);
+    const heading = canAdvanceInland
+      ? getBearingDeg(landingPos, advanceTarget)
+      : getBearingDeg(launcher.position, landingPos);
+
+    const deployed = createRuntimeUnitFromPlacement({
+      id,
+      name: `${deployableSpec.name} (登滩#${remaining})`,
+      callsign: `LANDING-${callsignSeq}`,
+      side: launcher.side,
+      platformId,
+      parentGroupId: launcher.parentGroupId,
+      position: landingPos,
+      heading,
+      speedKts: canAdvanceInland ? deployableSpec.cruiseSpeedKts : 0,
+      doctrine: { roe: 'free', requireIdentifiedForAutoFire: true, shootAndScoot: false },
+    }, catalog);
+    deployed.deployedByUnitId = launcher.id;
+    if (canAdvanceInland) {
+      deployed.waypoints = [{
+        position: advanceTarget,
+        speedKts: deployableSpec.cruiseSpeedKts,
+      }];
+    }
+    return {
+      deployed,
+      log: {
+        id: `amphibious_landing_${id}`,
+        simTime,
+        side: launcher.side,
+        category: 'EVENT',
+        severity: 'warning',
+        title: `[两栖抵滩投送] ${launcher.callsign} 卸载 ${deployableSpec.name} 抢滩登岛`,
+        message: `登陆点 [${landingPos[0].toFixed(2)}°E, ${landingPos[1].toFixed(2)}°N]，坞舱剩余 ${remaining - 1} 批。`,
+        position: [...landingPos],
+        unitId: deployed.id,
+        aarType: 'sortie',
+      },
+    };
+  }
+
+  return { errorReason: '平台不支持该类型搭载投送' };
 }

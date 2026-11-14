@@ -139,7 +139,15 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
     unique((platform.deployables ?? []).map((deployable) => deployable.platformId), `platforms.${pId}.deployables`);
     for (const deployable of platform.deployables ?? []) {
       const target = catalog.platforms[deployable.platformId];
-      if (!target || target.domain !== 'air' || !['decoy', 'mpa_uav'].includes(target.category)) {
+      const validAirDeployable =
+        !!target && target.domain === 'air' && ['decoy', 'mpa_uav'].includes(target.category);
+      const validAmphibiousEmbark =
+        !!target &&
+        target.domain === 'land' &&
+        target.category === 'ground_force' &&
+        platform.domain === 'surface' &&
+        ['carrier', 'amphibious'].includes(platform.category);
+      if (!validAirDeployable && !validAmphibiousEmbark) {
         errors.push(`platforms.${pId}: invalid deployable platform ${deployable.platformId}`);
       }
     }

@@ -1,6 +1,5 @@
-import * as turf from '@turf/turf';
 import { resolveUnitConfiguration } from '../../db/unitConfiguration';
-import { launchCarrierSortie } from '../../engine/carrierOperations';
+import { deployCarriedUnitFromLauncher, launchCarrierSortie } from '../../engine/carrierOperations';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
 import { findShootAndScootDestination, isRouteAllowed } from '../../engine/environment';
 import { evaluateFireControl } from '../../engine/fireControl';
@@ -233,48 +232,34 @@ export function createCommandSlice(set: StoreSet) {
 
     deployCarriedPlatform: (launcherUnitId: string, platformId: string) => set((s) => {
       const launcher = s.units[launcherUnitId];
-      const deployableSpec = s.catalog.platforms[platformId];
-      const remaining = launcher?.deployableInventory[platformId] ?? 0;
-      if (!canCommandUnit(s, launcher) || remaining <= 0 || !deployableSpec || deployableSpec.domain !== 'air' ||
-          !['decoy', 'mpa_uav'].includes(deployableSpec.category)) return s;
-      const id = `deployable_${launcher.id}_${platformId}_${s.tick}_${s.commandSequence}`;
-      if (s.units[id]) return s;
-      const deployed = createRuntimeUnitFromPlacement({
-        id,
-        name: `${deployableSpec.name} #${remaining}`,
-        callsign: `${deployableSpec.category === 'decoy' ? 'DECOY' : 'UAV'}-${s.commandSequence + 1}`,
-        side: launcher.side,
+      if (!canCommandUnit(s, launcher)) return s;
+      const outcome = deployCarriedUnitFromLauncher(
+        s.units,
+        launcher,
         platformId,
-        parentGroupId: launcher.parentGroupId,
-        position: [...launcher.position],
-        altitudeM: Math.max(deployableSpec.minAltitudeM, Math.min(deployableSpec.maxAltitudeM, launcher.altitudeM)),
-        heading: launcher.heading,
-        speedKts: deployableSpec.cruiseSpeedKts,
-      }, s.catalog);
-      deployed.deployedByUnitId = launcher.id;
-      deployed.waypoints = [{
-        position: turf.destination(launcher.position, 250, launcher.heading, { units: 'kilometers' })
-          .geometry.coordinates as [number, number],
-        speedKts: deployableSpec.cruiseSpeedKts,
-        altitudeM: deployed.altitudeM,
-      }];
-      const launcherClone = { ...launcher, deployableInventory: {
-        ...launcher.deployableInventory, [platformId]: remaining - 1,
-      } };
-      const log: CombatLogEntry = {
-        id: `deployable_launch_${id}`,
-        simTime: s.simTime,
-        side: launcher.side,
-        category: 'EVENT',
-        severity: 'info',
-        title: `${launcher.callsign} 释放 ${deployableSpec.name}`,
-        message: `剩余库存 ${remaining - 1}；平台作为独立可观测实体进入战场。`,
-        position: [...launcher.position],
-        unitId: deployed.id,
-        aarType: 'sortie',
+        s.catalog,
+        s.environment,
+        s.simTime,
+        `${s.tick}_${s.commandSequence}`,
+        s.commandSequence + 1
+      );
+      if (!outcome.deployed) {
+        if (outcome.errorReason) emitActionFeedback('warning', outcome.errorReason);
+        return s;
+      }
+      const remaining = launcher.deployableInventory[platformId] ?? 1;
+      const launcherClone = {
+        ...launcher,
+        deployableInventory: {
+          ...launcher.deployableInventory,
+          [platformId]: Math.max(0, remaining - 1),
+        },
       };
-      return { units: { ...s.units, [launcher.id]: launcherClone, [deployed.id]: deployed },
-        selectedUnitId: deployed.id, logs: [log, ...s.logs].slice(0, 250) };
+      return {
+        units: { ...s.units, [launcher.id]: launcherClone, [outcome.deployed.id]: outcome.deployed },
+        selectedUnitId: outcome.deployed.id,
+        logs: outcome.log ? [outcome.log, ...s.logs].slice(0, 250) : s.logs,
+      };
     }),
 
     deployCountermeasure: (unitId: string, kind: 'chaff' | 'flares' | 'acousticDecoys') => set((s) => {

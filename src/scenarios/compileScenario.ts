@@ -197,6 +197,16 @@ export function compileScenario(
           if (!mission || mission.side !== carrier.side) invalid(path, 'unknown sortie mission or side mismatch');
         }
       }
+      if (action.type === 'DEPLOY_CARRIED') {
+        const launcher = units.get(action.launcherUnitId);
+        const deployables = launcher ? catalog.platforms[launcher.platformId]?.deployables : undefined;
+        const entry = deployables?.find((candidate) => candidate.platformId === action.platformId);
+        if (!launcher || !entry) invalid(path, 'unknown launcher or unsupported carried platform');
+        if (action.assignedMissionId) {
+          const mission = missions.get(action.assignedMissionId);
+          if (!mission || mission.side !== launcher.side) invalid(path, 'unknown deploy mission or side mismatch');
+        }
+      }
       if (action.type === 'ASSIGN_MISSION') {
         if (action.side === 'NEUTRAL') invalid(path, 'neutral side cannot receive missions');
         const targetUnit = action.unitId ? units.get(action.unitId) : undefined;

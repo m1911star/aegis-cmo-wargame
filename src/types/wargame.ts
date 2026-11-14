@@ -555,6 +555,14 @@ export type ScenarioEventAction =
       launchDelaySec?: number;
     }
   | {
+      type: 'DEPLOY_CARRIED';
+      launcherUnitId: string;
+      platformId: string;
+      count?: number;
+      targetWaypoint?: [number, number];
+      assignedMissionId?: string;
+    }
+  | {
       type: 'ASSIGN_MISSION';
       side: SideId;
       unitId?: string;

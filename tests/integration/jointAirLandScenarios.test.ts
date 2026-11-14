@@ -251,6 +251,38 @@ describe('Joint sea-land-air & inland air-land mechanics', () => {
     expect(res.battleResult).toBeUndefined();
   });
 
+  test('amphibious ship blocks offshore disembarkation, lands ground_force near coastline, and replays deterministically', () => {
+    store.getState().loadScenario(SCENARIO_JOINT_AMPHIBIOUS_ASSAULT, false, 3141);
+    store.setState({ autoPause: pausesOff });
+    // Initially at 119.92E (>50km from 120.5E island coast): offshore disembarkation must be blocked
+    const before = store.getState();
+    store.getState().deployCarriedPlatform('joint_red_lhd', 'red_armor_brigade');
+    expect(store.getState()).toBe(before);
+
+    // Move LHD in sandbox to 120.42E (within 18km of 120.5E island coast), switch back to command mode and disembark
+    store.getState().setPlayMode('sandbox');
+    store.getState().moveUnitInSandbox('joint_red_lhd', [120.42, 23.75]);
+    store.getState().setPlayMode('command');
+    store.getState().deployCarriedPlatform('joint_red_lhd', 'red_armor_brigade');
+
+    const stateAfterLanding = store.getState();
+    expect(stateAfterLanding.units.joint_red_lhd.deployableInventory.red_armor_brigade).toBe(1);
+    const landedBrigade = Object.values(stateAfterLanding.units).find(
+      (u) => u.deployedByUnitId === 'joint_red_lhd' && u.platformId === 'red_armor_brigade'
+    );
+    expect(landedBrigade).toBeDefined();
+    expect(landedBrigade!.domain).toBe('land');
+    expect(landedBrigade!.position[0]).toBeGreaterThanOrEqual(120.5);
+    expect(landedBrigade!.waypoints.length).toBeGreaterThan(0);
+
+    store.getState().stepSingleTick(15);
+    const expected = canonicalBattleState();
+    const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
+    for (const batch of [1, 15, 60]) {
+      expect(replayBattleRecording(recording, batch)).toEqual(expected);
+    }
+  });
+
   test('joint amphibious and pure inland air-land scenarios compile, isolate domains, and replay deterministically', () => {
     const compiledJoint = compileScenario(SCENARIO_JOINT_AMPHIBIOUS_ASSAULT);
     const compiledInland = compileScenario(SCENARIO_INLAND_AIR_LAND);

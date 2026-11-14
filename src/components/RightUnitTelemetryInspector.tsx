@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, Crosshair, Navigation } from 'lucide-react';
 import ms from 'milsymbol';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { findAmphibiousLandingPoint, MAX_AMPHIBIOUS_STANDOFF_KM } from '../engine/environment';
 import { calculateRadarHorizonKm } from '../engine/simulationEngine';
 import { getUnitCapabilities } from '../engine/unitCapabilities';
 import { useWargameStore } from '../store/useWargameStore';
@@ -38,6 +39,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const [selectedTankerId, setSelectedTankerId] = useState('');
 
   const units = useWargameStore((s) => s.units);
+  const environment = useWargameStore((s) => s.environment);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
   const selectedUnit = rawUnit && (rawUnit.side === playerSide || playMode === 'sandbox') ? rawUnit : null;
@@ -236,24 +238,44 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
             </Button>
           </div>
         )}
-        {Object.entries(selectedUnit.deployableInventory).some(([, count]) => count > 0) && (
-          <div className="bg-violet-500/10 border border-violet-500/30 space-y-1.5 text-[11px]">
-            <div className="text-violet-300 font-semibold">携带式无人/诱饵平台</div>
-            {Object.entries(selectedUnit.deployableInventory).map(([pid, count]) => (
-              <div key={pid} className="flex items-center justify-between gap-2">
-                <span className="truncate">{catalog.platforms[pid]?.name ?? pid} · {count}</span>
-                <Button
-                  size="xs"
-                  disabled={count <= 0}
-                  onClick={() => deployCarriedPlatform(selectedUnit.id, pid)}
-                  className="bg-violet-500 hover:bg-violet-400 text-white"
-                >
-                  释放
-                </Button>
+        {Object.entries(selectedUnit.deployableInventory).some(([, count]) => count > 0) && (() => {
+          const entries = Object.entries(selectedUnit.deployableInventory).filter(([, count]) => count > 0);
+          const hasGroundEmbark = entries.some(([pid]) => catalog.platforms[pid]?.domain === 'land');
+          const landingPoint = hasGroundEmbark
+            ? findAmphibiousLandingPoint(selectedUnit.position, selectedUnit.heading, environment, MAX_AMPHIBIOUS_STANDOFF_KM)
+            : undefined;
+          return (
+            <div className="bg-violet-500/10 border border-violet-500/30 p-2 rounded-lg space-y-1.5 text-[11px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-violet-300 font-semibold">
+                  {hasGroundEmbark ? '两栖坞舱 / 搭载兵力投送' : '携带式无人/诱饵平台'}
+                </span>
+                {hasGroundEmbark && (
+                  <span className={`text-[10px] ${landingPoint ? 'text-emerald-300' : 'text-amber-300'}`}>
+                    {landingPoint ? `已入抵滩范围 (≤${MAX_AMPHIBIOUS_STANDOFF_KM}km)` : `需抵近海岸 ≤${MAX_AMPHIBIOUS_STANDOFF_KM}km`}
+                  </span>
+                )}
               </div>
-            ))}
-          </div>
-        )}
+              {entries.map(([pid, count]) => {
+                const spec = catalog.platforms[pid];
+                const isAmphib = spec?.domain === 'land';
+                return (
+                  <div key={pid} className="flex items-center justify-between gap-2">
+                    <span className="truncate">{spec?.name ?? pid} · {count}</span>
+                    <Button
+                      size="xs"
+                      disabled={count <= 0 || (isAmphib && !landingPoint) || !capabilities?.canFire}
+                      onClick={() => deployCarriedPlatform(selectedUnit.id, pid)}
+                      className="bg-violet-500 hover:bg-violet-400 text-white shrink-0"
+                    >
+                      {isAmphib ? '抵滩卸载' : '释放'}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         <div className="unit-actions grid grid-cols-2 gap-2">
           <Button

@@ -113,6 +113,10 @@ const action = taggedUnion({
     carrierUnitId: id, hangarSlotId: id, loadoutId: optional(id), assignedMissionId: optional(id),
     launchDelaySec: optional(number(0)),
   }),
+  DEPLOY_CARRIED: object({
+    launcherUnitId: id, platformId: id, count: optional(count), targetWaypoint: optional(coordinate),
+    assignedMissionId: optional(id),
+  }),
   ASSIGN_MISSION: object({ side, unitId: optional(id), groupId: optional(id), missionId: optional(id) }),
   TOGGLE_SIDE_EMCON: object({ side, groupId: optional(id), sensor: oneOf(['radar', 'sonar', 'jamming']) }),
   COORDINATE_ATTACK: object({ side, groupId: optional(id), targetDomain: optional(domain), delaySec: number(0) }),

@@ -6,13 +6,18 @@ import type {
   PendingSortieOrder,
   RuntimeScenarioEvent,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScenarioObjective,
   ScoreLedger,
   TacticalContact,
   TacticalMission,
   VictoryConditionRule,
 } from '../../types/wargame';
-import { evaluateCarrierSortieAvailability, launchCarrierSortie } from '../carrierOperations';
+import {
+  deployCarriedUnitFromLauncher,
+  evaluateCarrierSortieAvailability,
+  launchCarrierSortie,
+} from '../carrierOperations';
 import { evaluateObjectives, resolveWithdrawalAreas } from '../objectives';
 import { getEventOccurrences } from '../scenarioEvents';
 import { createRuntimeUnitFromPlacement } from './unitFactory';
@@ -26,6 +31,7 @@ export type EventResolutionContext = {
   contacts: Record<string, TacticalContact>;
   missions: TacticalMission[];
   catalog: EquipmentCatalog;
+  environment?: ScenarioEnvironment;
   nextSimTime: number;
   startTime: number;
   dtSec?: number;
@@ -46,6 +52,7 @@ export function resolveEventsAndObjectives({
   contacts,
   missions,
   catalog,
+  environment,
   nextSimTime,
   startTime,
   dtSec = 0,
@@ -185,6 +192,35 @@ export function resolveEventsAndObjectives({
                 aarType: 'sortie',
               });
             }
+          }
+        } else if (action.type === 'DEPLOY_CARRIED') {
+          const launcher = units[action.launcherUnitId];
+          const requestedCount = Math.max(1, action.count ?? 1);
+          for (let batch = 0; batch < requestedCount; batch++) {
+            const res = deployCarriedUnitFromLauncher(
+              units,
+              launcher,
+              action.platformId,
+              catalog,
+              environment,
+              nextSimTime,
+              `ev_${event.id}_${event.fireCount}_${actionIndex}_${batch}`,
+              (score.sortiesLaunched ?? 0) + 1,
+              action.targetWaypoint
+            );
+            if (!res.deployed || !launcher) break;
+            launcher.deployableInventory = {
+              ...launcher.deployableInventory,
+              [action.platformId]: Math.max(0, (launcher.deployableInventory[action.platformId] ?? 1) - 1),
+            };
+            if (action.assignedMissionId && missions.some((m) => m.id === action.assignedMissionId && m.side === res.deployed!.side)) {
+              res.deployed.assignedMissionId = action.assignedMissionId;
+              res.deployed.navigationMode = 'mission';
+              res.deployed.missionState = 'ingress';
+            }
+            units[res.deployed.id] = res.deployed;
+            score.sortiesLaunched = (score.sortiesLaunched ?? 0) + 1;
+            if (res.log) logs.push(res.log);
           }
         } else if (action.type === 'ASSIGN_MISSION') {
           for (const unit of Object.values(units)) {

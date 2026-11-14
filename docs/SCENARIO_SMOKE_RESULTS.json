@@ -304,6 +304,11 @@
           "id": "ev_joint_blue_scramble",
           "fireCount": 1,
           "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_joint_red_amphib_landing",
+          "fireCount": 0,
+          "lastFiredElapsedSec": null
         }
       ],
       "sortieOrders": {

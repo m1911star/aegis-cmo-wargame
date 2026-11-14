@@ -380,7 +380,8 @@ export const RED_FORCE_PLATFORMS: Record<string, PlatformSpec> = {
       totalAirframes: 3, readyAirframes: 1, launchCooldownSec: 24,
       turnaroundSec: 100, turnaroundSupplyBatches: 3,
     }],
-    description: '慢速高价值两栖核心，以HQ-16FE和直-20F构成有限自卫/反潜能力，适合作为preserve+withdraw目标。',
+    deployables: [{ platformId: 'red_armor_brigade', count: 2 }],
+    description: '慢速高价值两栖核心，搭载直-20F反潜分队与2个两栖合成突击营，支持近岸抵滩卸载投送。',
   },
   cv18_fujian_carrier: {
     id: 'cv18_fujian_carrier',

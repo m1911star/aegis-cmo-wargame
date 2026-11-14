@@ -263,6 +263,7 @@ function stepWorkingWorldInPlace(
     contacts,
     missions,
     catalog,
+    environment: world.environment,
     nextSimTime,
     startTime,
     dtSec,

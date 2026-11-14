@@ -351,6 +351,33 @@ export const SCENARIO_JOINT_AMPHIBIOUS_ASSAULT: ScenarioDefinition = {
         },
       ],
     },
+    {
+      id: 'ev_joint_red_amphib_landing',
+      name: '红方075两栖编队抵近滩头卸载合成突击营',
+      description: '海南舰推进至距东岸岛屿海岸线18公里以内海域时，自动实施气垫船与两栖装甲超视距抢滩卸载。',
+      trigger: {
+        type: 'UNIT_ENTERS_AREA',
+        side: 'RED',
+        unitCategory: 'carrier',
+        areaPolygon: [[120.34, 23.55], [120.52, 23.55], [120.52, 23.95], [120.34, 23.95]],
+      },
+      actions: [
+        {
+          type: 'DEPLOY_CARRIED',
+          launcherUnitId: 'joint_red_lhd',
+          platformId: 'red_armor_brigade',
+          count: 2,
+          targetWaypoint: [120.66, 23.76],
+        },
+        {
+          type: 'BROADCAST_MESSAGE',
+          side: 'RED',
+          severity: 'warning',
+          title: '两栖突击波次成功抢滩登岛',
+          message: '075型海南舰已在滩头近岸展开坞舱卸载，两栖合成突击营正沿滩头向纵深守备阵地突击。',
+        },
+      ],
+    },
   ],
   victoryConditions: {
     durationSec: 2700,
