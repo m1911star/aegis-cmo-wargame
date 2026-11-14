@@ -1,10 +1,17 @@
 import React from 'react';
-import { BookOpen, X } from 'lucide-react';
+import { BookOpen, Play, X } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 
 export const BriefingModal: React.FC = () => {
   const currentScenario = useWargameStore((s) => s.currentScenario);
+  const objectives = useWargameStore((s) => s.objectives);
+  const seed = useWargameStore((s) => s.seed);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
+  const setTimeScale = useWargameStore((s) => s.setTimeScale);
+
+  const durationMin = currentScenario.victoryConditions
+    ? Math.round(currentScenario.victoryConditions.durationSec / 60)
+    : 60;
 
   return (
     <div className="w-full max-w-2xl tactical-panel rounded-lg border border-cyan-400/50 overflow-hidden shadow-[0_0_50px_rgba(34,211,238,0.25)]">
@@ -14,6 +21,7 @@ export const BriefingModal: React.FC = () => {
           <span>OPERATIONAL BRIEFING // 战役想定简报</span>
         </div>
         <button
+          aria-label="关闭简报"
           onClick={() => setActiveModal('none')}
           className="text-slate-400 hover:text-white cursor-pointer"
         >
@@ -26,8 +34,12 @@ export const BriefingModal: React.FC = () => {
           <div className="text-base font-bold text-cyan-300">
             {currentScenario.title}
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">
-            {currentScenario.subtitle} · 战区: {currentScenario.theater}
+          <div className="text-[11px] text-slate-300 mt-1 flex flex-wrap gap-3">
+            <span>战区: {currentScenario.theater}</span>
+            <span>难度: {currentScenario.difficulty}</span>
+            <span>限时: {durationMin} 分钟</span>
+            <span>目标数: {objectives.length} 项</span>
+            <span>种子: {seed}</span>
           </div>
         </div>
 
@@ -67,14 +79,28 @@ export const BriefingModal: React.FC = () => {
             ))}
           </ul>
         </div>
+
+        <p className="text-[11px] text-slate-400 border-t border-slate-800 pt-2">
+          免责声明：本系统中的装备参数、命中率与环境模型均为游戏化教学抽象，不构成现实装备效能评估，亦不用于实际导航或军事决策。
+        </p>
       </div>
 
-      <div className="px-4 py-3 bg-slate-950/90 border-t border-slate-800 flex justify-end">
+      <div className="px-4 py-3 bg-slate-950/90 border-t border-slate-800 flex justify-end gap-2">
         <button
           onClick={() => setActiveModal('none')}
-          className="px-4 py-1.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer"
+          className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
         >
-          进入指挥席位
+          先查看地图部署
+        </button>
+        <button
+          onClick={() => {
+            setTimeScale(5);
+            setActiveModal('none');
+          }}
+          className="px-4 py-1.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer flex items-center gap-1.5"
+        >
+          <Play className="w-3.5 h-3.5" />
+          <span>开始推演 (5×)</span>
         </button>
       </div>
     </div>

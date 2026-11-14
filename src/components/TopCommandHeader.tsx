@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database,
-  FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler,
+  FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler, Shuffle, History,
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import type { ActivePerspective, TimeScale } from '../types/wargame';
@@ -50,10 +50,39 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const campaignState = useWargameStore((s) => s.campaignState);
   const startCampaign = useWargameStore((s) => s.startCampaign);
   const exitCampaign = useWargameStore((s) => s.exitCampaign);
+  const hasAutosave = useWargameStore((s) => s.hasAutosave);
+  const restoreAutosaveCheckpoint = useWargameStore((s) => s.restoreAutosaveCheckpoint);
+  const exitReplayPlayer = useWargameStore((s) => s.exitReplayPlayer);
   const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
   const setPlayMode = useWargameStore((s) => s.setPlayMode);
+  const [randomizeSpawns, setRandomizeSpawns] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { type: 'reset'; randomize: boolean }
+    | { type: 'switch'; scenarioId: string }
+    | null
+  >(null);
   const utc = new Date(simTimeSecond * 1000).toISOString();
+
+  const handleScenarioChange = (scenarioId: string) => {
+    const found = availableScenarios.find((s) => s.id === scenarioId);
+    if (!found) return;
+    if (hasStarted && !battleResult) {
+      setPendingConfirm({ type: 'switch', scenarioId });
+      return;
+    }
+    exitReplayPlayer();
+    loadScenario(found, randomizeSpawns);
+  };
+
+  const handleResetClick = (randomize = randomizeSpawns) => {
+    if (hasStarted && !battleResult) {
+      setPendingConfirm({ type: 'reset', randomize });
+      return;
+    }
+    exitReplayPlayer();
+    resetScenario(randomize);
+  };
 
   return (
     <header className="command-header tactical-panel">
@@ -64,10 +93,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             aria-label="选择战役想定"
             title={currentScenario.title}
             value={currentScenario.id}
-            onChange={(e) => {
-              const found = availableScenarios.find((s) => s.id === e.target.value);
-              if (found) loadScenario(found);
-            }}
+            onChange={(e) => handleScenarioChange(e.target.value)}
             className="scenario-select"
           >
             {availableScenarios.map((sc) => (
@@ -77,6 +103,15 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           <button onClick={() => setActiveModal('briefing')} className="toolbar-button" title="查看想定简报">
             <BookOpen /><span>简报</span>
           </button>
+          {hasAutosave && !hasStarted && (
+            <button
+              onClick={() => restoreAutosaveCheckpoint()}
+              className="toolbar-button text-emerald-300"
+              title="恢复浏览器本地自动保存的上一局断点"
+            >
+              <History /><span>继续上局</span>
+            </button>
+          )}
           <button
             onClick={() => (campaignState ? exitCampaign() : startCampaign())}
             className={`toolbar-button ${campaignState ? 'text-amber-300' : 'text-cyan-300'}`}
@@ -151,8 +186,16 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             <button onClick={() => stepSingleTick(5)} title="单步推进 5 秒" className="toolbar-button">
               <StepForward /><span>+5秒</span>
             </button>
-            <button onClick={() => resetScenario()} aria-label="重置当前想定" title="使用相同种子重新开局" className="toolbar-button icon-button">
+            <button onClick={() => handleResetClick(randomizeSpawns)} aria-label="重置当前想定" title="使用当前种子或随机散布重新开局" className="toolbar-button icon-button">
               <RotateCcw />
+            </button>
+            <button
+              onClick={() => setRandomizeSpawns((prev) => !prev)}
+              aria-pressed={randomizeSpawns}
+              title="开局随机散布与随机种子开关"
+              className={`toolbar-button icon-button ${randomizeSpawns ? 'text-amber-300 border-amber-400/50' : ''}`}
+            >
+              <Shuffle />
             </button>
           </div>
         </div>
@@ -175,6 +218,35 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           </div>
         </div>
       </div>
+      {pendingConfirm && (
+        <div className="auto-pause-banner" role="alertdialog" aria-label="确认重置或切换想定">
+          <ShieldAlert className="w-4 h-4 shrink-0" />
+          <span>
+            {pendingConfirm.type === 'reset'
+              ? '当前推演正在进行中，确认重置本局战场并回到 Tick 0 吗？'
+              : '当前推演正在进行中，确认放弃当前进度并切换至新想定吗？'}
+          </span>
+          <button
+            onClick={() => {
+              if (pendingConfirm.type === 'reset') {
+                exitReplayPlayer();
+                resetScenario(pendingConfirm.randomize);
+              } else {
+                const found = availableScenarios.find((s) => s.id === pendingConfirm.scenarioId);
+                if (found) {
+                  exitReplayPlayer();
+                  loadScenario(found, randomizeSpawns);
+                }
+              }
+              setPendingConfirm(null);
+            }}
+            className="toolbar-button bg-rose-700 text-white"
+          >
+            确认执行
+          </button>
+          <button onClick={() => setPendingConfirm(null)} className="toolbar-button">取消</button>
+        </div>
+      )}
       {lastAutoPauseBanner && (
         <div className="auto-pause-banner" role="status">
           <ShieldAlert className="w-4 h-4 shrink-0" />

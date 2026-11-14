@@ -28,6 +28,7 @@ const doctrine = object({
   automaticFireRangeFraction: optional(number(0.05, 1)),
   minimumWeaponReserve: optional(count), automaticTargetDomains: optional(array(domain)),
   minimumAutomaticThreat: optional(oneOf(['low', 'medium', 'high', 'critical'])),
+  requireIdentifiedForAutoFire: optional(boolean),
 });
 const mount = object({ mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0) });
 const sensor = object({

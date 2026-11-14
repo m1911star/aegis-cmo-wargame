@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Database, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Database, Search, X } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 
 export const CatalogViewerModal: React.FC = () => {
@@ -8,6 +8,38 @@ export const CatalogViewerModal: React.FC = () => {
   const [catalogTab, setCatalogTab] = useState<
     'platforms' | 'loadouts' | 'weapons' | 'sensors'
   >('platforms');
+  const [query, setQuery] = useState('');
+  const [domainFilter, setDomainFilter] = useState('ALL');
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const matchesText = (text: string) => !normalizedQuery || text.toLowerCase().includes(normalizedQuery);
+  const platforms = useMemo(
+    () => Object.values(catalog.platforms).filter((p) =>
+      (domainFilter === 'ALL' || p.domain === domainFilter) &&
+      matchesText(`${p.id} ${p.name} ${p.className} ${p.origin} ${p.description}`)
+    ),
+    [catalog.platforms, domainFilter, normalizedQuery]
+  );
+  const loadouts = useMemo(
+    () => Object.values(catalog.loadouts).filter((l) =>
+      matchesText(`${l.id} ${l.name} ${l.codeName} ${l.role} ${l.description}`)
+    ),
+    [catalog.loadouts, normalizedQuery]
+  );
+  const weapons = useMemo(
+    () => Object.values(catalog.weapons).filter((w) =>
+      (domainFilter === 'ALL' || w.targetDomains.includes(domainFilter as never)) &&
+      matchesText(`${w.id} ${w.name} ${w.codeName} ${w.category} ${w.description}`)
+    ),
+    [catalog.weapons, domainFilter, normalizedQuery]
+  );
+  const sensors = useMemo(
+    () => Object.values(catalog.sensors).filter((s) =>
+      (domainFilter === 'ALL' || s.detectDomains.includes(domainFilter as never)) &&
+      matchesText(`${s.id} ${s.name} ${s.codeName} ${s.frequencyBand} ${s.description}`)
+    ),
+    [catalog.sensors, domainFilter, normalizedQuery]
+  );
 
   return (
     <div className="w-full max-w-4xl tactical-panel rounded-lg border border-cyan-400/50 overflow-hidden">
@@ -19,6 +51,7 @@ export const CatalogViewerModal: React.FC = () => {
           </span>
         </div>
         <button
+          aria-label="关闭装备库"
           onClick={() => setActiveModal('none')}
           className="text-slate-400 hover:text-white cursor-pointer"
         >
@@ -61,9 +94,34 @@ export const CatalogViewerModal: React.FC = () => {
         ))}
       </div>
 
-      <div className="p-4 max-h-[68vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+      <div className="px-4 py-2 bg-slate-950/90 border-b border-slate-800 flex flex-wrap gap-2 items-center text-xs">
+        <div className="flex items-center gap-1.5 flex-1 min-w-48 bg-slate-900 border border-slate-700 rounded px-2 py-1">
+          <Search className="w-3.5 h-3.5 text-slate-400" />
+          <input
+            aria-label="检索装备库"
+            placeholder="输入型号、名称、频段或关键词检索..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full bg-transparent text-slate-100 focus:outline-none"
+          />
+        </div>
+        <select
+          aria-label="按作战域筛选装备"
+          value={domainFilter}
+          onChange={(e) => setDomainFilter(e.target.value)}
+          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"
+        >
+          <option value="ALL">全部作战域</option>
+          <option value="air">空中域 (AIR)</option>
+          <option value="surface">水面域 (SURFACE)</option>
+          <option value="subsurface">水下域 (SUBSURFACE)</option>
+          <option value="land">陆基域 (LAND)</option>
+        </select>
+      </div>
+
+      <div className="p-4 max-h-[62vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
         {catalogTab === 'platforms' &&
-          Object.values(catalog.platforms).map((p) => (
+          platforms.map((p) => (
             <div
               key={p.id}
               className="p-3 rounded bg-slate-950/85 border border-slate-800 space-y-1.5"
@@ -90,7 +148,7 @@ export const CatalogViewerModal: React.FC = () => {
           ))}
 
         {catalogTab === 'loadouts' &&
-          Object.values(catalog.loadouts).map((l) => (
+          loadouts.map((l) => (
             <div
               key={l.id}
               className="p-3 rounded bg-slate-950/85 border border-slate-800 space-y-1.5"
@@ -110,7 +168,7 @@ export const CatalogViewerModal: React.FC = () => {
           ))}
 
         {catalogTab === 'weapons' &&
-          Object.values(catalog.weapons).map((w) => (
+          weapons.map((w) => (
             <div
               key={w.id}
               className="p-3 rounded bg-slate-950/85 border border-slate-800 space-y-1.5"
@@ -134,7 +192,7 @@ export const CatalogViewerModal: React.FC = () => {
           ))}
 
         {catalogTab === 'sensors' &&
-          Object.values(catalog.sensors).map((s) => (
+          sensors.map((s) => (
             <div
               key={s.id}
               className="p-3 rounded bg-slate-950/85 border border-slate-800 space-y-1.5"

@@ -12,9 +12,14 @@ interface Props {
 
 export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, eligibleMissions }) => {
   const catalog = useWargameStore((s) => s.catalog);
+  const tick = useWargameStore((s) => s.tick);
+  const playMode = useWargameStore((s) => s.playMode);
   const updateUnitDoctrine = useWargameStore((s) => s.updateUnitDoctrine);
   const switchUnitLoadout = useWargameStore((s) => s.switchUnitLoadout);
   const assignUnitMission = useWargameStore((s) => s.assignUnitMission);
+  const deployCountermeasure = useWargameStore((s) => s.deployCountermeasure);
+  const loadoutLocked = tick > 0 && playMode !== 'sandbox';
+  const unitDead = unit.hp <= 0 || unit.status === 'destroyed';
 
   return (
     <div className="p-2.5 rounded bg-slate-950/80 border border-slate-800 space-y-2.5">
@@ -85,21 +90,68 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         </button>
       </div>
 
-      <div className="stat-line flex items-center justify-between text-[10px] text-slate-400">
-        <span>软杀伤库存</span>
-        <span className="text-amber-200">
-          箔条 {unit.countermeasures.chaff} · 红外 {unit.countermeasures.flares} · 水声 {unit.countermeasures.acousticDecoys}
-        </span>
+      <div className="stat-line flex items-center justify-between text-[10px] text-slate-300">
+        <span>软杀伤手动投放</span>
+        <div className="flex gap-1">
+          <button
+            disabled={unitDead || unit.countermeasures.chaff <= 0}
+            onClick={() => deployCountermeasure(unit.id, 'chaff')}
+            className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer"
+          >
+            箔条({unit.countermeasures.chaff})
+          </button>
+          <button
+            disabled={unitDead || unit.countermeasures.flares <= 0}
+            onClick={() => deployCountermeasure(unit.id, 'flares')}
+            className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer"
+          >
+            红外({unit.countermeasures.flares})
+          </button>
+          <button
+            disabled={unitDead || unit.countermeasures.acousticDecoys <= 0}
+            onClick={() => deployCountermeasure(unit.id, 'acousticDecoys')}
+            className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer"
+          >
+            声诱饵({unit.countermeasures.acousticDecoys})
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+        <button
+          disabled={unitDead}
+          aria-pressed={unit.doctrine.autoEvade}
+          onClick={() => updateUnitDoctrine(unit.id, { autoEvade: !unit.doctrine.autoEvade })}
+          className={`px-2 py-1 rounded border text-left cursor-pointer disabled:opacity-35 ${
+            unit.doctrine.autoEvade ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200' : 'bg-slate-900 border-slate-800 text-slate-400'
+          }`}
+        >
+          自动规避：{unit.doctrine.autoEvade ? '开启' : '关闭'}
+        </button>
+        <button
+          disabled={unitDead}
+          aria-pressed={!!unit.doctrine.requireIdentifiedForAutoFire}
+          onClick={() => updateUnitDoctrine(unit.id, { requireIdentifiedForAutoFire: !unit.doctrine.requireIdentifiedForAutoFire })}
+          className={`px-2 py-1 rounded border text-left cursor-pointer disabled:opacity-35 ${
+            unit.doctrine.requireIdentifiedForAutoFire ? 'bg-amber-500/20 border-amber-400 text-amber-200' : 'bg-slate-900 border-slate-800 text-slate-400'
+          }`}
+        >
+          识别后开火：{unit.doctrine.requireIdentifiedForAutoFire ? '开启' : '关闭'}
+        </button>
       </div>
 
       {platformSpec.availableLoadoutIds && platformSpec.availableLoadoutIds.length > 0 && (
         <div className="pt-1 border-t border-slate-900 space-y-1">
-          <div className="text-[10px] text-amber-300 font-bold">战术挂载方案切换</div>
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-amber-300 font-bold">战术挂载方案切换</span>
+            {loadoutLocked && <span className="text-slate-400">推演中锁定（沙盒可改）</span>}
+          </div>
           <select
             aria-label="战术挂载方案切换"
+            disabled={loadoutLocked || unitDead}
             value={unit.activeLoadoutId || ''}
             onChange={(e) => switchUnitLoadout(unit.id, e.target.value)}
-            className="w-full bg-slate-900 border border-amber-500/40 rounded px-2 py-1 text-[11px] text-amber-200 cursor-pointer"
+            className="w-full bg-slate-900 border border-amber-500/40 rounded px-2 py-1 text-[11px] text-amber-200 cursor-pointer disabled:opacity-45"
           >
             {platformSpec.availableLoadoutIds.map((lid) => {
               const lSpec = catalog.loadouts[lid];

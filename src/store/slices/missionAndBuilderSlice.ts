@@ -3,6 +3,7 @@ import { canCommandUnit } from '../../engine/commandPolicy';
 import { isRouteAllowed } from '../../engine/environment';
 import { deriveMissionAssignments } from '../../engine/missions';
 import { createRuntimeUnitFromPlacement } from '../../engine/simulationEngine';
+import { emitActionFeedback } from '../actionFeedbackBus';
 import type {
   CombatLogEntry,
   MissionType,
@@ -11,6 +12,7 @@ import type {
   ScenarioObjective,
   SideId,
   TacticalMission,
+  UnitDoctrine,
 } from '../../types/wargame';
 import type {
   AreaEventDraft,
@@ -75,7 +77,10 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
 
     createMissionFromReferencePoints: (draft: MissionReferencePointDraft) => set((s) => {
       const resolved = resolveMissionDraft(s, draft);
-      if (!resolved) return s;
+      if (!resolved) {
+        emitActionFeedback('warning', '任务多边形无效：需至少 3 个同阵营非共线/非自交参考点');
+        return s;
+      }
       const missionId = `mission_${resolved.side.toLowerCase()}_${s.tick}_${s.commandSequence}`;
       if (s.missions.some((mission) => mission.id === missionId)) return s;
       const mission: TacticalMission = {
@@ -101,7 +106,10 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
       const mission = s.missions.find((candidate) => candidate.id === missionId);
       if (!mission || (s.playMode !== 'sandbox' && mission.side !== s.playerSide)) return s;
       const resolved = resolveMissionDraft(s, draft, mission.side);
-      if (!resolved) return s;
+      if (!resolved) {
+        emitActionFeedback('warning', '任务更新失败：多边形或参数无效');
+        return s;
+      }
       const missions = s.missions.map((candidate) => candidate.id === missionId
         ? { ...candidate, ...resolved, areaPolygon: resolved.areaPolygon.map((point) => [...point] as [number, number]) }
         : candidate);
@@ -113,6 +121,30 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
         severity: 'info',
         title: `任务已更新：${resolved.name}`,
         message: `${resolved.type} · 区域参考点 ${draft.referencePointIds.length} 个 · 区外追击 ${resolved.prosecuteOutsideAreaKm} km。`,
+      };
+      return { missions, logs: [log, ...s.logs].slice(0, 250) };
+    }),
+
+    updateMissionDoctrine: (missionId: string, override: Partial<UnitDoctrine>) => set((s) => {
+      const mission = s.missions.find((candidate) => candidate.id === missionId);
+      if (s.battleResult || !mission || (s.playMode !== 'sandbox' && mission.side !== s.playerSide)) return s;
+      if (override.roe !== undefined && !['free', 'tight', 'hold'].includes(override.roe)) return s;
+      if (override.salvoSize !== undefined && (!Number.isSafeInteger(override.salvoSize) || override.salvoSize < 1)) return s;
+      const nextOverride: Partial<UnitDoctrine> = {
+        ...(mission.doctrineOverride ?? {}),
+        ...override,
+      };
+      const missions = s.missions.map((candidate) =>
+        candidate.id === missionId ? { ...candidate, doctrineOverride: nextOverride } : candidate
+      );
+      const log: CombatLogEntry = {
+        id: `mission_doctrine_${missionId}_${s.tick}_${s.commandSequence}`,
+        simTime: s.simTime,
+        side: mission.side,
+        category: 'DOCTRINE',
+        severity: 'info',
+        title: `任务条令更新：${mission.name}`,
+        message: `ROE=${(nextOverride.roe ?? '继承单位').toUpperCase()} · 识别后开火=${nextOverride.requireIdentifiedForAutoFire ? '是' : '否'}`,
       };
       return { missions, logs: [log, ...s.logs].slice(0, 250) };
     }),

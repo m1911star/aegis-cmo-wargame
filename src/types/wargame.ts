@@ -217,6 +217,7 @@ export interface UnitDoctrine {
   minimumWeaponReserve: number;
   automaticTargetDomains: Domain[];
   minimumAutomaticThreat: ThreatLevel;
+  requireIdentifiedForAutoFire?: boolean;
 }
 
 export interface RuntimeWeaponMount extends PlatformMountTemplate {
@@ -684,7 +685,7 @@ export type CombatLogCategory =
   | 'EVENT'         // ★ 新增：战役脚本触发事件 (援军抵达/参谋部急电/阶段转换)
   | 'SYSTEM';
 
-export type AarEventKind = 'launch' | 'hit' | 'intercept' | 'loss' | 'sortie' | 'recovery' | 'turnaround' | 'hangar_loss';
+export type AarEventKind = 'launch' | 'hit' | 'intercept' | 'loss' | 'sortie' | 'recovery' | 'turnaround' | 'hangar_loss' | 'miss';
 
 export interface CombatLogEntry {
   id: string;
@@ -702,6 +703,8 @@ export interface CombatLogEntry {
   quantity?: number;
   aarType?: AarEventKind;
   aarSide?: SideId;
+  aarShooterId?: string;
+  aarOutcome?: 'hit' | 'destroy' | 'intercept' | 'softkill' | 'miss';
 }
 
 export interface AarEventRecord {
@@ -715,6 +718,8 @@ export interface AarEventRecord {
   targetUnitId?: string;
   weaponId?: string;
   quantity: number;
+  shooterId?: string;
+  outcome?: 'hit' | 'destroy' | 'intercept' | 'softkill' | 'miss';
 }
 
 export interface AarTrackSample {

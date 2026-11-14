@@ -344,6 +344,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
       'text-size': 11,
       'text-offset': [0, 1.85],
       'text-anchor': 'top',
+      'text-allow-overlap': false,
+      'text-padding': 4,
       'text-optional': true,
     },
     paint: {

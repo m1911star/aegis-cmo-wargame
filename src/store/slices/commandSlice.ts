@@ -9,6 +9,7 @@ import { effectiveDoctrine } from '../../engine/operations';
 import { createRuntimeUnitFromPlacement, getBearingDeg } from '../../engine/simulationEngine';
 import { getUnitCapabilities } from '../../engine/unitCapabilities';
 import { createRuntimeWeaponMounts, recordWeaponLaunch } from '../../engine/unitConfiguration';
+import { emitActionFeedback } from '../actionFeedbackBus';
 import type {
   CombatLogEntry,
   Domain,
@@ -53,7 +54,10 @@ export function createCommandSlice(set: StoreSet) {
               altitudeM > configuration.platform.maxAltitudeM)) return s;
         const leg: RouteLeg = { position: [...coord], speedKts, altitudeM };
         const nextWaypoints = replaceAll ? [leg] : [...unit.waypoints, leg];
-        if (!routeLegsAllowed(unit, nextWaypoints, s.environment)) return s;
+        if (!routeLegsAllowed(unit, nextWaypoints, s.environment)) {
+          emitActionFeedback('warning', `${unit.callsign} 航路被海陆地形边界阻挡，未添加航点`);
+          return s;
+        }
         const nextHeading = nextWaypoints.length > 0
           ? getBearingDeg(unit.position, nextWaypoints[0].position) : unit.heading;
         const nextSpeed = unit.speedKts < 1 && configuration.maxSpeedKts > 0
@@ -192,7 +196,10 @@ export function createCommandSlice(set: StoreSet) {
           tanker.domain !== 'air' || tanker.category !== 'tanker' || tanker.side !== receiver.side || receiver.domain !== 'air' || receiver.category === 'tanker' ||
           receiverSpec?.canReceiveAar === false || !tankerSpec?.aarFuelCapacitySec ||
           !tankerSpec.aarTransferRateSecPerSec || tanker.aarFuelRemainingSec <= 0 || receiver.airRefuelState ||
-          tanker.aarQueue.includes(receiver.id) || receiver.fuelRemainingSec >= receiver.maxFuelSec) return s;
+          tanker.aarQueue.includes(receiver.id) || receiver.fuelRemainingSec >= receiver.maxFuelSec) {
+        emitActionFeedback('warning', '当前无法请求空中加油（需本方受油机且油箱未满、加油机有余油）');
+        return s;
+      }
       const receiverClone: RuntimeUnit = {
         ...receiver,
         navigationMode: 'manual',
@@ -268,6 +275,88 @@ export function createCommandSlice(set: StoreSet) {
       };
       return { units: { ...s.units, [launcher.id]: launcherClone, [deployed.id]: deployed },
         selectedUnitId: deployed.id, logs: [log, ...s.logs].slice(0, 250) };
+    }),
+
+    deployCountermeasure: (unitId: string, kind: 'chaff' | 'flares' | 'acousticDecoys') => set((s) => {
+      const unit = s.units[unitId];
+      if (!canCommandUnit(s, unit)) return s;
+      const available = unit.countermeasures[kind] ?? 0;
+      if (available <= 0) {
+        emitActionFeedback('warning', `${unit.callsign} 所选软杀伤诱饵库存已耗尽`);
+        return s;
+      }
+      if (unit.countermeasures.cooldownUntil > s.simTime) {
+        emitActionFeedback('warning', `${unit.callsign} 诱饵投放冷却中`);
+        return s;
+      }
+      const nextCountermeasures = {
+        ...unit.countermeasures,
+        [kind]: available - 1,
+        cooldownUntil: s.simTime + 30000,
+      };
+      const prevEffect = unit.countermeasureEffect && unit.countermeasureEffect.expiresAtSimTime > s.simTime
+        ? unit.countermeasureEffect
+        : { chaff: false, flares: false, acoustic: false, expiresAtSimTime: s.simTime };
+      const countermeasureEffect = {
+        chaff: prevEffect.chaff || kind === 'chaff',
+        flares: prevEffect.flares || kind === 'flares',
+        acoustic: prevEffect.acoustic || kind === 'acousticDecoys',
+        expiresAtSimTime: s.simTime + 20000,
+      };
+      const label = kind === 'chaff' ? '箔条干扰' : kind === 'flares' ? '红外诱饵弹' : '水声声诱饵';
+      const log: CombatLogEntry = {
+        id: `cm_manual_${s.tick}_${s.commandSequence}_${unit.id}`,
+        simTime: s.simTime,
+        side: unit.side,
+        category: 'DOCTRINE',
+        severity: 'info',
+        title: `${unit.callsign} 手动投放${label}`,
+        message: `持续有效 20 秒，剩余库存 ${available - 1}。`,
+        position: [...unit.position],
+        unitId: unit.id,
+      };
+      emitActionFeedback('info', `${unit.callsign} 已投放${label}`);
+      return {
+        units: {
+          ...s.units,
+          [unit.id]: { ...unit, countermeasures: nextCountermeasures, countermeasureEffect },
+        },
+        logs: [log, ...s.logs].slice(0, 250),
+      };
+    }),
+
+    cancelUnitReturn: (unitId: string) => set((s) => {
+      const unit = s.units[unitId];
+      if (!canCommandUnit(s, unit) || unit.status !== 'returning') return s;
+      if (unit.fuelRemainingSec <= 0) {
+        emitActionFeedback('warning', `${unit.callsign} 燃油已耗尽，无法取消返航`);
+        return s;
+      }
+      const log: CombatLogEntry = {
+        id: `cancel_rtb_${s.tick}_${s.commandSequence}_${unit.id}`,
+        simTime: s.simTime,
+        side: unit.side,
+        category: 'DOCTRINE',
+        severity: 'warning',
+        title: `${unit.callsign} 人工取消返航指令`,
+        message: '算子已恢复手动控制，请注意剩余燃油与弹药风险。',
+        position: [...unit.position],
+        unitId: unit.id,
+      };
+      emitActionFeedback('info', `${unit.callsign} 已取消返航，恢复人工接管`);
+      return {
+        units: {
+          ...s.units,
+          [unit.id]: {
+            ...unit,
+            status: 'operational',
+            returnReason: undefined,
+            navigationMode: 'manual',
+            missionState: undefined,
+          },
+        },
+        logs: [log, ...s.logs].slice(0, 250),
+      };
     }),
 
     updateUnitDoctrine: (unitId: string, patch: Partial<UnitDoctrine>) =>
@@ -349,7 +438,10 @@ export function createCommandSlice(set: StoreSet) {
         const unit = s.units[unitId];
         const loadout = s.catalog.loadouts[loadoutId];
         if (!canCommandUnit(s, unit) || !loadout || unit.activeLoadoutId === loadoutId) return s;
-        if (s.tick > 0 && s.playMode !== 'sandbox') return s;
+        if (s.tick > 0 && s.playMode !== 'sandbox') {
+          emitActionFeedback('warning', '推演已开始，仅沙盒模式可现场更换挂载方案');
+          return s;
+        }
         if (!loadout.compatiblePlatformIds.includes(unit.platformId)) return s;
         const previous = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
         const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, loadoutId);
@@ -446,9 +538,11 @@ export function createCommandSlice(set: StoreSet) {
       const requestedSalvo = salvoCount ?? attacker.doctrine.salvoSize;
       if (!Number.isSafeInteger(requestedSalvo) || requestedSalvo <= 0) return s;
       if (!chosen || chosen.solution.status === 'blocked' || !contact) {
+        const reason = chosen?.solution.hardBlockReasons.join('；') || '无匹配武器或情报接触';
+        emitActionFeedback('warning', `火力未执行：${reason}`);
         const log: CombatLogEntry = { id: `fire_rejected_${s.tick}_${s.commandSequence}`, simTime: s.simTime,
           side: attacker.side, category: 'DOCTRINE', severity: 'warning', title: '火力指令未执行',
-          message: chosen?.solution.hardBlockReasons.join('；') || '无匹配武器或情报接触', unitId: attacker.id };
+          message: reason, unitId: attacker.id };
         return { pendingRiskEngagement: null, interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
       }
       const { mount, weapon, solution } = chosen;
