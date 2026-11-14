@@ -3,7 +3,7 @@ import { array, boolean, coordinate, id, number, object, oneOf, optional, record
 
 const domain = oneOf(['air', 'surface', 'subsurface', 'land']);
 const side = oneOf(['RED', 'BLUE', 'NEUTRAL']);
-const category = oneOf(['fighter', 'stealth_fighter', 'ew_aircraft', 'awacs', 'tanker', 'bomber', 'mpa_uav', 'decoy', 'carrier', 'destroyer', 'frigate', 'ssn', 'sam_battery', 'asm_battery', 'airbase', 'radar_site']);
+const category = oneOf(['fighter', 'stealth_fighter', 'ew_aircraft', 'awacs', 'tanker', 'bomber', 'mpa_uav', 'decoy', 'carrier', 'amphibious', 'destroyer', 'frigate', 'ssn', 'sam_battery', 'asm_battery', 'ground_force', 'airbase', 'radar_site']);
 const count = number(0, Number.MAX_SAFE_INTEGER, true);
 const positive = number(Number.MIN_VALUE);
 const identifiers = array(id);
@@ -28,6 +28,8 @@ const doctrine = object({
   automaticFireRangeFraction: optional(number(0.05, 1)),
   minimumWeaponReserve: optional(count), automaticTargetDomains: optional(array(domain)),
   minimumAutomaticThreat: optional(oneOf(['low', 'medium', 'high', 'critical'])),
+  requireIdentifiedForAutoFire: optional(boolean),
+  shootAndScoot: optional(boolean),
 });
 const mount = object({ mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0) });
 const sensor = object({
@@ -121,7 +123,7 @@ const action = taggedUnion({
   AWARD_SCORE: object({ side, points: number(), reason: text }),
 });
 const environmentPolygon = object({
-  id, name: text, areaPolygon: array(coordinate, 3),
+  id, name: text, areaPolygon: array(coordinate, 3), elevationM: optional(number(0, 9000)),
 });
 const scenario = object({
   id, title: text, subtitle: text, theater: text, difficulty: oneOf(['STANDARD', 'HARD', 'EXTREME']),
@@ -154,9 +156,10 @@ const scenario = object({
   customCatalogOverlay: optional(overlay),
   objectives: optional(array(object({
     id, side: oneOf(['RED', 'BLUE']), title: text,
-    type: oneOf(['destroy', 'disable', 'preserve', 'observe', 'withdraw']),
-    unitIds: array(id, 1), required: boolean, points: number(0), criticalFailure: optional(boolean), preserveCapability: optional(boolean),
-  withdrawAreaPolygon: optional(array(coordinate, 3)), withdrawUnitDomains: optional(array(domain, 1)),
+    type: oneOf(['destroy', 'disable', 'preserve', 'observe', 'withdraw', 'control_area']),
+    unitIds: array(id), areaPolygon: optional(array(coordinate, 3)), controlDomains: optional(array(domain)),
+    required: boolean, points: number(0), criticalFailure: optional(boolean), preserveCapability: optional(boolean),
+    withdrawAreaPolygon: optional(array(coordinate, 3)), withdrawUnitDomains: optional(array(domain, 1)),
   }))),
 });
 

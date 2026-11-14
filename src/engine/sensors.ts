@@ -1,7 +1,7 @@
 import * as turf from '@turf/turf';
 import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
-import { acousticRangeFactor } from './environment';
+import { acousticRangeFactor, hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
 import {
@@ -288,6 +288,15 @@ export function computeContactsOnly(
         if (!obsSpec) continue;
 
         const distKm = getDistanceKm(observer.position, target.position);
+        let cachedLos: boolean | undefined;
+        const hasLineOfSight = () => (cachedLos ??= hasRadarLineOfSight(
+          observer.position,
+          observer.altitudeM,
+          obsSpec.radarAntennaHeightM,
+          target.position,
+          target.altitudeM,
+          environment
+        ));
 
         // 计算目标相对该观察者雷达视线的姿态等效 RCS (正前/侧向/尾向 + 外挂惩罚)
         const aspectRcsM2 = calculateAspectEffectiveRcsM2(
@@ -310,6 +319,7 @@ export function computeContactsOnly(
             sensor.type === 'radar_oth'
           ) {
             if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) continue;
+            if (sensor.type === 'radar_air_surface' && !hasLineOfSight()) continue;
 
             const effRangeKm = calculateEffectiveRadarRangeKm(
               { ...sensor, maxRangeKm: sensor.maxRangeKm * getUnitCapabilities(observer).radarFactor },
@@ -348,7 +358,7 @@ export function computeContactsOnly(
               ) * 1.28;
             const esmRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
 
-            if (distKm <= esmRangeKm) {
+            if (distKm <= esmRangeKm && hasLineOfSight()) {
               emitterObserved = true;
               const trueBearing = getBearingDeg(observer.position, target.position);
               const hash = `${observer.id}:${target.id}`.split('').reduce((sum, character) => sum + character.charCodeAt(0), 0);
@@ -386,7 +396,7 @@ export function computeContactsOnly(
               target.altitudeM
             );
             const effRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
-            if (distKm <= effRangeKm) {
+            if (distKm <= effRangeKm && hasLineOfSight()) {
               hasNonEsmDetection = true;
               detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
               if (distKm <= effRangeKm * 0.65) {
@@ -530,9 +540,10 @@ export function computeContactsOnly(
           : target.category === 'decoy' || target.category === 'tanker'
             ? 'low'
             : target.category === 'stealth_fighter' || target.category === 'destroyer' ||
-              target.category === 'ssn' || target.category === 'sam_battery'
+              target.category === 'ssn' || target.category === 'sam_battery' || target.category === 'airbase'
               ? 'critical'
-              : target.category === 'bomber' || target.category === 'carrier' || target.category === 'ew_aircraft'
+              : target.category === 'bomber' || target.category === 'carrier' || target.category === 'ew_aircraft' ||
+                target.category === 'amphibious' || target.category === 'ground_force' || target.category === 'radar_site'
                 ? 'high' : 'medium';
 
         nextContacts[contactKey] = {
@@ -617,7 +628,7 @@ export function computeContactsOnly(
 
 export function observeMissile(
   side: SideId, missile: WeaponInFlight, units: Record<string, RuntimeUnit>,
-  catalog: EquipmentCatalog, simTime: number, receiver?: RuntimeUnit
+  catalog: EquipmentCatalog, simTime: number, receiver?: RuntimeUnit, environment?: ScenarioEnvironment
 ): TacticalContact | undefined {
   const sources: RuntimeUnit[] = [];
   for (const observer of Object.values(units)) {
@@ -638,6 +649,10 @@ export function observeMissile(
       }
       if (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth') return false;
       if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) return false;
+      if (sensor.type === 'radar_air_surface' && !hasRadarLineOfSight(
+        observer.position, observer.altitudeM, config.platform.radarAntennaHeightM,
+        missile.position, missile.altitudeM, environment
+      )) return false;
       return distance <= calculateEffectiveRadarRangeKm(
         { ...sensor, maxRangeKm: sensor.maxRangeKm * getUnitCapabilities(observer).radarFactor },
         0.1, observer.altitudeM, config.platform.radarAntennaHeightM, missile.altitudeM

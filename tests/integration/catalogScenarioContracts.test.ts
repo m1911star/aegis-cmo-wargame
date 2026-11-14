@@ -211,10 +211,10 @@ describe('Scenario input boundary', () => {
   });
 
   test('content expansion counts, required IDs and scenario consumption remain explicit', () => {
-    expect(Object.keys(catalog.platforms)).toHaveLength(38);
-    expect(Object.keys(catalog.weapons)).toHaveLength(27);
+    expect(Object.keys(catalog.platforms)).toHaveLength(44);
+    expect(Object.keys(catalog.weapons)).toHaveLength(31);
     expect(Object.keys(catalog.sensors)).toHaveLength(24);
-    expect(Object.keys(catalog.loadouts)).toHaveLength(27);
+    expect(Object.keys(catalog.loadouts)).toHaveLength(30);
     const addedPlatforms = ['j15t_flanker', 'fa18ef_super_hornet', 'y9g_jammer', 'b1b_lancer',
       'j10c_multirole', 'mq4c_triton', 'f35b_lightning', 'type054b_frigate', 'constellation_ffg',
       'type039c_ssk', 'taigei_ssk', 'type075_lhd', 'america_lha', 'z20f_asw', 'mh60r_seahawk'];

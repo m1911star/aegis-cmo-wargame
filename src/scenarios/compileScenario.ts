@@ -49,6 +49,18 @@ export function compileScenario(
   index(scenario.objectives ?? [], 'scenario.objectives');
   if (scenario.objectives?.length && !scenario.victoryConditions) invalid('scenario.objectives', 'objectives require a time limit');
   for (const objective of scenario.objectives ?? []) {
+    if (objective.type === 'control_area') {
+      if (!objective.areaPolygon || objective.areaPolygon.length < 3) {
+        invalid(`objective.${objective.id}`, 'control_area objectives require at least 3 polygon vertices');
+      } else {
+        const feature = turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]]);
+        if (turf.area(feature) <= 1 || turf.kinks(feature).features.length > 0) {
+          invalid(`objective.${objective.id}`, 'control_area polygon must be non-degenerate and non-self-intersecting');
+        }
+      }
+    } else if (objective.unitIds.length === 0) {
+      invalid(`objective.${objective.id}`, 'objective requires at least one unit target');
+    }
     if (new Set(objective.unitIds).size !== objective.unitIds.length) invalid(`objective.${objective.id}`, 'duplicate target');
     for (const target of objective.unitIds) {
       const placement = units.get(target);

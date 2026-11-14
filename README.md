@@ -71,9 +71,12 @@ bun run preview
 | **东海惊雷** | 浅海AIP/护卫舰反潜幕、运-9G电子支援、诱饵、SEAD与B-1B饱和波次 |
 | **深海猎杀** | 双航母隐身制空、多用途重锤、电子伴随、侦察分类、加油前出与可靠分波次出动 |
 | **巴士海峡封锁** | 50分钟双两栖核心preserve+withdraw、浅深海ASW、岸基拒止/SEAD和Turnaround护航轮换 |
+| **联合登岛** | 海陆空立体夺控、两栖投送、陆基机场压制与滩头控制 |
+| **山谷突防** | 纯陆+空内陆山地攻防、山脊雷达遮蔽与合成旅通道夺控 |
 | **有限信息演练** | 15 分钟短局，练习观察、风险射击、资源撤离与任务结算 |
+| **联合作战教学** | 10 分钟互动指引演练，覆盖雷达、航路、推演与火控 |
 
-想定入口位于 `src/scenarios/`。装备、传感器、武器和挂载数据位于 `src/db/`。当前主目录版本 `2026.12-CONTENT-EXPANSION-1` 包含 **38 平台、27 武器、24 传感器、27 挂载**；名称与参数均为可测试游戏抽象。
+想定入口位于 `src/scenarios/`。装备、传感器、武器和挂载数据位于 `src/db/`。当前主目录版本 `2026.12-CONTENT-EXPANSION-1` 包含 **44 平台、31 武器、24 传感器、30 挂载**；名称与参数均为可测试游戏抽象。
 
 ## 系统架构
 
@@ -176,9 +179,9 @@ bun run test:e2e
 
 当前内容扩充基线：
 
-- Bun unit / integration：**164 pass，0 fail**
-- Playwright E2E：**13 pass，0 fail**
-- Engine 聚合行覆盖率：**98.35%（3342/3398）**，门禁要求 ≥80%
+- Bun unit / integration：**180 pass，0 fail**
+- Playwright E2E：**18 pass，0 fail**
+- Engine 聚合行覆盖率：**96.94%（3424/3532）**，门禁要求 ≥80%
 - 四想定固定种子摘要：[`docs/SCENARIO_SMOKE_RESULTS.json`](docs/SCENARIO_SMOKE_RESULTS.json)
 
 ## API 文档

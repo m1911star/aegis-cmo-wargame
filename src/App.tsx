@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWargameStore } from './store/useWargameStore';
+import { simulationWorkerClient } from './engine/workerClient';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
 import { RightUnitTelemetryInspector } from './components/RightUnitTelemetryInspector';
@@ -7,10 +8,22 @@ import { BottomCombatLogDock } from './components/BottomCombatLogDock';
 import { TacticalModals } from './components/TacticalModals';
 import { TacticalMapCanvas } from './map/TacticalMapCanvas';
 import { RiskEngagementDialog } from './components/FireControlDiagnostics';
+import { TutorialChecklistOverlay } from './components/TutorialChecklistOverlay';
+import { ActionFeedbackToast } from './components/ActionFeedbackToast';
+import { ReplayPlayerBar } from './components/ReplayPlayerBar';
+import { BattleResultOverlay } from './components/modals/BattleResultOverlay';
 
 export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
+  const [debriefDismissed, setDebriefDismissed] = useState(false);
+
+  const battleResult = useWargameStore((s) => s.battleResult);
+  const replayPlayer = useWargameStore((s) => s.replayPlayer);
+
+  useEffect(() => {
+    if (!battleResult) setDebriefDismissed(false);
+  }, [battleResult]);
 
   useEffect(() => {
     const narrow = window.matchMedia('(max-width: 900px)');
@@ -48,18 +61,78 @@ export default function App() {
 
     let last = performance.now();
     let backlog = 0;
+    let workerBusy = false;
+    let cancelled = false;
     // Speed changes the time budget, never the engine's atomic step. Keep lag rather than skip ticks.
     const timer = window.setInterval(() => {
       const now = performance.now();
       backlog += (now - last) * timeScale / 1000;
       last = now;
-      if (useWargameStore.getState().timeScale !== timeScale) return;
+      const s = useWargameStore.getState();
+      if (s.timeScale !== timeScale || s.battleResult) return;
+      if (timeScale >= 15 && typeof Worker !== 'undefined') {
+        if (workerBusy) return;
+        const budget = Math.min(15, backlog);
+        if (budget + s.pendingSimSeconds + 1e-9 < 0.25) return;
+        backlog -= budget;
+        workerBusy = true;
+        const expectedTick = s.tick;
+        const expectedSeq = s.commandSequence;
+        const expectedScenarioId = s.currentScenario.id;
+        void simulationWorkerClient
+          .runBatch(
+            {
+              startTime: s.startTime,
+              tick: s.tick,
+              rngState: s.rngState,
+              objectives: s.objectives,
+              objectiveProgress: s.objectiveProgress,
+              creditedDamage: s.creditedDamage,
+              detectedMissileIds: s.detectedMissileIds,
+              aar: s.aar,
+              simTime: s.simTime,
+              units: s.units,
+              contacts: s.contacts,
+              weaponsInFlight: s.weaponsInFlight,
+              explosions: s.explosions,
+              missions: s.missions,
+              events: s.events,
+              environment: s.environment,
+              victoryConditions: s.currentScenario.victoryConditions,
+              score: s.score,
+            },
+            s.catalog,
+            budget + s.pendingSimSeconds,
+            s.autoPause,
+            s.playerSide,
+            expectedSeq
+          )
+          .then((result) => {
+            if (cancelled) return;
+            const applied = useWargameStore
+              .getState()
+              .applySimulationResult(result, expectedTick, expectedSeq, expectedScenarioId);
+            if (!applied) {
+              backlog = 0;
+            }
+          })
+          .catch(() => {
+            if (!cancelled) stepSingleTick(budget);
+          })
+          .finally(() => {
+            workerBusy = false;
+          });
+        return;
+      }
       const budget = Math.min(15, backlog);
       backlog -= budget;
       stepSingleTick(budget);
     }, 100);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [timeScale, stepSingleTick]);
 
   // --------------------------------------------------------------------------
@@ -108,6 +181,13 @@ export default function App() {
             });
           }
         }
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        setLeftOpen((prevLeft) => {
+          const next = !(prevLeft || rightOpen);
+          setRightOpen(next);
+          return next;
+        });
       } else if (e.key === 'Escape') {
         if (state.activeModal !== 'none') {
           state.setActiveModal('none');
@@ -147,13 +227,15 @@ export default function App() {
         onToggleRight={toggleRight}
       />
 
-      {/* 中间主体区：左侧 ORBAT/情报/任务树 + 中央 WebGL 海陆空战术态势图 + 右侧单元火控与遥测面板 */}
+      {/* 中间主体区：100%全屏 WebGL 态势地图为底，左右侧栏以半透明悬浮抽屉展开 */}
       <div className="workspace">
         <div id="order-panel" className="workspace-pane order-pane" hidden={!leftOpen}>
           <LeftOrbatMissionSidebar />
         </div>
-        <main className="flex-1 h-full relative min-w-0">
-          <TacticalMapCanvas />
+        <main className="workspace-map-stage" data-left-open={leftOpen} data-right-open={rightOpen}>
+          <TacticalMapCanvas leftOpen={leftOpen} rightOpen={rightOpen} />
+          <ReplayPlayerBar />
+          <TutorialChecklistOverlay leftOpen={leftOpen} />
         </main>
         <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!rightOpen}>
           <RightUnitTelemetryInspector />
@@ -165,6 +247,10 @@ export default function App() {
 
       {/* 模态框：战役简报、装备数据库、实时兵力投放、想定 JSON 序列化 */}
       <TacticalModals />
+      {battleResult && !replayPlayer && !debriefDismissed && (
+        <BattleResultOverlay onDismiss={() => setDebriefDismissed(true)} />
+      )}
+      <ActionFeedbackToast />
       <RiskEngagementDialog />
     </div>
   );

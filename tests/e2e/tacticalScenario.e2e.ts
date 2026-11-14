@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 
 test('loads the command workspace and switches tactical scenarios', async ({ page }) => {
   const scenario = page.getByLabel('选择战役想定');
-  await expect(scenario).toHaveValue('op_east_sea_thunder_2027');
+  await expect(scenario).toHaveValue('limited_information_exercise');
   await scenario.selectOption('op_deep_sea_carrier_hunt_2028');
   await expect(scenario).toHaveValue('op_deep_sea_carrier_hunt_2028');
   await expect(scenario.locator('option:checked')).toContainText('深海猎杀');
@@ -36,6 +36,7 @@ test('configures automatic weapon-release limits from the unit inspector', async
 });
 
 test('edits route-leg speed and altitude and issues a group formation order', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
   await page.getByLabel('WP-1 速度').fill('500');
   await page.getByLabel('WP-1 高度或潜深').fill('6000');
   await page.getByRole('button', { name: '设为编队领队' }).click();
@@ -45,6 +46,7 @@ test('edits route-leg speed and altitude and issues a group formation order', as
 });
 
 test('creates a replayable patrol mission from same-side reference points', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
   await page.getByRole('button', { name: '巡逻任务' }).click();
   await page.getByLabel('任务名称').fill('E2E 东海 CAP');
   await page.getByLabel('选择参考点 RP-1 东海ADIZ北界点').check();
@@ -55,12 +57,14 @@ test('creates a replayable patrol mission from same-side reference points', asyn
 });
 
 test('releases a finite carried UAV as an independent observable unit', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
   await page.locator('#order-panel').getByText('THUNDER-08', { exact: true }).click();
   await page.getByRole('button', { name: '释放', exact: true }).click();
   await expect(page.locator('#inspector-panel').getByText(/无侦-8 高空高速无人侦察平台 #1/)).toBeVisible();
 });
 
 test('queues a compatible receiver for finite air-to-air refueling', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
   const request = page.getByRole('button', { name: '请求加油' });
   await expect(page.getByLabel('选择加油机')).toHaveValue('red_y20u_tanker');
   await expect(request).toBeDisabled();
@@ -73,6 +77,7 @@ test('queues a compatible receiver for finite air-to-air refueling', async ({ pa
 });
 
 test('edits scenario groups, objectives and area events in sandbox builder', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
   await page.getByRole('button', { name: '指挥模式' }).click();
   await page.getByRole('button', { name: '想定编辑' }).click();
   await expect(page.getByText('SCENARIO BUILDER // 可视化想定编辑')).toBeVisible();
@@ -108,7 +113,7 @@ test('gates full-truth AAR until sandbox or battle end and shows the independent
   await page.waitForTimeout(1200);
   await page.getByRole('button', { name: '暂停推演' }).click();
   await aarButton.click();
-  await expect(page.getByText('AFTER ACTION REVIEW // 战斗复盘')).toBeVisible();
+  await expect(page.getByText(/AFTER ACTION REVIEW/)).toBeVisible();
   await expect(page.getByText('完整航迹账本')).toBeVisible();
 });
 
@@ -147,4 +152,58 @@ test('starts, advances and pauses the simulation from the command header', async
   await expect(seat).toBeDisabled({ timeout: 10_000 });
   await page.getByRole('button', { name: '暂停推演' }).click();
   await expect(page.getByRole('button', { name: '开始推演' })).toBeVisible();
+});
+
+test('runs interactive tutorial checklist and campaign progression controls', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('interactive_command_tutorial');
+  await expect(page.getByLabel('新兵互动教学指引')).toBeVisible();
+  await page.keyboard.press('F9');
+  await expect(page.getByText('指挥官教学指引 (1/5)')).toBeVisible();
+
+  await page.getByRole('button', { name: '战役模式' }).click();
+  await expect(page.getByRole('button', { name: '战役 1/3' })).toBeVisible();
+});
+
+test('captures and restores a resumable battle save in Scenario I/O modal', async ({ page }) => {
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await page.getByRole('button', { name: '想定管理' }).click();
+  await page.getByRole('button', { name: '生成断点存档 JSON' }).click();
+  await expect(page.getByLabel('想定或重放 JSON')).toContainText('aegis_battle_save');
+  await page.getByRole('button', { name: '恢复断点存档' }).click();
+  await expect(page.getByRole('button', { name: '开始推演' })).toBeVisible();
+});
+
+test('requires confirmation before mid-battle reset and launches live map replay player', async ({ page }) => {
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await page.getByLabel('重置当前想定').click();
+  await expect(page.getByRole('alertdialog', { name: '确认重置或切换想定' })).toBeVisible();
+  await page.getByRole('button', { name: '取消' }).click();
+
+  await page.getByRole('button', { name: '想定管理' }).click();
+  await page.getByRole('button', { name: '生成指令重放 JSON' }).click();
+  await page.getByRole('button', { name: '启动地图航迹回放播放器' }).click();
+  await expect(page.getByLabel('地图航迹回放播放器')).toBeVisible();
+  await page.getByRole('button', { name: '退出回放' }).click();
+});
+
+test('filters equipment catalog and triggers manual countermeasure from inspector', async ({ page }) => {
+  await page.getByRole('button', { name: '装备库' }).click();
+  await page.getByLabel('检索装备库').fill('055');
+  await expect(page.getByRole('dialog').getByText(/055型/).first()).toBeVisible();
+  await page.getByLabel('关闭装备库').click();
+
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
+  await page.getByRole('button', { name: /箔条\(/ }).click();
+  await expect(page.getByText(/已投放箔条干扰/)).toBeVisible();
+});
+
+test('loads sea-land-air amphibious and pure inland air-land scenarios and launches from airbase', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_joint_amphibious_assault_2027');
+  await expect(page.getByLabel('选择战役想定')).toHaveValue('op_joint_amphibious_assault_2027');
+
+  await page.getByLabel('选择战役想定').selectOption('op_inland_mountain_strike_2027');
+  await expect(page.getByLabel('选择战役想定')).toHaveValue('op_inland_mountain_strike_2027');
+  await page.locator('#order-panel').getByText('INLAND-AB-W', { exact: true }).click();
+  await page.getByRole('button', { name: '弹射升空' }).first().click();
+  await expect(page.locator('#inspector-panel').getByText(/基地歼-20A 航空兵大队 #1波次/)).toBeVisible();
 });

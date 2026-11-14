@@ -66,19 +66,23 @@ export function launchCarrierSortie(
   const sortieId = `sortie_${carrier.id}_${slot.slotId}_${sortieNumber}`;
   if (units[sortieId]) return undefined;
   const slotIndex = carrier.hangar.indexOf(slot);
+  const isLandAirbase = carrier.domain === 'land' || carrier.category === 'airbase';
+  const offsetLon = isLandAirbase ? (carrier.side === 'RED' ? 0.04 : -0.04) : (carrier.side === 'RED' ? 0.12 : -0.12);
+  const offsetLat = isLandAirbase ? 0.03 : 0.08;
+  const callsignPrefix = isLandAirbase ? 'WING' : carrier.side === 'RED' ? 'HAIDONG' : 'STRIKE';
   const launched = createRuntimeUnitFromPlacement({
     id: sortieId,
     name: `${slot.squadronName} #${sortieNumber}波次`,
-    callsign: `${carrier.side === 'RED' ? 'HAIDONG' : 'STRIKE'}-${sortieNumber}0${slotIndex + 1}`,
+    callsign: `${callsignPrefix}-${sortieNumber}0${slotIndex + 1}`,
     side: carrier.side,
     platformId: slot.platformId,
     loadoutId,
     parentGroupId: carrier.parentGroupId,
     position: [
-      Number((carrier.position[0] + (carrier.side === 'RED' ? 0.12 : -0.12)).toFixed(4)),
-      Number((carrier.position[1] + 0.08).toFixed(4)),
+      Number((carrier.position[0] + offsetLon).toFixed(4)),
+      Number((carrier.position[1] + offsetLat).toFixed(4)),
     ],
-    altitudeM: airSpec.defaultAltitudeM,
+    altitudeM: isLandAirbase ? Math.max(airSpec.defaultAltitudeM, 1500) : airSpec.defaultAltitudeM,
     heading: carrier.heading,
   }, catalog);
   launched.hostCarrierId = carrier.id;

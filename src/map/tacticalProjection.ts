@@ -4,6 +4,8 @@ import type {
   EquipmentCatalog,
   ReferencePoint,
   RuntimeUnit,
+  ScenarioEnvironment,
+  ScenarioObjective,
   TacticalContact,
   TacticalExplosionEffect,
   TacticalMission,
@@ -39,9 +41,13 @@ export type TacticalProjectionInput = {
   mapLayers: ProjectionLayers;
   catalog: EquipmentCatalog;
   simTime: number;
+  environment?: ScenarioEnvironment;
+  objectives?: ScenarioObjective[];
 };
 
 export type TacticalProjection = {
+  terrainRidges: GeoJSON.Feature[];
+  controlZones: GeoJSON.Feature[];
   missions: GeoJSON.Feature[];
   envelopes: GeoJSON.Feature[];
   aou: GeoJSON.Feature[];
@@ -58,7 +64,42 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
   const {
     units, contacts, weaponsInFlight, explosions, missions, referencePoints,
     activePerspective, selectedUnitId, selectedContactId, mapLayers, catalog, simTime,
+    environment, objectives,
   } = input;
+
+  const terrainRidges: GeoJSON.Feature[] = (environment?.landPolygons ?? [])
+    .filter((polygon) => (polygon.elevationM ?? 0) > 0 && polygon.areaPolygon.length >= 3)
+    .map((polygon) => ({
+      type: 'Feature',
+      properties: {
+        id: polygon.id,
+        label: `${polygon.name} (${polygon.elevationM}m)`,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[...polygon.areaPolygon, polygon.areaPolygon[0]]],
+      },
+    }));
+
+  const controlZones: GeoJSON.Feature[] = (objectives ?? [])
+    .filter((objective) =>
+      objective.type === 'control_area' &&
+      objective.areaPolygon &&
+      objective.areaPolygon.length >= 3 &&
+      (activePerspective === 'GOD' || objective.side === activePerspective)
+    )
+    .map((objective) => ({
+      type: 'Feature',
+      properties: {
+        id: objective.id,
+        side: objective.side,
+        label: `夺控区: ${objective.title}`,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[...objective.areaPolygon!, objective.areaPolygon![0]]],
+      },
+    }));
   const visibleUnits = Object.values(units).filter((unit) =>
     isActiveUnit(unit) && (activePerspective === 'GOD' || unit.side === activePerspective));
   const visibleContacts = activePerspective === 'GOD' ? [] : Object.values(contacts)
@@ -199,6 +240,8 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       geometry: { type: 'Point', coordinates: effect.position } }));
 
   return {
+    terrainRidges,
+    controlZones,
     missions: missionFeatures,
     envelopes: envelopeFeatures,
     aou: aouFeatures,

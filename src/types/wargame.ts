@@ -32,11 +32,13 @@ export type UnitCategory =
   | 'mpa_uav'         // 反潜巡逻机 / 长航时高空侦察无人机
   | 'decoy'           // 空射诱饵/高仿真假目标
   | 'carrier'         // 航空母舰 / 两栖攻击舰 (具备 Hangar 母舰放飞能力)
+  | 'amphibious'      // 两栖登陆舰 / 船坞登陆舰
   | 'destroyer'       // 大型防空/多用途驱逐舰
   | 'frigate'         // 护卫舰
   | 'ssn'             // 攻击型核潜艇 / AIP常规潜艇
   | 'sam_battery'     // 远程防空反导营
   | 'asm_battery'     // 岸基反舰/高超音速弹道导弹营
+  | 'ground_force'    // 陆军合成装甲/机械化突击营
   | 'airbase'         // 军用机场/航空兵基地 (具备 Hangar 放飞能力)
   | 'radar_site';     // 远程战略预警/超视距雷达站
 
@@ -222,6 +224,8 @@ export interface UnitDoctrine {
   minimumWeaponReserve: number;
   automaticTargetDomains: Domain[];
   minimumAutomaticThreat: ThreatLevel;
+  requireIdentifiedForAutoFire?: boolean;
+  shootAndScoot?: boolean;
 }
 
 export interface RuntimeWeaponMount extends PlatformMountTemplate {
@@ -631,8 +635,10 @@ export interface ScenarioObjective {
   id: string;
   side: 'RED' | 'BLUE';
   title: string;
-  type: 'destroy' | 'disable' | 'preserve' | 'observe' | 'withdraw';
+  type: 'destroy' | 'disable' | 'preserve' | 'observe' | 'withdraw' | 'control_area';
   unitIds: string[];
+  areaPolygon?: [number, number][];
+  controlDomains?: Domain[];
   required: boolean;
   points: number;
   criticalFailure?: boolean;
@@ -652,6 +658,7 @@ export interface EnvironmentPolygon {
   id: string;
   name: string;
   areaPolygon: [number, number][];
+  elevationM?: number;
 }
 
 export interface AcousticZone extends EnvironmentPolygon {
@@ -708,7 +715,7 @@ export type CombatLogCategory =
   | 'EVENT'         // ★ 新增：战役脚本触发事件 (援军抵达/参谋部急电/阶段转换)
   | 'SYSTEM';
 
-export type AarEventKind = 'launch' | 'hit' | 'intercept' | 'loss' | 'sortie' | 'recovery' | 'turnaround' | 'hangar_loss';
+export type AarEventKind = 'launch' | 'hit' | 'intercept' | 'loss' | 'sortie' | 'recovery' | 'turnaround' | 'hangar_loss' | 'miss';
 
 export interface CombatLogEntry {
   id: string;
@@ -726,6 +733,8 @@ export interface CombatLogEntry {
   quantity?: number;
   aarType?: AarEventKind;
   aarSide?: SideId;
+  aarShooterId?: string;
+  aarOutcome?: 'hit' | 'destroy' | 'intercept' | 'softkill' | 'miss';
 }
 
 export interface AarEventRecord {
@@ -739,6 +748,8 @@ export interface AarEventRecord {
   targetUnitId?: string;
   weaponId?: string;
   quantity: number;
+  shooterId?: string;
+  outcome?: 'hit' | 'destroy' | 'intercept' | 'softkill' | 'miss';
 }
 
 export interface AarTrackSample {

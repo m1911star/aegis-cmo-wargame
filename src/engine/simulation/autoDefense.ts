@@ -3,12 +3,14 @@ import type {
   CombatLogEntry,
   EquipmentCatalog,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScoreLedger,
   TacticalContact,
   TacticalMission,
   WeaponInFlight,
 } from '../../types/wargame';
 import { evaluateFireControl, weaponLaunchRangeKm } from '../fireControl';
+import { findShootAndScootDestination } from '../environment';
 import { getBearingDeg, getDistanceKm, calculateRadarHorizonKm } from '../geometry';
 import { launchGuidance } from '../guidance';
 import { effectiveDoctrine } from '../operations';
@@ -23,6 +25,7 @@ export type AutoDefenseContext = {
   contacts: Record<string, TacticalContact>;
   weaponsInFlight: Record<string, WeaponInFlight>;
   catalog: EquipmentCatalog;
+  environment?: ScenarioEnvironment;
   nextSimTime: number;
   score: ScoreLedger;
   logs: CombatLogEntry[];
@@ -40,6 +43,7 @@ export function runAutoDefense({
   contacts,
   weaponsInFlight,
   catalog,
+  environment,
   nextSimTime,
   score,
   logs,
@@ -82,7 +86,8 @@ export function runAutoDefense({
           units,
           catalog,
           nextSimTime,
-          shooter
+          shooter,
+          environment
         );
         if (!missileContact) continue;
 
@@ -301,6 +306,38 @@ export function runAutoDefense({
       recordWeaponLaunch(shooter, matchingMount, salvo, nextSimTime);
       shooter.status = 'engaged';
       shooter.coordinatedAttack = undefined;
+
+      if (
+        shooter.domain === 'land' &&
+        doctrine.shootAndScoot &&
+        shooter.waypoints.length === 0 &&
+        shooter.navigationMode !== 'formation'
+      ) {
+        const maxSpeed = catalog.platforms[shooter.platformId]?.maxSpeedKts ?? 0;
+        if (maxSpeed > 0) {
+          const scootTarget = findShootAndScootDestination(
+            shooter.position,
+            environment,
+            4.5,
+            Math.round(shooter.heading + 90)
+          );
+          if (scootTarget) {
+            shooter.waypoints = [{ position: scootTarget, speedKts: maxSpeed }];
+            shooter.targetSpeedKts = maxSpeed;
+            logs.push({
+              id: `scoot_${nextSimTime}_${shooter.id}`,
+              simTime: nextSimTime,
+              side: shooter.side,
+              category: 'DOCTRINE',
+              severity: 'info',
+              title: `${shooter.callsign} 执行发射后转移 (Shoot-and-Scoot)`,
+              message: '陆基机动火力单元开火后立即向预设隐蔽地域转移，规避敌方反制火力。',
+              position: [...shooter.position],
+              unitId: shooter.id,
+            });
+          }
+        }
+      }
 
       const callout =
         weapon.category === 'aam'

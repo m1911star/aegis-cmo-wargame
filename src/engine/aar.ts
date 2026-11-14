@@ -8,6 +8,17 @@ import type {
 
 export const createAarLedger = (): BattleAarLedger => ({ events: [], tracks: [] });
 
+const knownEventCache = new WeakMap<BattleAarLedger, Set<string>>();
+
+function getKnownEventIds(ledger: BattleAarLedger): Set<string> {
+  let known = knownEventCache.get(ledger);
+  if (!known) {
+    known = new Set(ledger.events.map((event) => event.id));
+    knownEventCache.set(ledger, known);
+  }
+  return known;
+}
+
 function eventKind(log: CombatLogEntry): AarEventKind | undefined {
   if (log.aarType) return log.aarType;
   if (log.category === 'LAUNCH') return 'launch';
@@ -26,25 +37,32 @@ export function recordAarTick(
   forceTrack = false,
   recordTracks = true
 ): void {
-  const knownEventIds = new Set(ledger.events.map((event) => event.id));
-  for (const log of logs) {
-    const kind = eventKind(log);
-    if (!kind || knownEventIds.has(log.id)) continue;
-    knownEventIds.add(log.id);
-    ledger.events.push({
-      id: log.id,
-      tick,
-      simTime: log.simTime,
-      side: log.aarSide ?? log.side,
-      kind,
-      title: log.title,
-      unitId: log.unitId,
-      targetUnitId: log.targetUnitId,
-      weaponId: log.weaponId,
-      quantity: log.quantity ?? 1,
-    });
+  if (logs.some(eventKind)) {
+    const knownEventIds = getKnownEventIds(ledger);
+    for (const log of logs) {
+      const kind = eventKind(log);
+      if (!kind || knownEventIds.has(log.id)) continue;
+      knownEventIds.add(log.id);
+      ledger.events.push({
+        id: log.id,
+        tick,
+        simTime: log.simTime,
+        side: log.aarSide ?? log.side,
+        kind,
+        title: log.title,
+        unitId: log.unitId,
+        targetUnitId: log.targetUnitId,
+        weaponId: log.weaponId,
+        quantity: log.quantity ?? 1,
+        shooterId: log.aarShooterId,
+        outcome: log.aarOutcome,
+      });
+    }
+    if (ledger.events.length > 50_000) {
+      const removed = ledger.events.splice(0, ledger.events.length - 50_000);
+      for (const entry of removed) knownEventIds.delete(entry.id);
+    }
   }
-  if (ledger.events.length > 50_000) ledger.events.splice(0, ledger.events.length - 50_000);
 
   if (recordTracks && (forceTrack || tick % 20 === 0)) {
     for (const unit of Object.values(units).sort((a, b) => a.id.localeCompare(b.id))) {

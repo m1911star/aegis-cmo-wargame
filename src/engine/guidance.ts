@@ -1,11 +1,19 @@
 import * as turf from '@turf/turf';
-import type { EquipmentCatalog, RuntimeUnit, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
+import type { EquipmentCatalog, RuntimeUnit, ScenarioEnvironment, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
+import { hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { guidanceProfile, trackSupport } from './fireControl';
 import { isRadioEmitting, isActiveUnit } from './unitCapabilities';
 
 const move = (position: [number, number], km: number, heading: number) =>
   turf.destination(position, km, heading, { units: 'kilometers' }).geometry.coordinates as [number, number];
+
+export function computeMissileEnergyFactor(missile: WeaponInFlight, weapon: WeaponSpec): number {
+  if (!Number.isFinite(weapon.maxRangeKm) || weapon.maxRangeKm <= 0) return 1;
+  const ratio = Math.max(0, Math.min(1, missile.traveledKm / weapon.maxRangeKm));
+  if (ratio <= 0.55) return 1;
+  return Math.max(0.55, 1 - ((ratio - 0.55) / 0.45) * 0.45);
+}
 
 export function launchGuidance(contact: TacticalContact) {
   return {
@@ -18,7 +26,7 @@ export function launchGuidance(contact: TacticalContact) {
 // Truth is permitted inside the sensor test and collision resolver, never as an unconditional steering input.
 export function seekerCanObserve(
   missile: WeaponInFlight, weapon: WeaponSpec, target: RuntimeUnit | WeaponInFlight | undefined,
-  catalog: EquipmentCatalog, supportAvailable: boolean
+  catalog: EquipmentCatalog, supportAvailable: boolean, environment?: ScenarioEnvironment
 ): boolean {
   if (!target) return false;
   const isUnit = 'platformId' in target;
@@ -35,6 +43,9 @@ export function seekerCanObserve(
     if (missile.altitudeM >= 0 || target.altitudeM > 0) return false;
   } else {
     range = Math.min(range, calculateRadarHorizonKm(missile.altitudeM, 0, target.altitudeM));
+    if (!hasRadarLineOfSight(missile.position, missile.altitudeM, 0, target.position, target.altitudeM, environment)) {
+      return false;
+    }
   }
   if (weapon.guidance === 'anti_radiation') {
     if (!isUnit || !isRadioEmitting(target, catalog)) return false;
@@ -63,7 +74,7 @@ export function sweptSeparationKm(
 export function advanceGuidance(
   missile: WeaponInFlight, weapon: WeaponSpec, contact: TacticalContact | undefined,
   units: Record<string, RuntimeUnit>, catalog: EquipmentCatalog, simTime: number, dtSec: number,
-  target: RuntimeUnit | WeaponInFlight | undefined
+  target: RuntimeUnit | WeaponInFlight | undefined, environment?: ScenarioEnvironment
 ): { reached: boolean; expired: boolean } {
   const profile = guidanceProfile(weapon);
   const shooter = units[missile.shooterId];
@@ -87,7 +98,7 @@ export function advanceGuidance(
 
   const terminal = missile.seekerState.startsWith('terminal') ||
     getDistanceKm(missile.position, missile.aimPosition) <= profile.activationRangeKm;
-  const locked = terminal && seekerCanObserve(missile, weapon, target, catalog, support);
+  const locked = terminal && seekerCanObserve(missile, weapon, target, catalog, support, environment);
   if (locked && target) {
     missile.seekerState = 'terminal_locked';
     missile.searchElapsedSec = 0;
@@ -99,6 +110,8 @@ export function advanceGuidance(
     missile.searchElapsedSec = (missile.searchElapsedSec ?? 0) + dtSec;
   }
 
+  const energyFactor = computeMissileEnergyFactor(missile, weapon);
+  missile.speedKts = Math.round(weapon.speedKts * energyFactor);
   const remaining = Math.max(0, missile.maxRangeKm - missile.traveledKm);
   const step = Math.min(remaining, missile.speedKts * 1.852 * dtSec / 3600);
   const before = [...missile.position] as [number, number];
