@@ -248,6 +248,14 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
         mapLayers: state.mapLayers,
         catalog: state.catalog,
         simTime: state.simTime,
+        environment: state.environment,
+        objectives: state.objectives,
+      });
+      (map.getSource('terrain-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection', features: projection.terrainRidges,
+      });
+      (map.getSource('control-zones-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection', features: projection.controlZones,
       });
       (map.getSource('missions-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.missions,
@@ -400,6 +408,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
         selectedUnitId: s.selectedUnitId,
         selectedContactId: s.selectedContactId,
         mapLayers: s.mapLayers,
+        environment: s.environment,
+        objectives: s.objectives,
       }),
       () => {
         syncStoreToLayers();

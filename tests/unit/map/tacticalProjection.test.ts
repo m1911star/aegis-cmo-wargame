@@ -32,8 +32,14 @@ test('pure tactical projection builds every GeoJSON family without exposing hidd
     simTime: 0,
   };
   const snapshot = structuredClone(input);
-  const projection = projectTacticalState(input);
+  const projection = projectTacticalState({
+    ...input,
+    environment: east.environment,
+    objectives: east.objectives,
+  });
   expect(input).toEqual(snapshot);
+  expect(projection.terrainRidges.length).toBeGreaterThan(0);
+  expect(projection.controlZones).toHaveLength(0);
   expect(projection.missions.length).toBeGreaterThan(0);
   expect(projection.envelopes.some((feature) => feature.properties?.ringKind === 'threat')).toBe(true);
   expect(projection.aou).toHaveLength(1);
@@ -42,4 +48,21 @@ test('pure tactical projection builds every GeoJSON family without exposing hidd
   const contactFeature = projection.units.find((feature) => feature.properties?.entityType === 'contact');
   expect(contactFeature?.properties).not.toHaveProperty('actualUnitId');
   expect(projection.referencePoints.length).toBeGreaterThan(0);
+
+  const jointProjection = projectTacticalState({
+    ...input,
+    objectives: [
+      {
+        id: 'beach_zone',
+        side: 'RED',
+        title: 'Beachhead',
+        type: 'control_area',
+        unitIds: [],
+        areaPolygon: [[120.3, 23.5], [120.8, 23.5], [120.8, 23.9], [120.3, 23.9]],
+        required: true,
+        points: 200,
+      },
+    ],
+  });
+  expect(jointProjection.controlZones).toHaveLength(1);
 });

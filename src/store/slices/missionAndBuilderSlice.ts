@@ -209,14 +209,24 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
     upsertObjective: (draft: ObjectiveDraft) => set((s) => {
       const title = draft.title?.trim();
       const id = draft.id ?? `objective_${s.tick}_${s.commandSequence}`;
-      const allowedTypes: ScenarioObjective['type'][] = ['destroy', 'disable', 'preserve', 'observe', 'withdraw'];
+      const allowedTypes: ScenarioObjective['type'][] = ['destroy', 'disable', 'preserve', 'observe', 'withdraw', 'control_area'];
       if (s.playMode !== 'sandbox' || !title || title.length > 120 || !['RED', 'BLUE'].includes(draft.side) ||
-          !allowedTypes.includes(draft.type) || !Array.isArray(draft.unitIds) || draft.unitIds.length === 0 ||
+          !allowedTypes.includes(draft.type) || !Array.isArray(draft.unitIds) ||
           new Set(draft.unitIds).size !== draft.unitIds.length || draft.unitIds.some((unitId) => !s.units[unitId]) ||
           !Number.isSafeInteger(draft.points) || draft.points < 0 ||
           draft.criticalFailure && draft.type !== 'preserve' || draft.preserveCapability && draft.type !== 'preserve') return s;
+      if (draft.type === 'control_area') {
+        if (!draft.areaPolygon || draft.areaPolygon.length < 3) return s;
+        const poly = turf.polygon([[...draft.areaPolygon, draft.areaPolygon[0]]]);
+        if (turf.area(poly) <= 1 || turf.kinks(poly).features.length > 0) return s;
+      } else if (draft.unitIds.length === 0) {
+        return s;
+      }
       const objective: ScenarioObjective = { id, title, side: draft.side, type: draft.type,
-        unitIds: [...draft.unitIds], required: draft.required, points: draft.points,
+        unitIds: [...draft.unitIds],
+        areaPolygon: draft.areaPolygon ? draft.areaPolygon.map((pt) => [...pt] as [number, number]) : undefined,
+        controlDomains: draft.controlDomains ? [...draft.controlDomains] : undefined,
+        required: draft.required, points: draft.points,
         criticalFailure: draft.criticalFailure, preserveCapability: draft.preserveCapability };
       const exists = s.objectives.some((candidate) => candidate.id === id);
       const objectiveProgress = { ...s.objectiveProgress }; delete objectiveProgress[id];
