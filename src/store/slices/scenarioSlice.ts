@@ -11,8 +11,8 @@ import { BASEMAP_PRESETS, DEFAULT_BASEMAP } from '../../map/basemaps';
 import {
   BUILTIN_SCENARIOS,
   instantiateScenarioUnits,
-  SCENARIO_EAST_SEA_THUNDER,
 } from '../../scenarios/builtinScenarios';
+import { INFORMATION_EXERCISE } from '../../scenarios/informationExercise';
 import {
   BUILTIN_CAMPAIGN_WESTPAC,
   buildCampaignStageScenario,
@@ -22,7 +22,15 @@ import {
 } from '../../scenarios/campaign';
 import { compileScenario } from '../../scenarios/compileScenario';
 import type { ScenarioDefinition } from '../../types/wargame';
-import type { BattleSnapshot } from '../battleRecording';
+import { emitActionFeedback } from '../actionFeedbackBus';
+import {
+  AUTOSAVE_STORAGE_KEY,
+  captureBattleSave,
+  replayBattleRecording,
+  restoreBattleSave,
+  type BattleRecording,
+  type BattleSnapshot,
+} from '../battleRecording';
 import type { StoreGet, StoreSet, WargameStoreState } from '../types';
 
 export function createInitialStateFromScenario(
@@ -121,8 +129,16 @@ export function createInitialStateFromScenario(
   };
 }
 
+function readHasAutosave(): boolean {
+  try {
+    return typeof window !== 'undefined' && !!window.localStorage?.getItem(AUTOSAVE_STORAGE_KEY);
+  } catch {
+    return false;
+  }
+}
+
 export function createScenarioSlice(set: StoreSet, get: StoreGet) {
-  const initialBoot = createInitialStateFromScenario(SCENARIO_EAST_SEA_THUNDER);
+  const initialBoot = createInitialStateFromScenario(INFORMATION_EXERCISE);
 
   return {
     basemapMode: DEFAULT_BASEMAP,
@@ -132,6 +148,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     playerSide: 'RED' as const,
     playMode: 'command' as const,
     campaignState: null,
+    hasAutosave: readHasAutosave(),
+    replayPlayer: null,
     seed: initialBoot.seed,
     rngState: initialBoot.rngState,
     tick: 0,
@@ -327,11 +345,100 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
 
     exitCampaign: () => set({ campaignState: null }),
 
-    setTimeScale: (scale: WargameStoreState['timeScale']) =>
+    saveAutosaveCheckpoint: () => {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        const save = captureBattleSave();
+        window.localStorage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify(save));
+        set({ hasAutosave: true });
+      } catch {
+        // Ignore storage quota or private mode failures.
+      }
+    },
+
+    restoreAutosaveCheckpoint: () => {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return false;
+        const raw = window.localStorage.getItem(AUTOSAVE_STORAGE_KEY);
+        if (!raw) {
+          emitActionFeedback('warning', '未找到本地自动断点存档');
+          return false;
+        }
+        restoreBattleSave(JSON.parse(raw));
+        emitActionFeedback('info', '已恢复上局断点存档');
+        return true;
+      } catch (error) {
+        emitActionFeedback(
+          'error',
+          `断点存档恢复失败（版本或校验不匹配）：${error instanceof Error ? error.message : '未知错误'}`
+        );
+        return false;
+      }
+    },
+
+    startReplayPlayer: (recording: BattleRecording, startTick = 0) => {
+      try {
+        const clamped = Math.max(0, Math.min(startTick, recording.untilTick));
+        replayBattleRecording(recording, 60, clamped);
+        set({
+          replayPlayer: { recording, currentTick: clamped, isPlaying: false, speed: 5 },
+          activeModal: 'none',
+          timeScale: 0,
+        });
+        emitActionFeedback('info', `已进入地图回放模式（Tick ${clamped} / ${recording.untilTick}）`);
+      } catch (error) {
+        emitActionFeedback('error', error instanceof Error ? error.message : '无法启动地图回放');
+      }
+    },
+
+    setReplayPlayerPlaying: (playing: boolean) =>
+      set((s) => (s.replayPlayer ? { replayPlayer: { ...s.replayPlayer, isPlaying: playing } } : s)),
+
+    setReplayPlayerSpeed: (speed: 1 | 5 | 15) =>
+      set((s) => (s.replayPlayer ? { replayPlayer: { ...s.replayPlayer, speed } } : s)),
+
+    seekReplayPlayer: (targetTick: number) => {
+      const player = get().replayPlayer;
+      if (!player) return;
+      const clamped = Math.max(0, Math.min(targetTick, player.recording.untilTick));
+      try {
+        replayBattleRecording(player.recording, 60, clamped);
+        const reachedEnd = clamped >= player.recording.untilTick;
+        set({
+          replayPlayer: {
+            ...player,
+            currentTick: clamped,
+            isPlaying: reachedEnd ? false : player.isPlaying,
+          },
+        });
+      } catch (error) {
+        set({ replayPlayer: { ...player, isPlaying: false } });
+        emitActionFeedback('error', error instanceof Error ? error.message : '回放跳转失败');
+      }
+    },
+
+    exitReplayPlayer: () => {
+      const player = get().replayPlayer;
+      set({ replayPlayer: null });
+      if (player) {
+        emitActionFeedback('info', '已退出地图回放模式');
+      }
+    },
+
+    setTimeScale: (scale: WargameStoreState['timeScale']) => {
+      const s = get();
+      if (s.replayPlayer) {
+        set({ timeScale: 0 });
+        return;
+      }
       set({
-        timeScale: get().battleResult || get().pendingRiskEngagement ? 0 : scale,
-        lastAutoPauseBanner: scale > 0 ? null : get().lastAutoPauseBanner,
-      }),
+        timeScale: s.battleResult || s.pendingRiskEngagement ? 0 : scale,
+        lastAutoPauseBanner: scale > 0 ? null : s.lastAutoPauseBanner,
+      });
+      if (scale === 0 && s.tick > 0) {
+        get().saveAutosaveCheckpoint();
+      }
+    },
 
     stepSingleTick: (dtSec = 2) => {
       const s = get();
@@ -363,7 +470,14 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         s.autoPause,
         s.playerSide
       );
-      get().applySimulationResult(result);
+      const prevTick = s.tick;
+      const applied = get().applySimulationResult(result);
+      if (applied && typeof window !== 'undefined' && !s.replayPlayer) {
+        const after = get();
+        if (after.battleResult || Math.floor(after.tick / 120) > Math.floor(prevTick / 120)) {
+          get().saveAutosaveCheckpoint();
+        }
+      }
     },
 
     applySimulationResult: (

@@ -95,6 +95,9 @@ export function evaluateFireControl(
   if (mode === 'automatic' && (!attacker.doctrine.engageOpportunityTargets || attacker.status === 'returning')) {
     hardBlockReasons.push('未获自动进攻授权');
   }
+  if (mode === 'automatic' && attacker.doctrine.requireIdentifiedForAutoFire && contact && contact.classification !== 'identified') {
+    hardBlockReasons.push('条令要求识别目标后方可自动开火');
+  }
   return { status: hardBlockReasons.length ? 'blocked' : riskWarnings.length ? 'risky' : 'executable',
     hardBlockReasons, riskWarnings, distanceKm, trackAgeSec, supportSourceIds };
 }

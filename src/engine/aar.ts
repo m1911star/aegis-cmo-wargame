@@ -54,6 +54,8 @@ export function recordAarTick(
         targetUnitId: log.targetUnitId,
         weaponId: log.weaponId,
         quantity: log.quantity ?? 1,
+        shooterId: log.aarShooterId,
+        outcome: log.aarOutcome,
       });
     }
     if (ledger.events.length > 50_000) {

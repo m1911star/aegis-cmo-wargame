@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { AlertCircle, Check, Download, FileJson, Upload, X } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { AlertCircle, Check, Download, FileJson, Play, Upload, X } from 'lucide-react';
 import {
   exportCurrentStateAsScenarioJson,
   validateAndParseScenarioJson,
@@ -27,6 +27,7 @@ function recordingUntilTick(jsonText: string): number | undefined {
 export const ScenarioIoModal: React.FC = () => {
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const currentScenario = useWargameStore((s) => s.currentScenario);
+  const seed = useWargameStore((s) => s.seed);
   const units = useWargameStore((s) => s.units);
   const groups = useWargameStore((s) => s.groups);
   const missions = useWargameStore((s) => s.missions);
@@ -35,17 +36,56 @@ export const ScenarioIoModal: React.FC = () => {
   const referencePoints = useWargameStore((s) => s.referencePoints);
   const environment = useWargameStore((s) => s.environment);
   const loadScenario = useWargameStore((s) => s.loadScenario);
+  const startReplayPlayer = useWargameStore((s) => s.startReplayPlayer);
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [jsonText, setJsonText] = useState<string>('');
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [replayTick, setReplayTick] = useState(0);
+  const [customSeedInput, setCustomSeedInput] = useState(String(seed));
+  const [randomizeSpawns, setRandomizeSpawns] = useState(false);
 
   const displayedJson = jsonText || exportCurrentStateAsScenarioJson(currentScenario, units, {
     groups, missions, events, objectives, referencePoints, environment,
   });
   const replayUntilTick = recordingUntilTick(displayedJson);
   const selectedReplayTick = replayUntilTick === undefined ? 0 : Math.min(replayTick, replayUntilTick);
+
+  const downloadJsonFile = () => {
+    if (typeof document === 'undefined') return;
+    const blob = new Blob([displayedJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${currentScenario.id}_export.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const content = await file.text();
+      setJsonText(content);
+      const untilTick = recordingUntilTick(content);
+      if (untilTick !== undefined) setReplayTick(untilTick);
+      setJsonError(null);
+    } catch {
+      setJsonError('读取本地 JSON 文件失败');
+    }
+  };
+
+  const applyCustomSeedRestart = () => {
+    const parsedSeed = Number(customSeedInput);
+    if (!Number.isSafeInteger(parsedSeed) || parsedSeed < 0 || parsedSeed > 0xffffffff) {
+      setJsonError('种子必须为 0 ~ 4294967295 之间的整数');
+      return;
+    }
+    loadScenario(currentScenario, randomizeSpawns, parsedSeed);
+    setActiveModal('none');
+  };
 
   return (
     <div className="w-full max-w-3xl max-h-[90dvh] tactical-panel rounded-lg border border-cyan-400/50 overflow-y-auto">
@@ -121,15 +161,55 @@ export const ScenarioIoModal: React.FC = () => {
               onChange={(event) => setReplayTick(Number(event.target.value))}
               className="w-full accent-cyan-400"
             />
-            <button className="toolbar-button" onClick={() => {
-              try { replayBattleRecording(JSON.parse(displayedJson), 60, selectedReplayTick); setActiveModal('none'); }
-              catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
-            }}>
-              跳转至 Tick {selectedReplayTick}
-            </button>
-            <p className="text-slate-500">拖动只改变预览 Tick；点击跳转后优先从最近关键帧快照确定性重放，不追加用户命令。</p>
+            <div className="flex flex-wrap gap-2">
+              <button className="toolbar-button" onClick={() => {
+                try { replayBattleRecording(JSON.parse(displayedJson), 60, selectedReplayTick); setActiveModal('none'); }
+                catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
+              }}>
+                跳转至 Tick {selectedReplayTick}
+              </button>
+              <button
+                className="toolbar-button bg-amber-500/20 border-amber-400/50 text-amber-200"
+                onClick={() => {
+                  try {
+                    const parsed = JSON.parse(displayedJson);
+                    startReplayPlayer(parsed, selectedReplayTick);
+                  } catch (error) {
+                    setJsonError(error instanceof Error ? error.message : '启动地图回放失败');
+                  }
+                }}
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>启动地图航迹回放播放器</span>
+              </button>
+            </div>
+            <p className="text-slate-500">拖动只改变预览 Tick；支持直接跳转到指定 Tick，或启动顶部地图播放器按倍速连续回放。</p>
           </div>
         )}
+
+        <div className="p-2.5 rounded bg-slate-950/90 border border-slate-800 flex flex-wrap items-center gap-2">
+          <span className="text-cyan-300 font-bold">开局种子与随机散布:</span>
+          <input
+            aria-label="自定义随机种子"
+            type="number"
+            min={0}
+            max={4294967295}
+            value={customSeedInput}
+            onChange={(e) => setCustomSeedInput(e.target.value)}
+            className="w-32 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100"
+          />
+          <label className="flex items-center gap-1 text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={randomizeSpawns}
+              onChange={(e) => setRandomizeSpawns(e.target.checked)}
+            />
+            <span>启用开局位置随机散布</span>
+          </label>
+          <button onClick={applyCustomSeedRestart} className="toolbar-button text-cyan-300">
+            按此种子重新开局
+          </button>
+        </div>
 
         {jsonError && (
           <div className="p-2.5 rounded bg-rose-950/60 border border-rose-500 text-rose-200 flex items-center gap-2">
@@ -138,27 +218,44 @@ export const ScenarioIoModal: React.FC = () => {
           </div>
         )}
 
-        <div className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => {
-              navigator.clipboard?.writeText(displayedJson);
-              setCopySuccess(true);
-              setTimeout(() => setCopySuccess(false), 2000);
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 border border-cyan-500/30 text-cyan-300 cursor-pointer"
-          >
-            {copySuccess ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>已复制到剪贴板</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5" />
-                <span>复制 JSON</span>
-              </>
-            )}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText(displayedJson);
+                setCopySuccess(true);
+                setTimeout(() => setCopySuccess(false), 2000);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 border border-cyan-500/30 text-cyan-300 cursor-pointer"
+            >
+              {copySuccess ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>已复制到剪贴板</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>复制 JSON</span>
+                </>
+              )}
+            </button>
+            <button onClick={downloadJsonFile} className="toolbar-button text-cyan-300">
+              <Download className="w-3.5 h-3.5" />
+              <span>下载文件</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <button onClick={() => fileInputRef.current?.click()} className="toolbar-button text-slate-200">
+              <Upload className="w-3.5 h-3.5" />
+              <span>从文件导入</span>
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <button

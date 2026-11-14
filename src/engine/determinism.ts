@@ -3,10 +3,11 @@ export const DEFAULT_SEED = 20261028;
 export const SNAPSHOT_INTERVAL_TICKS = 240;
 export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypoint', 'updateUnitWaypoint',
   'removeUnitWaypoint', 'clearUnitWaypoints', 'setGroupFormation', 'requestAirRefuel', 'deployCarriedPlatform',
+  'deployCountermeasure', 'cancelUnitReturn',
   'updateUnitDoctrine', 'updateUnitKinematics', 'switchUnitLoadout', 'launchCarrierAircraft',
   'assignUnitMission', 'createMissionFromReferencePoints', 'updateMissionFromReferencePoints',
-  'deleteMission', 'toggleMissionActive', 'moveUnitInSandbox', 'updateScenarioGroup', 'assignUnitGroup',
-  'upsertObjective', 'deleteObjective', 'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
+  'updateMissionDoctrine', 'deleteMission', 'toggleMissionActive', 'moveUnitInSandbox', 'updateScenarioGroup',
+  'assignUnitGroup', 'upsertObjective', 'deleteObjective', 'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
   'executeManualEngage', 'addReferencePoint',
   'removeReferencePoint', 'startSpawnUnitOnMap', 'spawnUnitAtCoordinate'] as const;
 

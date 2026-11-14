@@ -13,11 +13,14 @@ import { SCENARIO_INTERACTIVE_TUTORIAL } from '../../src/scenarios/tutorialScena
 import {
   captureBattleRecording,
   captureBattleSave,
+  captureShareableAarPackage,
   canonicalBattleState,
   replayBattleRecording,
   restoreBattleSave,
   SNAPSHOT_INTERVAL_TICKS,
 } from '../../src/store/battleRecording';
+import { evaluateFireControl } from '../../src/engine/fireControl';
+import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
 import { useWargameStore as store } from '../../src/store/useWargameStore';
 import type { InitialUnitPlacement, TacticalContact, WeaponInFlight } from '../../src/types/wargame';
 
@@ -256,5 +259,97 @@ describe('Multi-stage campaign & interactive tutorial scenario', () => {
     expect(stage2?.carryover.completedStages).toBe(1);
     expect(store.getState().currentScenario.id).toContain('op_east_sea_thunder_2027__campaign_s2');
     expect(store.getState().playerSide).toBe('RED');
+  });
+});
+
+describe('P0/P1 tactical controls, identified-only doctrine & shareable AAR', () => {
+  test('requireIdentifiedForAutoFire blocks automatic fire on classified tracks while allowing manual fire', () => {
+    const shooter = createRuntimeUnitFromPlacement(
+      placement('id_shooter', {
+        platformId: 'j20_mighty_dragon',
+        parentGroupId: 'red_air_cmd',
+        doctrine: { roe: 'free', emconRadar: true, requireIdentifiedForAutoFire: true },
+      }),
+      catalog
+    );
+    const target = createRuntimeUnitFromPlacement(
+      placement('id_target', { side: 'BLUE', platformId: 'f35c_lightning', position: [0.3, 0] }),
+      catalog
+    );
+    const classifiedContact: TacticalContact = {
+      id: 'RED_CONTACT_id_target',
+      actualUnitId: target.id,
+      observerSide: 'RED',
+      targetSide: 'BLUE',
+      domain: 'air',
+      classification: 'classified',
+      displayName: 'BOGEY-101',
+      sidc: target.sidc,
+      estimatedPosition: [...target.position],
+      truePosition: [...target.position],
+      uncertaintyRadiusKm: 0.5,
+      heading: 270,
+      speedKts: 500,
+      altitudeM: 9000,
+      firstDetectedTime: 0,
+      lastDetectedTime: 0,
+      detectedBySources: ['id_shooter'],
+      sourceUnitIds: ['id_shooter'],
+      fireControlSourceIds: ['id_shooter'],
+      threatLevel: 'high',
+    };
+    const mount = shooter.mounts[0];
+    const weapon = catalog.weapons[mount.weaponId];
+    expect(
+      evaluateFireControl(shooter, classifiedContact, mount, weapon, catalog, { id_shooter: shooter, id_target: target }, 0, 'automatic').status
+    ).toBe('blocked');
+    expect(
+      evaluateFireControl(shooter, classifiedContact, mount, weapon, catalog, { id_shooter: shooter, id_target: target }, 0, 'manual').status
+    ).toBe('executable');
+
+    const weaponsInFlight: Record<string, WeaponInFlight> = {};
+    runAutoDefense({
+      units: { id_shooter: shooter, id_target: target },
+      missions: [],
+      contacts: { [classifiedContact.id]: classifiedContact },
+      weaponsInFlight,
+      catalog,
+      nextSimTime: 0,
+      score: emptyScore(),
+      logs: [],
+      autoPauseSettings: pausesOff,
+      triggerPause: () => undefined,
+    });
+    expect(weaponsInFlight).toEqual({});
+  });
+
+  test('deployCountermeasure, cancelUnitReturn and updateMissionDoctrine record deterministically and replay cleanly', () => {
+    store.getState().loadScenario(SCENARIO_INTERACTIVE_TUTORIAL, false, 888);
+    store.setState({ autoPause: pausesOff });
+    store.getState().deployCountermeasure('tut_red_ddg', 'chaff');
+    expect(store.getState().units.tut_red_ddg.countermeasures.chaff).toBe(5);
+    expect(store.getState().units.tut_red_ddg.countermeasureEffect?.chaff).toBe(true);
+
+    store.setState((s) => ({
+      units: {
+        ...s.units,
+        tut_red_j20: { ...s.units.tut_red_j20, status: 'returning', returnReason: 'ammunition' },
+      },
+    }));
+    store.getState().cancelUnitReturn('tut_red_j20');
+    expect(store.getState().units.tut_red_j20.status).toBe('operational');
+
+    store.getState().updateMissionDoctrine('tut_red_aew_mission', {
+      roe: 'tight',
+      requireIdentifiedForAutoFire: true,
+    });
+    expect(store.getState().missions.find((m) => m.id === 'tut_red_aew_mission')?.doctrineOverride).toMatchObject({
+      roe: 'tight',
+      requireIdentifiedForAutoFire: true,
+    });
+
+    const pkg = captureShareableAarPackage();
+    expect(pkg.kind).toBe('aegis_aar_package');
+    expect(pkg.catalogSnapshot.version).toBe(store.getState().catalog.version);
   });
 });

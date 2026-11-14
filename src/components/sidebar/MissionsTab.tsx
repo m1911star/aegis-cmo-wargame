@@ -33,9 +33,12 @@ export const MissionsTab: React.FC = () => {
   const toggleMissionActive = useWargameStore((s) => s.toggleMissionActive);
   const createMissionFromReferencePoints = useWargameStore((s) => s.createMissionFromReferencePoints);
   const updateMissionFromReferencePoints = useWargameStore((s) => s.updateMissionFromReferencePoints);
+  const updateMissionDoctrine = useWargameStore((s) => s.updateMissionDoctrine);
   const deleteMission = useWargameStore((s) => s.deleteMission);
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
+  const addReferencePoint = useWargameStore((s) => s.addReferencePoint);
   const removeReferencePoint = useWargameStore((s) => s.removeReferencePoint);
+  const currentScenario = useWargameStore((s) => s.currentScenario);
 
   const visibleMissions = useMemo(
     () => missions.filter((mission) => activePerspective === 'GOD' || mission.side === activePerspective),
@@ -91,31 +94,60 @@ export const MissionsTab: React.FC = () => {
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">{m.description}</p>
             {(playMode === 'sandbox' || m.side === playerSide) && (
-              <div className="flex gap-2 text-[10px]">
-                <button
-                  onClick={() => {
-                    setEditingMissionId(m.id);
-                    setMissionName(m.name);
-                    setMissionType(m.type);
-                    setMissionRangeKm(m.prosecuteOutsideAreaKm);
-                    setMissionStationRadiusKm(m.stationRadiusKm ?? 20);
-                    setMissionEscortUnitId(m.escortUnitId ?? '');
-                    setSelectedReferencePointIds(m.areaPolygon.map(([longitude, latitude]) =>
-                      editableReferencePoints.find((point) => point.side === m.side &&
-                        point.position[0] === longitude && point.position[1] === latitude)?.id
-                    ).filter((id): id is string => !!id));
-                  }}
-                  className="text-cyan-300 underline hover:text-cyan-100 cursor-pointer"
-                >
-                  编辑任务
-                </button>
-                <button
-                  aria-label={`删除任务 ${m.name}`}
-                  onClick={() => deleteMission(m.id)}
-                  className="text-rose-300 underline hover:text-rose-100 cursor-pointer"
-                >
-                  删除任务
-                </button>
+              <div className="space-y-1.5 pt-1 border-t border-slate-900">
+                <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                  <select
+                    aria-label={`${m.name} 任务 ROE`}
+                    value={m.doctrineOverride?.roe ?? ''}
+                    onChange={(event) => updateMissionDoctrine(m.id, {
+                      roe: (event.target.value || undefined) as 'free' | 'tight' | 'hold' | undefined,
+                    })}
+                    className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
+                  >
+                    <option value="">ROE：沿用单位</option>
+                    <option value="free">ROE：自由开火</option>
+                    <option value="tight">ROE：自卫反导</option>
+                    <option value="hold">ROE：禁止自动</option>
+                  </select>
+                  <button
+                    onClick={() => updateMissionDoctrine(m.id, {
+                      requireIdentifiedForAutoFire: !m.doctrineOverride?.requireIdentifiedForAutoFire,
+                    })}
+                    className={`px-1.5 py-0.5 rounded border cursor-pointer ${
+                      m.doctrineOverride?.requireIdentifiedForAutoFire
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                        : 'bg-slate-900 border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {m.doctrineOverride?.requireIdentifiedForAutoFire ? '仅攻击已识别' : '允许攻击已分类'}
+                  </button>
+                </div>
+                <div className="flex gap-2 text-[10px]">
+                  <button
+                    onClick={() => {
+                      setEditingMissionId(m.id);
+                      setMissionName(m.name);
+                      setMissionType(m.type);
+                      setMissionRangeKm(m.prosecuteOutsideAreaKm);
+                      setMissionStationRadiusKm(m.stationRadiusKm ?? 20);
+                      setMissionEscortUnitId(m.escortUnitId ?? '');
+                      setSelectedReferencePointIds(m.areaPolygon.map(([longitude, latitude]) =>
+                        editableReferencePoints.find((point) => point.side === m.side &&
+                          point.position[0] === longitude && point.position[1] === latitude)?.id
+                      ).filter((id): id is string => !!id));
+                    }}
+                    className="text-cyan-300 underline hover:text-cyan-100 cursor-pointer"
+                  >
+                    编辑任务
+                  </button>
+                  <button
+                    aria-label={`删除任务 ${m.name}`}
+                    onClick={() => deleteMission(m.id)}
+                    className="text-rose-300 underline hover:text-rose-100 cursor-pointer"
+                  >
+                    删除任务
+                  </button>
+                </div>
               </div>
             )}
             <div className="flex items-center justify-between text-[10px] text-cyan-400 pt-1 border-t border-slate-900">
@@ -212,15 +244,38 @@ export const MissionsTab: React.FC = () => {
       </div>
 
       <div className="pt-2 border-t border-slate-800 space-y-2">
-        <div className="flex items-center justify-between px-1">
+        <div className="flex items-center justify-between gap-1 px-1">
           <span className="text-[11px] text-amber-300 font-bold">战术参考点</span>
-          <button
-            onClick={() => setInteractionMode('place_ref_point')}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-[10px] text-amber-200 cursor-pointer"
-          >
-            <MapPin className="w-3 h-3" />
-            <span>添加参考点</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                const [cx, cy] = currentScenario.initialCamera.center;
+                const offsets: [number, number][] = [
+                  [cx - 0.35, cy + 0.25],
+                  [cx + 0.35, cy + 0.25],
+                  [cx, cy - 0.35],
+                ];
+                const beforeIds = new Set(useWargameStore.getState().referencePoints.map((r) => r.id));
+                for (const coord of offsets) addReferencePoint(coord, playerSide);
+                const addedIds = useWargameStore
+                  .getState()
+                  .referencePoints.filter((r) => !beforeIds.has(r.id) && r.side === playerSide)
+                  .map((r) => r.id);
+                setSelectedReferencePointIds(addedIds);
+              }}
+              className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-[10px] text-emerald-200 cursor-pointer"
+              title="一键生成 3 个同阵营参考点并勾选"
+            >
+              一键3点
+            </button>
+            <button
+              onClick={() => setInteractionMode('place_ref_point')}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-[10px] text-amber-200 cursor-pointer"
+            >
+              <MapPin className="w-3 h-3" />
+              <span>添加参考点</span>
+            </button>
+          </div>
         </div>
 
         <div className="space-y-1.5">

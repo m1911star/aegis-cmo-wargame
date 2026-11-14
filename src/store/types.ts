@@ -33,7 +33,7 @@ import type {
   UnitDoctrine,
   WeaponInFlight,
 } from '../types/wargame';
-import type { BattleSnapshot } from './battleRecording';
+import type { BattleRecording, BattleSnapshot } from './battleRecording';
 
 export type MapInteractionMode =
   | 'select'
@@ -106,6 +106,15 @@ export interface WargameStoreState {
   setPlayMode: (mode: PlayMode) => void;
   dismissRiskEngagement: () => void;
   selectLogEntry: (logId: string) => void;
+  hasAutosave: boolean;
+  saveAutosaveCheckpoint: () => void;
+  restoreAutosaveCheckpoint: () => boolean;
+  replayPlayer: { recording: BattleRecording; currentTick: number; isPlaying: boolean; speed: 1 | 5 | 15 } | null;
+  startReplayPlayer: (recording: BattleRecording, startTick?: number) => void;
+  setReplayPlayerPlaying: (playing: boolean) => void;
+  setReplayPlayerSpeed: (speed: 1 | 5 | 15) => void;
+  seekReplayPlayer: (tick: number) => void;
+  exitReplayPlayer: () => void;
 
   // --- 想定与装备目录 ---
   currentScenario: ScenarioDefinition;
@@ -211,6 +220,8 @@ export interface WargameStoreState {
   setGroupFormation: (groupId: string, leaderUnitId?: string, spacingKm?: number) => void;
   requestAirRefuel: (receiverUnitId: string, tankerUnitId: string) => void;
   deployCarriedPlatform: (launcherUnitId: string, platformId: string) => void;
+  deployCountermeasure: (unitId: string, kind: 'chaff' | 'flares' | 'acousticDecoys') => void;
+  cancelUnitReturn: (unitId: string) => void;
   updateUnitDoctrine: (unitId: string, patch: Partial<UnitDoctrine>) => void;
   updateUnitKinematics: (
     unitId: string,
@@ -226,6 +237,7 @@ export interface WargameStoreState {
   assignUnitMission: (unitId: string, missionId: string | undefined) => void;
   createMissionFromReferencePoints: (draft: MissionReferencePointDraft) => void;
   updateMissionFromReferencePoints: (missionId: string, draft: MissionReferencePointDraft) => void;
+  updateMissionDoctrine: (missionId: string, override: Partial<UnitDoctrine>) => void;
   deleteMission: (missionId: string) => void;
   toggleMissionActive: (missionId: string) => void;
   moveUnitInSandbox: (unitId: string, coord: [number, number]) => void;

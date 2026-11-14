@@ -29,6 +29,8 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const startManualEngage = useWargameStore((s) => s.startManualEngage);
   const requestAirRefuel = useWargameStore((s) => s.requestAirRefuel);
   const deployCarriedPlatform = useWargameStore((s) => s.deployCarriedPlatform);
+  const cancelUnitReturn = useWargameStore((s) => s.cancelUnitReturn);
+  const launchCarrierAircraft = useWargameStore((s) => s.launchCarrierAircraft);
   const [selectedTankerId, setSelectedTankerId] = useState('');
 
   const units = useWargameStore((s) => s.units);
@@ -113,25 +115,80 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
     );
   }
 
+  const hpPct = Math.max(0, Math.min(100, Math.round((selectedUnit.hp / Math.max(1, selectedUnit.maxHp)) * 100)));
+  const fuelPct = selectedUnit.maxFuelSec > 0
+    ? Math.max(0, Math.min(100, Math.round((selectedUnit.fuelRemainingSec / selectedUnit.maxFuelSec) * 100)))
+    : 100;
+  const totalAmmo = selectedUnit.mounts.reduce((sum, mount) => sum + mount.currentAmmo, 0);
+  const readyHangarSlot = selectedUnit.hangar.find((slot) => slot.readyAirframes > 0 && slot.cooldownRemainingSec <= 0);
+  const isDestroyed = selectedUnit.hp <= 0 || selectedUnit.status === 'destroyed';
+
   return (
     <aside className="z-20 w-full h-full tactical-panel border-l border-cyan-500/25 flex flex-col overflow-y-auto p-3 space-y-4 inspector-content">
-      <div className="flex items-center gap-3 p-2.5 rounded bg-slate-950/85 border border-cyan-500/35">
-        <div className="w-12 h-12 flex items-center justify-center shrink-0" dangerouslySetInnerHTML={{ __html: symbolSvgHtml }} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between">
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-              selectedUnit.side === 'RED'
-                ? 'bg-rose-500/25 text-rose-300 border border-rose-500/40'
-                : 'bg-sky-500/25 text-sky-300 border border-sky-500/40'
-            }`}>
-              {selectedUnit.callsign}
-            </span>
-            <span className="text-[10px] text-cyan-400 uppercase">
-              {domainLabels[selectedUnit.domain]} · {statusLabels[selectedUnit.status]}
-            </span>
+      <div className="sticky top-0 z-10 -mx-1 px-2.5 py-2 rounded bg-slate-950/95 border border-cyan-500/40 shadow-lg space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 flex items-center justify-center shrink-0" dangerouslySetInnerHTML={{ __html: symbolSvgHtml }} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                selectedUnit.side === 'RED'
+                  ? 'bg-rose-500/25 text-rose-300 border border-rose-500/40'
+                  : 'bg-sky-500/25 text-sky-300 border border-sky-500/40'
+              }`}>
+                {selectedUnit.callsign}
+              </span>
+              <span className="text-[10px] text-cyan-300 uppercase">
+                {domainLabels[selectedUnit.domain]} · {statusLabels[selectedUnit.status]}
+              </span>
+            </div>
+            <div className="text-xs font-bold text-slate-100 truncate mt-1">{selectedUnit.name}</div>
           </div>
-          <div className="text-sm font-bold text-slate-100 leading-relaxed mt-2">{selectedUnit.name}</div>
         </div>
+
+        <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
+          <div>
+            <div className="flex justify-between text-slate-300"><span>耐久</span><span>{hpPct}%</span></div>
+            <div className="h-1 bg-slate-800 rounded overflow-hidden mt-0.5">
+              <div className={`h-full ${hpPct > 50 ? 'bg-emerald-400' : hpPct > 25 ? 'bg-amber-400' : 'bg-rose-500'}`} style={{ width: `${hpPct}%` }} />
+            </div>
+          </div>
+          <div>
+            <div className="flex justify-between text-slate-300"><span>燃油</span><span>{selectedUnit.domain === 'air' ? `${fuelPct}%` : '常驻'}</span></div>
+            <div className="h-1 bg-slate-800 rounded overflow-hidden mt-0.5">
+              <div className="h-full bg-cyan-400" style={{ width: `${fuelPct}%` }} />
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-slate-400">总余弹</div>
+            <div className="text-amber-300 font-bold">{totalAmmo} 发</div>
+          </div>
+        </div>
+
+        {(readyHangarSlot || selectedUnit.status === 'returning') && !isDestroyed && (
+          <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/80">
+            {readyHangarSlot && (
+              <button
+                onClick={() => launchCarrierAircraft(selectedUnit.id, readyHangarSlot.slotId, readyHangarSlot.selectedLoadoutId)}
+                className="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[10px] cursor-pointer"
+              >
+                快捷出动 {readyHangarSlot.squadronName.slice(0, 12)}
+              </button>
+            )}
+            {selectedUnit.status === 'returning' && (
+              <button
+                disabled={selectedUnit.fuelRemainingSec <= 0}
+                onClick={() => cancelUnitReturn(selectedUnit.id)}
+                className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-[10px] cursor-pointer"
+                title={selectedUnit.fuelRemainingSec <= 0 ? '燃油耗尽不可取消返航' : '中断返航并恢复人工接管'}
+              >
+                取消返航
+              </button>
+            )}
+          </div>
+        )}
+        {isDestroyed && (
+          <div className="text-[10px] text-rose-300 font-bold">该单位已被摧毁，所有作战与挂载控制已锁定。</div>
+        )}
       </div>
 
       <div className="text-xs p-2 rounded bg-slate-950/80 border border-slate-800 space-y-1">

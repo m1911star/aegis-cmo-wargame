@@ -22,7 +22,7 @@
   body {
     margin: 0;
     padding: 0;
-    background-color: #050811;
+    background-color: var(--hud-bg);
     color: #e2e8f0;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
     user-select: none;
@@ -46,8 +46,8 @@
 }
 
 .tactical-panel {
-  background: linear-gradient(180deg, rgba(9, 17, 34, 0.92) 0%, rgba(5, 10, 22, 0.95) 100%);
-  border: 1px solid rgba(34, 211, 238, 0.22);
+  background: linear-gradient(180deg, var(--hud-panel) 0%, rgba(5, 10, 22, 0.96) 100%);
+  border: 1px solid var(--hud-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(34, 211, 238, 0.14);
   backdrop-filter: blur(12px);
 }
@@ -144,8 +144,8 @@ button svg, summary svg { flex-shrink: 0; }
 .auto-pause-banner span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .workspace { position: relative; flex: 1; display: flex; min-height: 0; overflow: hidden; }
 .workspace-pane { flex: none; min-height: 0; }
-.order-pane { width: clamp(264px, 21vw, 304px); }
-.inspector-pane { width: clamp(320px, 25vw, 356px); }
+.order-pane { width: clamp(244px, 18vw, 276px); }
+.inspector-pane { width: clamp(292px, 21vw, 328px); }
 .workspace-pane > aside { width: 100%; box-shadow: none; }
 .workspace-pane > aside > * { flex-shrink: 0; }
 .inspector-content { font-family: inherit; }

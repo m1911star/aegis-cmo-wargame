@@ -835,7 +835,7 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       speedKts: 12,
       waypoints: [[125.6, 21.75]],
       assignedMissionId: 'mission_red_asuw_hunt',
-      doctrine: { roe: 'free', emconRadar: false, emconSonar: false, salvoSize: 2 },
+      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, emconRadar: false, emconSonar: false, salvoSize: 2 },
     },
     {
       id: 'red_093b_wolf2',
@@ -851,7 +851,7 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       speedKts: 12,
       waypoints: [[125.8, 21.25]],
       assignedMissionId: 'mission_red_asuw_hunt',
-      doctrine: { roe: 'free', emconRadar: false, emconSonar: false, salvoSize: 2 },
+      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, emconRadar: false, emconSonar: false, salvoSize: 2 },
     },
     {
       id: 'red_kj500_south',
@@ -894,7 +894,7 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       heading: 90,
       speedKts: 450,
       waypoints: [[123.4, 21.2]],
-      doctrine: { roe: 'free', emconRadar: false, emconSonar: false, salvoSize: 4 },
+      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, emconRadar: false, emconSonar: false, salvoSize: 4 },
     },
 
     // --- BLUE ---
@@ -997,7 +997,7 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       heading: 275,
       speedKts: 15,
       waypoints: [[124.3, 21.75]],
-      doctrine: { roe: 'free', emconRadar: false, emconSonar: false, salvoSize: 2 },
+      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, emconRadar: false, emconSonar: false, salvoSize: 2 },
     },
   ],
   missions: [
@@ -1019,7 +1019,11 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
   ],
   referencePoints: [
     { id: 'rp_bashi_east', name: 'RP-1 巴士海峡东出口', side: 'RED', position: [123.2, 21.5], locked: true },
-    { id: 'rp_csg_pim', name: 'RP-2 航母预想机动中心 (PIM)', side: 'BLUE', position: [125.8, 21.6], locked: false },
+    { id: 'rp_bashi_north', name: 'RP-2 巴士北翼伏击点', side: 'RED', position: [124.5, 22.2], locked: false },
+    { id: 'rp_bashi_south', name: 'RP-3 巴士南翼伏击点', side: 'RED', position: [124.5, 20.9], locked: false },
+    { id: 'rp_csg_pim', name: 'RP-4 航母预想机动中心 (PIM)', side: 'BLUE', position: [125.8, 21.6], locked: false },
+    { id: 'rp_csg_north', name: 'RP-5 航母北翼防空点', side: 'BLUE', position: [125.3, 22.1], locked: false },
+    { id: 'rp_csg_south', name: 'RP-6 航母南翼反潜点', side: 'BLUE', position: [125.3, 21.1], locked: false },
   ],
   events: [
     {

@@ -257,6 +257,8 @@ export function advanceWeaponPhysics({
         targetUnitId: targetUnit.id,
         weaponId: weapon.id,
         quantity: 1,
+        aarShooterId: missile.shooterId,
+        aarOutcome: 'softkill',
       });
       delete weaponsInFlight[missile.id];
       continue;
@@ -287,6 +289,8 @@ export function advanceWeaponPhysics({
         targetUnitId: targetUnit.id,
         weaponId: weapon.id,
         quantity: 1,
+        aarShooterId: missile.shooterId,
+        aarOutcome: 'intercept',
       });
     } else if (rng() < effectivePk) {
       const damage = Math.round(
@@ -329,6 +333,8 @@ export function advanceWeaponPhysics({
           targetUnitId: targetUnit.id,
           weaponId: weapon.id,
           quantity: 1,
+          aarShooterId: missile.shooterId,
+          aarOutcome: 'destroy',
         });
         triggerPause(
           autoPauseSettings.onUnitHitOrDestroyed,
@@ -368,6 +374,8 @@ export function advanceWeaponPhysics({
           weaponId: weapon.id,
           quantity: 1,
           aarSide: missile.side,
+          aarShooterId: missile.shooterId,
+          aarOutcome: 'hit',
         });
         triggerPause(
           autoPauseSettings.onUnitHitOrDestroyed,
@@ -384,6 +392,24 @@ export function advanceWeaponPhysics({
         label: 'MISSED (TERMINAL)',
         createdAtSimTime: nextSimTime,
         radiusKm: 2.5,
+      });
+      logs.push({
+        id: `log_miss_${nextSimTime}_${missile.id}`,
+        simTime: nextSimTime,
+        side: missile.side,
+        category: 'EVENT',
+        severity: 'info',
+        title: `${missile.name} 末段脱靶`,
+        message: `${missile.shooterName} 发射的 ${missile.name} 末段未能命中目标。`,
+        position: [...targetUnit.position],
+        unitId: missile.shooterId,
+        targetUnitId: targetUnit.id,
+        weaponId: weapon.id,
+        quantity: 1,
+        aarType: 'miss',
+        aarSide: missile.side,
+        aarShooterId: missile.shooterId,
+        aarOutcome: 'miss',
       });
     }
 

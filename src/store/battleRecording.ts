@@ -1,4 +1,5 @@
 import { COMMAND_ACTIONS, FIXED_DT_SEC, SNAPSHOT_INTERVAL_TICKS, type RecordedCommand } from '../engine/determinism';
+import { summarizeAar } from '../engine/aar';
 import { compileScenario } from '../scenarios/compileScenario';
 import type { ScenarioDefinition } from '../types/wargame';
 import { useWargameStore, type WargameStoreState } from './useWargameStore';
@@ -6,8 +7,9 @@ import { useWargameStore, type WargameStoreState } from './useWargameStore';
 export const BATTLE_RECORDING_VERSION = 2 as const;
 export const BATTLE_SAVE_VERSION = 1 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
-export const RULESET_VERSION = '2026.11-ruleset-16';
+export const RULESET_VERSION = '2026.11-ruleset-17';
 export const SCENARIO_SCHEMA_VERSION = 8;
+export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
 
 export type BattleSnapshot = ReturnType<typeof canonicalBattleState>;
 
@@ -92,6 +94,25 @@ export function captureBattleSave(): BattleSaveState {
     commandHistory: state.commandHistory,
     snapshot,
     digest: computeCanonicalDigest(snapshot),
+  });
+}
+
+export function captureShareableAarPackage() {
+  const state = useWargameStore.getState();
+  return structuredClone({
+    kind: 'aegis_aar_package' as const,
+    version: 1 as const,
+    rulesetVersion: RULESET_VERSION,
+    catalogVersion: state.catalog.version,
+    scenarioId: state.currentScenario.id,
+    scenarioTitle: state.currentScenario.title,
+    tick: state.tick,
+    simTime: state.simTime,
+    battleResult: state.battleResult,
+    score: state.score,
+    summary: summarizeAar(state.aar),
+    aar: state.aar,
+    catalogSnapshot: state.catalog,
   });
 }
 

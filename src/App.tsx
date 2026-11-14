@@ -9,10 +9,21 @@ import { TacticalModals } from './components/TacticalModals';
 import { TacticalMapCanvas } from './map/TacticalMapCanvas';
 import { RiskEngagementDialog } from './components/FireControlDiagnostics';
 import { TutorialChecklistOverlay } from './components/TutorialChecklistOverlay';
+import { ActionFeedbackToast } from './components/ActionFeedbackToast';
+import { ReplayPlayerBar } from './components/ReplayPlayerBar';
+import { BattleResultOverlay } from './components/modals/BattleResultOverlay';
 
 export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
+  const [debriefDismissed, setDebriefDismissed] = useState(false);
+
+  const battleResult = useWargameStore((s) => s.battleResult);
+  const replayPlayer = useWargameStore((s) => s.replayPlayer);
+
+  useEffect(() => {
+    if (!battleResult) setDebriefDismissed(false);
+  }, [battleResult]);
 
   useEffect(() => {
     const narrow = window.matchMedia('(max-width: 900px)');
@@ -216,6 +227,7 @@ export default function App() {
         </div>
         <main className="flex-1 h-full relative min-w-0">
           <TacticalMapCanvas />
+          <ReplayPlayerBar />
           <TutorialChecklistOverlay />
         </main>
         <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!rightOpen}>
@@ -228,6 +240,10 @@ export default function App() {
 
       {/* 模态框：战役简报、装备数据库、实时兵力投放、想定 JSON 序列化 */}
       <TacticalModals />
+      {battleResult && !replayPlayer && !debriefDismissed && (
+        <BattleResultOverlay onDismiss={() => setDebriefDismissed(true)} />
+      )}
+      <ActionFeedbackToast />
       <RiskEngagementDialog />
     </div>
   );

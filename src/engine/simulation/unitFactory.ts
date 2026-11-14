@@ -65,6 +65,7 @@ export function createRuntimeUnitFromPlacement(
     minimumWeaponReserve: 0,
     automaticTargetDomains: ['air', 'surface', 'subsurface', 'land'] as RuntimeUnit['doctrine']['automaticTargetDomains'],
     minimumAutomaticThreat: 'medium' as const,
+    requireIdentifiedForAutoFire: false,
     ...(placement.doctrine || {}),
   };
 
