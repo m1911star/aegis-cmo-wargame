@@ -8,6 +8,7 @@ import type {
   ScoreLedger,
   TacticalContact,
   TacticalMission,
+  WeaponInFlight,
 } from '../../types/wargame';
 import { isRouteAllowed } from '../environment';
 import { getBearingDeg, getDistanceKm } from '../geometry';
@@ -19,6 +20,7 @@ const KTS_TO_KMPH = 1.852;
 export type UnitPhysicsContext = {
   units: Record<string, RuntimeUnit>;
   previousContacts: Record<string, TacticalContact>;
+  weaponsInFlight?: Record<string, WeaponInFlight>;
   missions: TacticalMission[];
   catalog: EquipmentCatalog;
   environment?: ScenarioEnvironment;
@@ -32,6 +34,7 @@ export type UnitPhysicsContext = {
 export function advanceUnitPhysics({
   units,
   previousContacts,
+  weaponsInFlight = {},
   missions,
   catalog,
   environment,
@@ -135,7 +138,8 @@ export function advanceUnitPhysics({
       nextSimTime,
       dtSec,
       score,
-      logs
+      logs,
+      weaponsInFlight
     );
     if (!isActiveUnit(unit)) continue;
 

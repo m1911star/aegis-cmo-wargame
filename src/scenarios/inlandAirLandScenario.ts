@@ -222,7 +222,7 @@ export const SCENARIO_INLAND_AIR_LAND: ScenarioDefinition = {
       heading: 270,
       speedKts: 560,
       assignedMissionId: 'inland_blue_cap',
-      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, emconRadar: false, salvoSize: 2 },
+      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, bvrTactics: 'crank_pump', emconRadar: false, salvoSize: 2 },
     },
     {
       id: 'inland_blue_e2d',

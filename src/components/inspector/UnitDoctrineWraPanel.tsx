@@ -162,6 +162,19 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
             />
           </div>
         )}
+        {unit.domain === 'air' && !['awacs', 'tanker', 'decoy'].includes(unit.category) && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+            <span className="text-foreground">BVR 偏置/脱离 (Crank/Pump)</span>
+            <Switch
+              aria-label="BVR偏置脱离战术"
+              disabled={unitDead}
+              checked={unit.doctrine.bvrTactics === 'crank_pump'}
+              onCheckedChange={(checked) =>
+                updateUnitDoctrine(unit.id, { bvrTactics: checked ? 'crank_pump' : 'standard' })
+              }
+            />
+          </div>
+        )}
       </div>
 
       {platformSpec.availableLoadoutIds && platformSpec.availableLoadoutIds.length > 0 && (

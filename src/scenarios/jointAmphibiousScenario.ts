@@ -295,7 +295,7 @@ export const SCENARIO_JOINT_AMPHIBIOUS_ASSAULT: ScenarioDefinition = {
       heading: 270,
       speedKts: 560,
       assignedMissionId: 'joint_blue_cap',
-      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, emconRadar: false, salvoSize: 2 },
+      doctrine: { roe: 'tight', requireIdentifiedForAutoFire: true, bvrTactics: 'crank_pump', emconRadar: false, salvoSize: 2 },
     },
   ],
   missions: [

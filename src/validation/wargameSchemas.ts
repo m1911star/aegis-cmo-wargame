@@ -30,6 +30,7 @@ const doctrine = object({
   minimumAutomaticThreat: optional(oneOf(['low', 'medium', 'high', 'critical'])),
   requireIdentifiedForAutoFire: optional(boolean),
   shootAndScoot: optional(boolean),
+  bvrTactics: optional(oneOf(['standard', 'crank_pump'])),
 });
 const mount = object({ mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0) });
 const sensor = object({

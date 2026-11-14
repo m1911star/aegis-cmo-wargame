@@ -226,6 +226,7 @@ export interface UnitDoctrine {
   minimumAutomaticThreat: ThreatLevel;
   requireIdentifiedForAutoFire?: boolean;
   shootAndScoot?: boolean;
+  bvrTactics?: 'standard' | 'crank_pump';
 }
 
 export interface RuntimeWeaponMount extends PlatformMountTemplate {

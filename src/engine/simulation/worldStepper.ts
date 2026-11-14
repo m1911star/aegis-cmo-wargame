@@ -177,6 +177,7 @@ function stepWorkingWorldInPlace(
   advanceUnitPhysics({
     units,
     previousContacts: world.contacts,
+    weaponsInFlight,
     missions,
     catalog,
     environment: world.environment,

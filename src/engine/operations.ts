@@ -1,7 +1,8 @@
 import * as turf from '@turf/turf';
-import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScoreLedger, TacticalContact } from '../types/wargame';
+import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
-import { getDistanceKm } from './geometry';
+import { guidanceProfile } from './fireControl';
+import { getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 
 export function effectiveDoctrine(unit: RuntimeUnit, missions: MissionDefinition[]) {
@@ -63,7 +64,7 @@ function enqueueRecoveredSortie(
 export function updateUnitOperations(
   unit: RuntimeUnit, units: Record<string, RuntimeUnit>, contacts: Record<string, TacticalContact>,
   missions: MissionDefinition[], catalog: EquipmentCatalog, simTime: number, dtSec: number,
-  score: ScoreLedger, logs: CombatLogEntry[]
+  score: ScoreLedger, logs: CombatLogEntry[], weaponsInFlight: Record<string, WeaponInFlight> = {}
 ) {
   const mission = missions.find((m) => m.id === unit.assignedMissionId && m.isActive);
   const targetDomains: RuntimeUnit['domain'][] = mission?.type === 'aaw_patrol' ? ['air']
@@ -192,7 +193,44 @@ export function updateUnitOperations(
   ).sort((a, b) => getDistanceKm(unit.position, a.estimatedPosition) - getDistanceKm(unit.position, b.estimatedPosition) || a.id.localeCompare(b.id));
   const target = candidates.find((contact) => contact.id === unit.missionTargetId) ?? candidates[0];
   if (target) {
+    const doctrine = effectiveDoctrine(unit, missions);
     const inFlight = Object.values(unit.weaponUsage).some((usage) => usage.cooldownUntil > simTime);
+    if (unit.domain === 'air' && doctrine.bvrTactics === 'crank_pump') {
+      const outbound = Object.values(weaponsInFlight).filter(
+        (m) => m.shooterId === unit.id && !m.isIntercepted && m.targetType !== 'missile'
+      );
+      const guidingMidcourse = outbound.some((m) => {
+        const w = catalog.weapons[m.weaponId];
+        return !!w && guidanceProfile(w).receivesUpdates && !!m.seekerState?.startsWith('midcourse');
+      });
+      const config = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
+      if (guidingMidcourse) {
+        const bearingToTarget = getBearingDeg(unit.position, target.estimatedPosition);
+        const crankSign = unit.id.charCodeAt(unit.id.length - 1) % 2 === 0 ? 1 : -1;
+        const crankBearing = (bearingToTarget + crankSign * 50 + 360) % 360;
+        const crankPoint = turf.destination(unit.position, 24, crankBearing, { units: 'kilometers' })
+          .geometry.coordinates as [number, number];
+        unit.missionTargetId = target.id;
+        unit.missionState = 'engaging';
+        unit.waypoints = [{
+          position: crankPoint,
+          speedKts: Math.max(120, Math.round(config.cruiseSpeedKts * 0.82)),
+        }];
+        return;
+      }
+      if (inFlight) {
+        const awayBearing = (getBearingDeg(target.estimatedPosition, unit.position) + 360) % 360;
+        const pumpPoint = turf.destination(unit.position, 22, awayBearing, { units: 'kilometers' })
+          .geometry.coordinates as [number, number];
+        unit.missionTargetId = undefined;
+        unit.missionState = 'egress';
+        unit.waypoints = [{
+          position: pumpPoint,
+          speedKts: Math.round(config.maxSpeedKts * 0.9),
+        }];
+        return;
+      }
+    }
     if (!inFlight) {
       unit.missionTargetId = target.id;
       unit.missionState = 'engaging';

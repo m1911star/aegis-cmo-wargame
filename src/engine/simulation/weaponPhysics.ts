@@ -11,6 +11,7 @@ import type {
   VictoryConditionRule,
   WeaponInFlight,
 } from '../../types/wargame';
+import { resolveMissileTerrainInteraction } from '../environment';
 import { advanceGuidance, computeMissileEnergyFactor, seekerCanObserve } from '../guidance';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { creditDamage } from '../objectives';
@@ -174,6 +175,7 @@ export function advanceWeaponPhysics({
           )
         : undefined
       : missile.targetType === 'unit' ? contacts[`${missile.side}_CONTACT_${missile.targetId}`] : undefined;
+    const beforePos: [number, number] = [...missile.position];
     const flight = advanceGuidance(
       missile,
       weapon,
@@ -185,6 +187,42 @@ export function advanceWeaponPhysics({
       target,
       environment
     );
+    const terrainCheck = resolveMissileTerrainInteraction(
+      beforePos,
+      missile.position,
+      missile.launchPosition,
+      target ? target.position : missile.aimPosition,
+      missile.altitudeM,
+      weapon,
+      environment
+    );
+    if (terrainCheck.impacted) {
+      explosions.push({
+        id: `exp_terrain_${nextSimTime}_${missile.id}`,
+        position: [...missile.position],
+        type: 'intercept',
+        side: missile.side,
+        label: `触山坠毁 ${missile.name}`,
+        radiusKm: 2,
+        createdAtSimTime: nextSimTime,
+      });
+      logs.push({
+        id: `log_terrain_hit_${nextSimTime}_${missile.id}`,
+        simTime: nextSimTime,
+        side: missile.side,
+        category: 'EVENT',
+        severity: 'warning',
+        title: `${missile.name} 撞击高地山脊坠毁`,
+        message: `飞行高度 (${Math.round(missile.altitudeM)}m) 低于 ${terrainCheck.ridgeName ?? '高地山脊'} (${terrainCheck.ridgeElevationM ?? 0}m)，弹体触山损毁。`,
+        position: [...missile.position],
+        weaponId: weapon.id,
+      });
+      delete weaponsInFlight[missile.id];
+      continue;
+    }
+    if (terrainCheck.terrainFollowAltitudeM !== undefined) {
+      missile.altitudeM = terrainCheck.terrainFollowAltitudeM;
+    }
     if (flight.expired) {
       logs.push({
         id: `log_lost_${nextSimTime}_${missile.id}`,

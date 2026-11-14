@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
 import { launchCarrierSortie } from '../../src/engine/carrierOperations';
-import { hasRadarLineOfSight } from '../../src/engine/environment';
+import { hasRadarLineOfSight, resolveMissileTerrainInteraction } from '../../src/engine/environment';
+import { getBearingDeg } from '../../src/engine/geometry';
 import { evaluateAreaControlStatus, evaluateObjectives } from '../../src/engine/objectives';
-import { recoverySolution } from '../../src/engine/operations';
+import { recoverySolution, updateUnitOperations } from '../../src/engine/operations';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
 import { createRuntimeUnitFromPlacement, stepSimulationWorld } from '../../src/engine/simulationEngine';
 import { SCENARIO_INLAND_AIR_LAND } from '../../src/scenarios/inlandAirLandScenario';
@@ -281,6 +282,163 @@ describe('Joint sea-land-air & inland air-land mechanics', () => {
     for (const batch of [1, 15, 60]) {
       expect(replayBattleRecording(recording, batch)).toEqual(expected);
     }
+  });
+
+  test('concave mountain ridges occlude cross-valley re-entry LOS, low-alt missiles impact ridges while LACM terrain-follows, and fighters Crank/Pump', () => {
+    // 1. Concave U-shaped ridge with a central spur at x=0.5: observer on west arm (x=0.05) and target on east arm (x=0.95)
+    // separated by two valleys and a central high ridge arm inside the same polygon
+    const wShapedMassif = {
+      landPolygons: [
+        {
+          id: 'w_massif',
+          name: 'W-Ridge',
+          elevationM: 1200,
+          areaPolygon: [
+            [0, 0], [1, 0], [1, 0.5], [0.9, 0.5], [0.9, 0.1],
+            [0.6, 0.1], [0.6, 0.5], [0.4, 0.5], [0.4, 0.1],
+            [0.1, 0.1], [0.1, 0.5], [0, 0.5],
+          ] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    // Ray at y=0.35 starts inside west arm [0..0.1], exits into valley [0.1..0.4], re-enters central ridge [0.4..0.6], exits [0.6..0.9], enters east arm [0.9..1.0]
+    expect(hasRadarLineOfSight([0.05, 0.35], 200, 15, [0.95, 0.35], 200, wShapedMassif)).toBe(false);
+    // High-altitude AWACS clears the 1200m central ridge
+    expect(hasRadarLineOfSight([0.05, 0.35], 9000, 0, [0.95, 0.35], 200, wShapedMassif)).toBe(true);
+    // Coastal/plateau radar looking monotonically outward into open valley [0.25, 0.35] does NOT self-occlude
+    expect(hasRadarLineOfSight([0.05, 0.35], 100, 15, [0.25, 0.35], 100, wShapedMassif)).toBe(true);
+
+    // 2. Low-altitude non-LACM impacts intervening ridge, while LACM climbs +60m AGL via TERCOM
+    const ridgeEnv = {
+      landPolygons: [
+        {
+          id: 'high_ridge',
+          name: 'High Ridge',
+          elevationM: 900,
+          areaPolygon: [[0.4, -0.2], [0.6, -0.2], [0.6, 0.2], [0.4, 0.2]] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    const ashmHit = resolveMissileTerrainInteraction(
+      [0.35, 0],
+      [0.45, 0],
+      [0, 0],
+      [1.0, 0],
+      25,
+      catalog.weapons.yj18_ashm,
+      ridgeEnv
+    );
+    expect(ashmHit.impacted).toBe(true);
+
+    const lacmClimb = resolveMissileTerrainInteraction(
+      [0.35, 0],
+      [0.45, 0],
+      [0, 0],
+      [1.0, 0],
+      80,
+      catalog.weapons.akd98_lasm,
+      ridgeEnv
+    );
+    expect(lacmClimb.impacted).toBe(false);
+    expect(lacmClimb.terrainFollowAltitudeM).toBe(960);
+
+    // 3. BVR Crank (during midcourse datalink) -> Pump (after Pitbull terminal lock)
+    const fighter = createRuntimeUnitFromPlacement(
+      {
+        id: 'bvr_f1',
+        name: 'J-20',
+        callsign: 'DRAGON-1',
+        side: 'RED',
+        platformId: 'j20_mighty_dragon',
+        parentGroupId: 'g',
+        position: [0, 0],
+        heading: 90,
+        assignedMissionId: 'cap_m',
+        doctrine: { roe: 'free', bvrTactics: 'crank_pump' },
+      },
+      catalog
+    );
+    fighter.weaponUsage = { pl15_aam: { expended: 2, cooldownUntil: 20000 } };
+    const bandit = createRuntimeUnitFromPlacement(
+      { id: 'bandit', name: 'F-35', callsign: 'VIPER', side: 'BLUE', platformId: 'f35c_lightning', parentGroupId: 'g2', position: [0.5, 0], heading: 270 },
+      catalog
+    );
+    const track: TacticalContact = {
+      id: 'RED_CONTACT_bandit',
+      actualUnitId: bandit.id,
+      observerSide: 'RED',
+      targetSide: 'BLUE',
+      domain: 'air',
+      classification: 'identified',
+      displayName: 'VIPER',
+      sidc: bandit.sidc,
+      estimatedPosition: [0.5, 0],
+      truePosition: [0.5, 0],
+      uncertaintyRadiusKm: 0.4,
+      heading: 270,
+      speedKts: 550,
+      altitudeM: 9000,
+      firstDetectedTime: 0,
+      lastDetectedTime: 5000,
+      detectedBySources: ['DRAGON-1'],
+      sourceUnitIds: ['bvr_f1'],
+      fireControlSourceIds: ['bvr_f1'],
+      threatLevel: 'high',
+    };
+    const capMission = {
+      id: 'cap_m',
+      name: 'CAP',
+      side: 'RED' as const,
+      type: 'aaw_patrol' as const,
+      isActive: true,
+      areaPolygon: [[-0.2, -0.2], [0.8, -0.2], [0.8, 0.2], [-0.2, 0.2]] as [number, number][],
+      prosecuteOutsideAreaKm: 40,
+      description: '',
+    };
+    const outbound: WeaponInFlight = {
+      id: 'm_bvr',
+      weaponId: 'pl15_aam',
+      name: 'PL-15',
+      side: 'RED',
+      shooterId: fighter.id,
+      shooterName: fighter.callsign,
+      targetId: bandit.id,
+      targetType: 'unit',
+      position: [0.2, 0],
+      launchPosition: [0, 0],
+      trail: [],
+      altitudeM: 9500,
+      heading: 90,
+      speedKts: 2600,
+      distanceRemainingKm: 30,
+      maxRangeKm: 200,
+      traveledKm: 20,
+      basePk: 0.78,
+      warheadDamage: 80,
+      seekerState: 'midcourse_datalink',
+    };
+
+    // Midcourse datalink active -> CRANK (~50 deg offset from 90 deg, reduced speed)
+    fighter.nextMissionDecisionTime = 0;
+    updateUnitOperations(fighter, { bvr_f1: fighter, bandit }, { [track.id]: track }, [capMission], catalog, 6000, 1, emptyScore(), [], { m_bvr: outbound });
+    expect(fighter.missionState).toBe('engaging');
+    const crankLegBearing = getBearingDeg(fighter.position, fighter.waypoints[0].position);
+    const crankAngleDiff = Math.abs(((crankLegBearing - 90 + 540) % 360) - 180);
+    expect(crankAngleDiff).toBeGreaterThan(42);
+    expect(crankAngleDiff).toBeLessThan(58);
+    expect(fighter.waypoints[0].speedKts!).toBeLessThan(catalog.platforms.j20_mighty_dragon.cruiseSpeedKts);
+
+    // Missile enters terminal_locked (Pitbull) -> PUMP (~270 deg cold away at dash speed)
+    outbound.seekerState = 'terminal_locked';
+    track.lastDetectedTime = 12000;
+    fighter.nextMissionDecisionTime = 0;
+    updateUnitOperations(fighter, { bvr_f1: fighter, bandit }, { [track.id]: track }, [capMission], catalog, 12000, 1, emptyScore(), [], { m_bvr: outbound });
+    expect(fighter.missionState).toBe('egress');
+    const pumpBearing = getBearingDeg(fighter.position, fighter.waypoints[0].position);
+    expect(Math.abs(((pumpBearing - 270 + 540) % 360) - 180)).toBeLessThan(5);
+    expect(fighter.waypoints[0].speedKts!).toBeGreaterThan(catalog.platforms.j20_mighty_dragon.cruiseSpeedKts);
   });
 
   test('joint amphibious and pure inland air-land scenarios compile, isolate domains, and replay deterministically', () => {

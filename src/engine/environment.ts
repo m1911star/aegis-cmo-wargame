@@ -1,5 +1,5 @@
 import * as turf from '@turf/turf';
-import type { Domain, ScenarioEnvironment } from '../types/wargame';
+import type { Domain, ScenarioEnvironment, WeaponSpec } from '../types/wargame';
 import { getDistanceKm } from './geometry';
 
 export const EMPTY_ENVIRONMENT: ScenarioEnvironment = {
@@ -74,22 +74,30 @@ export function hasRadarLineOfSight(
 
   for (const polygon of elevated) {
     const feature = polygonFeature(polygon.areaPolygon);
-    // Do not self-occlude a coastal/island unit standing inside its own simplified polygon.
-    if (
-      turf.booleanPointInPolygon(observerPos, feature) ||
-      turf.booleanPointInPolygon(targetPos, feature)
-    ) {
-      continue;
-    }
     if (!turf.booleanIntersects(ray, feature)) continue;
-    const terrainHeightM = polygon.elevationM ?? 0;
+
+    const inPoly: boolean[] = new Array(samples + 1);
+    inPoly[0] = turf.booleanPointInPolygon(observerPos, feature);
+    inPoly[samples] = turf.booleanPointInPolygon(targetPos, feature);
     for (let i = 1; i < samples; i++) {
       const t = i / samples;
       const samplePos: [number, number] = [
         observerPos[0] + (targetPos[0] - observerPos[0]) * t,
         observerPos[1] + (targetPos[1] - observerPos[1]) * t,
       ];
-      if (!turf.booleanPointInPolygon(samplePos, feature)) continue;
+      inPoly[i] = turf.booleanPointInPolygon(samplePos, feature);
+    }
+
+    // Samples continuously inside an endpoint's own plateau do not self-occlude;
+    // only polygon segments entered AFTER exiting into open air/valley count as intervening ridges.
+    const firstExit = inPoly.indexOf(false);
+    if (firstExit === -1) continue;
+    const lastExit = inPoly.lastIndexOf(false);
+
+    const terrainHeightM = polygon.elevationM ?? 0;
+    for (let i = Math.max(1, firstExit + 1); i < lastExit; i++) {
+      if (!inPoly[i]) continue;
+      const t = i / samples;
       const d1 = t * totalKm;
       const d2 = (1 - t) * totalKm;
       const earthBulgeM = ((d1 * d2) / (2 * EFFECTIVE_EARTH_RADIUS_KM)) * 1000;
@@ -99,6 +107,70 @@ export function hasRadarLineOfSight(
   }
 
   return true;
+}
+
+export interface MissileTerrainOutcome {
+  impacted: boolean;
+  ridgeName?: string;
+  ridgeElevationM?: number;
+  terrainFollowAltitudeM?: number;
+}
+
+export function resolveMissileTerrainInteraction(
+  fromPos: [number, number],
+  toPos: [number, number],
+  launchPos: [number, number],
+  targetPos: [number, number] | undefined,
+  missileAltM: number,
+  weapon: WeaponSpec,
+  environment?: ScenarioEnvironment
+): MissileTerrainOutcome {
+  if (missileAltM < 0 || weapon.guidance === 'hypersonic_glide') {
+    return { impacted: false };
+  }
+  const elevated = (environment?.landPolygons ?? []).filter((p) => (p.elevationM ?? 0) > 0);
+  if (elevated.length === 0) {
+    return { impacted: false };
+  }
+
+  // Terrain-following Land-Attack Cruise Missiles (TERCOM) climb 60m AGL over ridges
+  if (weapon.category === 'lacm') {
+    let maxElev = 0;
+    for (const poly of elevated) {
+      const feature = polygonFeature(poly.areaPolygon);
+      if (turf.booleanPointInPolygon(toPos, feature) || turf.booleanPointInPolygon(fromPos, feature)) {
+        maxElev = Math.max(maxElev, poly.elevationM ?? 0);
+      }
+    }
+    const desiredAltM = maxElev > 0 ? Math.max(weapon.cruiseAltitudeM, maxElev + 60) : weapon.cruiseAltitudeM;
+    return { impacted: false, terrainFollowAltitudeM: desiredAltM };
+  }
+
+  const segment =
+    fromPos[0] === toPos[0] && fromPos[1] === toPos[1]
+      ? undefined
+      : turf.lineString([fromPos, toPos]);
+
+  for (const poly of elevated) {
+    const terrainHeightM = poly.elevationM ?? 0;
+    if (missileAltM >= terrainHeightM) continue;
+    const feature = polygonFeature(poly.areaPolygon);
+    if (turf.booleanPointInPolygon(launchPos, feature)) continue;
+    if (targetPos && turf.booleanPointInPolygon(targetPos, feature)) continue;
+
+    const hit =
+      turf.booleanPointInPolygon(toPos, feature) ||
+      (!!segment && turf.booleanIntersects(segment, feature));
+    if (hit) {
+      return {
+        impacted: true,
+        ridgeName: poly.name,
+        ridgeElevationM: terrainHeightM,
+      };
+    }
+  }
+
+  return { impacted: false };
 }
 
 export const MAX_AMPHIBIOUS_STANDOFF_KM = 18;
