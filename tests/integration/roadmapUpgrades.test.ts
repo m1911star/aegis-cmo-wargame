@@ -442,4 +442,42 @@ describe('P0/P1 tactical controls, identified-only doctrine & shareable AAR', ()
       onUnitHitOrDestroyed: false,
     });
   });
+
+  test('multi-unit box selection enforces authority and batch waypoint/doctrine commands replay deterministically', () => {
+    store.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 909);
+    store.setState({ autoPause: pausesOff });
+
+    // Unauthorized enemy units are filtered out of multi-selection in command mode
+    store.getState().selectMultipleUnits(['red_j20_alpha', 'red_055_nanchang', 'blue_ddg125_lucas']);
+    expect(store.getState().selectedUnitIds).toEqual(['red_055_nanchang', 'red_j20_alpha']);
+
+    store.getState().toggleUnitSelection('red_054b_screen');
+    expect(store.getState().selectedUnitIds).toEqual(['red_054b_screen', 'red_055_nanchang', 'red_j20_alpha']);
+
+    // Atomic batch doctrine & waypoint commands
+    const seqBefore = store.getState().commandSequence;
+    store.getState().batchUpdateUnitDoctrine(store.getState().selectedUnitIds, {
+      roe: 'hold',
+      emconRadar: false,
+      salvoSize: 4,
+    });
+    expect(store.getState().commandSequence).toBe(seqBefore + 1);
+    for (const id of ['red_054b_screen', 'red_055_nanchang', 'red_j20_alpha']) {
+      expect(store.getState().units[id].doctrine).toMatchObject({ roe: 'hold', emconRadar: false, salvoSize: 4 });
+    }
+
+    store.getState().batchAppendUnitWaypoint(['red_054b_screen', 'red_055_nanchang'], [123.5, 26.5], true);
+    expect(store.getState().units.red_054b_screen.waypoints[0].position).toEqual([123.5, 26.5]);
+    expect(store.getState().units.red_055_nanchang.waypoints[0].position).toEqual([123.5, 26.5]);
+
+    store.getState().stepSingleTick(8);
+    store.getState().batchClearUnitWaypoints(['red_054b_screen', 'red_055_nanchang']);
+    expect(store.getState().units.red_054b_screen.waypoints).toEqual([]);
+
+    const expected = canonicalBattleState();
+    const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
+    for (const batch of [1, 15, 60]) {
+      expect(replayBattleRecording(recording, batch)).toEqual(expected);
+    }
+  });
 });

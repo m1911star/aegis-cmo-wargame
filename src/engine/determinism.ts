@@ -1,10 +1,11 @@
 export const FIXED_DT_SEC = 0.25;
 export const DEFAULT_SEED = 20261028;
 export const SNAPSHOT_INTERVAL_TICKS = 240;
-export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypoint', 'updateUnitWaypoint',
-  'removeUnitWaypoint', 'clearUnitWaypoints', 'setGroupFormation', 'requestAirRefuel', 'deployCarriedPlatform',
+export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypoint', 'batchAppendUnitWaypoint',
+  'updateUnitWaypoint', 'removeUnitWaypoint', 'clearUnitWaypoints', 'batchClearUnitWaypoints',
+  'setGroupFormation', 'requestAirRefuel', 'deployCarriedPlatform',
   'deployCountermeasure', 'cancelUnitReturn',
-  'updateUnitDoctrine', 'updateUnitKinematics', 'switchUnitLoadout', 'launchCarrierAircraft',
+  'updateUnitDoctrine', 'batchUpdateUnitDoctrine', 'updateUnitKinematics', 'switchUnitLoadout', 'launchCarrierAircraft',
   'assignUnitMission', 'createMissionFromReferencePoints', 'updateMissionFromReferencePoints',
   'updateMissionDoctrine', 'deleteMission', 'toggleMissionActive', 'moveUnitInSandbox', 'updateScenarioGroup',
   'assignUnitGroup', 'upsertObjective', 'deleteObjective', 'createAreaEventFromReferencePoints', 'deleteScenarioEvent',

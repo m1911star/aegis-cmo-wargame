@@ -195,12 +195,18 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     setPlayerSide: (side: 'RED' | 'BLUE') => {
       const s = get();
       if (s.tick !== 0 || s.timeScale !== 0) return;
-      set({ playerSide: side, activePerspective: side, selectedContactId: null,
-        selectedUnitId: Object.values(s.units).find((u) => u.side === side)?.id ?? null });
+      const firstUnitId = Object.values(s.units).find((u) => u.side === side)?.id ?? null;
+      set({
+        playerSide: side,
+        activePerspective: side,
+        selectedContactId: null,
+        selectedUnitId: firstUnitId,
+        selectedUnitIds: firstUnitId ? [firstUnitId] : [],
+      });
     },
     setPlayMode: (mode: WargameStoreState['playMode']) => set({
       playMode: mode, timeScale: 0, pendingRiskEngagement: null,
-      selectedUnitId: null, selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide,
+      selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide,
     }),
     dismissRiskEngagement: () => set({ pendingRiskEngagement: null }),
     selectLogEntry: (id: string) => {
@@ -245,6 +251,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     score: initialBoot.score,
 
     selectedUnitId: initialBoot.selectedUnitId,
+    selectedUnitIds: initialBoot.selectedUnitId ? [initialBoot.selectedUnitId] : [],
     selectedContactId: null,
     interactionMode: 'select' as const,
     pendingWeaponIdForEngage: null,
@@ -298,6 +305,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           logs: boot.logs,
           score: boot.score,
           selectedUnitId: boot.selectedUnitId,
+          selectedUnitIds: boot.selectedUnitId ? [boot.selectedUnitId] : [],
           selectedContactId: null,
           interactionMode: 'select',
           cameraFlyToRequest: {
@@ -597,7 +605,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     setActivePerspective: (p: WargameStoreState['activePerspective']) =>
       set({
         activePerspective: p,
-        selectedUnitId: null, selectedContactId: null, pendingRiskEngagement: null,
+        selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, pendingRiskEngagement: null,
         interactionMode: 'select',
       }),
 
@@ -612,10 +620,48 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       const s = get(); const unit = unitId ? s.units[unitId] : undefined;
       if (unit && unit.side !== s.playerSide && s.playMode !== 'sandbox') {
         const contact = contactForUnit(s.contacts, s.playerSide, unit.id);
-        set({ selectedUnitId: null, selectedContactId: contact?.id ?? null, interactionMode: 'select' });
+        set({ selectedUnitId: null, selectedUnitIds: [], selectedContactId: contact?.id ?? null, interactionMode: 'select' });
         return;
       }
-      set({ selectedUnitId: unit?.id ?? null, selectedContactId: null, interactionMode: 'select' });
+      set({
+        selectedUnitId: unit?.id ?? null,
+        selectedUnitIds: unit ? [unit.id] : [],
+        selectedContactId: null,
+        interactionMode: 'select',
+      });
+    },
+
+    selectMultipleUnits: (unitIds: string[], additive = false) => {
+      const s = get();
+      const base = additive ? s.selectedUnitIds : [];
+      const merged = [...new Set([...base, ...unitIds])]
+        .filter((id) => {
+          const u = s.units[id];
+          return !!u && u.hp > 0 && u.status !== 'destroyed' && u.status !== 'recovered' && canCommandUnit(s, u);
+        })
+        .sort((a, b) => a.localeCompare(b));
+      set({
+        selectedUnitIds: merged,
+        selectedUnitId: merged[0] ?? null,
+        selectedContactId: null,
+        interactionMode: 'select',
+      });
+    },
+
+    toggleUnitSelection: (unitId: string) => {
+      const s = get();
+      const unit = s.units[unitId];
+      if (!unit || !canCommandUnit(s, unit)) return;
+      const exists = s.selectedUnitIds.includes(unitId);
+      const next = exists
+        ? s.selectedUnitIds.filter((id) => id !== unitId)
+        : [...s.selectedUnitIds, unitId].sort((a, b) => a.localeCompare(b));
+      set({
+        selectedUnitIds: next,
+        selectedUnitId: next.includes(s.selectedUnitId ?? '') ? s.selectedUnitId : next[0] ?? null,
+        selectedContactId: null,
+        interactionMode: 'select',
+      });
     },
 
     selectContact: (contactId: string | null) => {

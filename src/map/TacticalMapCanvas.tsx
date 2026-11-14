@@ -29,11 +29,18 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   const [cursorCoord, setCursorCoord] = useState<[number, number]>([124.2, 26.2]);
   const rulerRef = useRef<{ start?: [number, number]; end?: [number, number] }>({});
   const [rulerMeasurement, setRulerMeasurement] = useState<{ distanceKm: number; bearingDeg: number } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const suppressNextClickRef = useRef(false);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
+  const selectedCount = useWargameStore((s) => s.selectedUnitIds.length);
   // The map layers subscribe imperatively; React only needs the stable banner label.
   const selectedUnitCallsign = useWargameStore((s) =>
-    s.selectedUnitId ? s.units[s.selectedUnitId]?.callsign : undefined
+    s.selectedUnitIds.length > 1
+      ? `${s.selectedUnitIds.length} 个编组单元`
+      : s.selectedUnitId
+        ? s.units[s.selectedUnitId]?.callsign
+        : undefined
   );
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
 
@@ -50,6 +57,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       bearing: initialScenario.initialCamera.bearing ?? 0,
       minZoom: 2,
       maxZoom: 18,
+      boxZoom: false,
       attributionControl: { compact: false },
       style: createOfflineBasemap(),
     });
@@ -250,6 +258,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         referencePoints: state.referencePoints,
         activePerspective: state.activePerspective,
         selectedUnitId: state.selectedUnitId,
+        selectedUnitIds: state.selectedUnitIds,
         selectedContactId: state.selectedContactId,
         mapLayers: state.mapLayers,
         catalog: state.catalog,
@@ -315,6 +324,10 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     });
 
     map.on('click', (e) => {
+      if (suppressNextClickRef.current) {
+        suppressNextClickRef.current = false;
+        return;
+      }
       const state = useWargameStore.getState();
       const clickedCoord: [number, number] = [
         Number(e.lngLat.lng.toFixed(4)),
@@ -342,10 +355,16 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         return;
       }
 
-      // 模式 A: F3 规划航路点
-      if (state.interactionMode === 'plot_waypoint' && state.selectedUnitId) {
-        state.appendUnitWaypoint(state.selectedUnitId, clickedCoord, false);
-        return;
+      // 模式 A: F3 规划航路点（支持单选与多选编组同步标绘）
+      if (state.interactionMode === 'plot_waypoint') {
+        if (state.selectedUnitIds.length > 1) {
+          state.batchAppendUnitWaypoint(state.selectedUnitIds, clickedCoord, false);
+          return;
+        }
+        if (state.selectedUnitId) {
+          state.appendUnitWaypoint(state.selectedUnitId, clickedCoord, false);
+          return;
+        }
       }
 
       // 模式 B: 放置参考点
@@ -384,12 +403,80 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         }
 
         if (props.entityType === 'unit') {
-          state.selectUnit(props.id);
+          if (e.originalEvent.shiftKey) {
+            state.toggleUnitSelection(props.id);
+          } else {
+            state.selectUnit(props.id);
+          }
         } else if (props.entityType === 'contact') {
           state.selectContact(props.id);
         }
       }
     });
+
+    // Shift+拖拽 或 框选模式 (box_select) 矩形框选多单元
+    const containerEl = mapContainerRef.current;
+    let boxStart: { x: number; y: number; additive: boolean } | null = null;
+    const onPointerDown = (ev: MouseEvent) => {
+      if (ev.button !== 0) return;
+      const mode = useWargameStore.getState().interactionMode;
+      if (!ev.shiftKey && mode !== 'box_select') return;
+      const rect = containerEl.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      boxStart = { x, y, additive: ev.shiftKey };
+      map.dragPan.disable();
+      setSelectionBox({ x1: x, y1: y, x2: x, y2: y });
+    };
+    const onPointerMove = (ev: MouseEvent) => {
+      if (!boxStart) return;
+      const rect = containerEl.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, ev.clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
+      setSelectionBox({ x1: boxStart.x, y1: boxStart.y, x2: x, y2: y });
+    };
+    const onPointerUp = (ev: MouseEvent) => {
+      if (!boxStart) return;
+      const start = boxStart;
+      boxStart = null;
+      map.dragPan.enable();
+      setSelectionBox(null);
+      const rect = containerEl.getBoundingClientRect();
+      const endX = Math.max(0, Math.min(rect.width, ev.clientX - rect.left));
+      const endY = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
+      if (Math.hypot(endX - start.x, endY - start.y) < 6) return;
+
+      suppressNextClickRef.current = true;
+      const minX = Math.min(start.x, endX);
+      const maxX = Math.max(start.x, endX);
+      const minY = Math.min(start.y, endY);
+      const maxY = Math.max(start.y, endY);
+      const sw = map.unproject([minX, maxY]);
+      const ne = map.unproject([maxX, minY]);
+      const minLng = Math.min(sw.lng, ne.lng);
+      const maxLng = Math.max(sw.lng, ne.lng);
+      const minLat = Math.min(sw.lat, ne.lat);
+      const maxLat = Math.max(sw.lat, ne.lat);
+
+      const s = useWargameStore.getState();
+      const matched = Object.values(s.units)
+        .filter(
+          (u) =>
+            u.hp > 0 &&
+            u.status !== 'destroyed' &&
+            u.status !== 'recovered' &&
+            (s.playMode === 'sandbox' || u.side === s.playerSide) &&
+            u.position[0] >= minLng &&
+            u.position[0] <= maxLng &&
+            u.position[1] >= minLat &&
+            u.position[1] <= maxLat
+        )
+        .map((u) => u.id);
+      s.selectMultipleUnits(matched, start.additive);
+    };
+    containerEl.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
 
     // 右键快速结束航线规划模式
     map.on('contextmenu', (e) => {
@@ -412,6 +499,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         referencePoints: s.referencePoints,
         activePerspective: s.activePerspective,
         selectedUnitId: s.selectedUnitId,
+        selectedUnitIds: s.selectedUnitIds,
         selectedContactId: s.selectedContactId,
         mapLayers: s.mapLayers,
         environment: s.environment,
@@ -447,6 +535,9 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     resizeObserver.observe(mapContainerRef.current);
 
     return () => {
+      containerEl.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
       resizeObserver.disconnect();
       unsubscribeData();
       unsubscribeCamera();
@@ -469,6 +560,17 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       />
 
       {basemapState.active === 'offline' && <div className="pointer-events-none absolute inset-0 tactical-scanlines opacity-55" />}
+      {selectionBox && (
+        <div
+          className="pointer-events-none absolute z-30 border border-cyan-400 bg-cyan-400/15 rounded-xs shadow-lg"
+          style={{
+            left: Math.min(selectionBox.x1, selectionBox.x2),
+            top: Math.min(selectionBox.y1, selectionBox.y2),
+            width: Math.abs(selectionBox.x2 - selectionBox.x1),
+            height: Math.abs(selectionBox.y2 - selectionBox.y1),
+          }}
+        />
+      )}
 
       {/* Compact floating map tools: ruler + basemap status badge */}
       <div
@@ -486,6 +588,18 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         >
           {basemapState.active === 'offline' ? '离线底图' : 'OSM底图'}
         </span>
+        <button
+          aria-pressed={interactionMode === 'box_select'}
+          onClick={() => setInteractionMode(interactionMode === 'box_select' ? 'select' : 'box_select')}
+          title="框选多单元（也可按住 Shift 拖拽地图）"
+          className={`px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+            interactionMode === 'box_select'
+              ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-bold'
+              : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200'
+          }`}
+        >
+          框选{selectedCount > 1 ? ` (${selectedCount})` : ''}
+        </button>
         <button
           aria-pressed={interactionMode === 'measure'}
           onClick={() => setInteractionMode(interactionMode === 'measure' ? 'select' : 'measure')}
@@ -514,6 +628,11 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
           }}
         >
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          {interactionMode === 'box_select' && (
+            <span className="text-cyan-200">
+              [多单元框选模式] 在态势图拖拽矩形框选本方多个作战单元进行批量指控 · 也可随时按住 Shift 拖拽
+            </span>
+          )}
           {interactionMode === 'plot_waypoint' && (
             <span>
               [F3 航路点标绘模式] 点击海图追加机动航路点 ({selectedUnitCallsign}

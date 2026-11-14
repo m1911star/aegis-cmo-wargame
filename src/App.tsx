@@ -154,7 +154,14 @@ export default function App() {
         }
       } else if (e.key === 'F9') {
         e.preventDefault();
-        if (state.selectedUnitId) {
+        if (state.selectedUnitIds.length > 1) {
+          const primary = state.units[state.selectedUnitId ?? state.selectedUnitIds[0]];
+          if (primary) {
+            state.batchUpdateUnitDoctrine(state.selectedUnitIds, {
+              emconRadar: !primary.doctrine.emconRadar,
+            });
+          }
+        } else if (state.selectedUnitId) {
           const u = state.units[state.selectedUnitId];
           if (u) {
             state.updateUnitDoctrine(u.id, {

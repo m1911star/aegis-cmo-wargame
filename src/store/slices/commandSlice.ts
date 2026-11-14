@@ -132,6 +132,97 @@ export function createCommandSlice(set: StoreSet) {
         };
       }),
 
+    batchAppendUnitWaypoint: (
+      unitIds: string[],
+      coord: [number, number],
+      replaceAll = false
+    ) =>
+      set((s) => {
+        if (!Array.isArray(unitIds) || unitIds.length === 0 || !Array.isArray(coord) || coord.length !== 2 ||
+            !Number.isFinite(coord[0]) || Math.abs(coord[0]) > 180 ||
+            !Number.isFinite(coord[1]) || Math.abs(coord[1]) > 90) return s;
+        const uniqueSorted = [...new Set(unitIds)].sort((a, b) => a.localeCompare(b));
+        const nextUnits = { ...s.units };
+        let appliedCount = 0;
+        let skippedCount = 0;
+        let logSide: SideId = s.playerSide;
+
+        for (const id of uniqueSorted) {
+          const unit = s.units[id];
+          if (!canCommandUnit(s, unit)) continue;
+          const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
+          const leg: RouteLeg = { position: [...coord] };
+          const nextWaypoints = replaceAll ? [leg] : [...unit.waypoints, leg];
+          if (!routeLegsAllowed(unit, nextWaypoints, s.environment)) {
+            skippedCount += 1;
+            continue;
+          }
+          const nextHeading = nextWaypoints.length > 0
+            ? getBearingDeg(unit.position, nextWaypoints[0].position) : unit.heading;
+          const nextSpeed = unit.speedKts < 1 && configuration.maxSpeedKts > 0
+            ? configuration.cruiseSpeedKts : unit.speedKts;
+          nextUnits[id] = {
+            ...unit,
+            waypoints: nextWaypoints,
+            navigationMode: 'manual',
+            missionTargetId: undefined,
+            formationLeaderId: undefined,
+            formationOffset: undefined,
+            heading: nextHeading,
+            speedKts: nextSpeed,
+            targetSpeedKts: Math.max(unit.targetSpeedKts, nextSpeed),
+          };
+          logSide = unit.side;
+          appliedCount += 1;
+        }
+
+        if (appliedCount === 0) {
+          if (skippedCount > 0) {
+            emitActionFeedback('warning', '所选编组航路均被海陆边界阻挡，未更新航点');
+          }
+          return s;
+        }
+        if (skippedCount > 0) {
+          emitActionFeedback('info', `已为 ${appliedCount} 个单元标绘航点（${skippedCount} 个因海陆域不匹配跳过）`);
+        }
+        const batchLog: CombatLogEntry = {
+          id: `log_batch_wp_${s.tick}_${s.commandSequence}`,
+          simTime: s.simTime,
+          side: logSide,
+          category: 'DOCTRINE',
+          severity: 'info',
+          title: `[编组批量机动] ${appliedCount} 个单元同步更新航路点`,
+          message: `目标坐标 [${coord[0].toFixed(2)}°E, ${coord[1].toFixed(2)}°N]${skippedCount > 0 ? `（跳过 ${skippedCount} 个跨域受阻单元）` : ''}。`,
+          position: [...coord],
+        };
+        return {
+          units: nextUnits,
+          logs: [batchLog, ...s.logs].slice(0, 250),
+        };
+      }),
+
+    batchClearUnitWaypoints: (unitIds: string[]) =>
+      set((s) => {
+        if (!Array.isArray(unitIds) || unitIds.length === 0) return s;
+        const uniqueSorted = [...new Set(unitIds)].sort((a, b) => a.localeCompare(b));
+        const nextUnits = { ...s.units };
+        let changed = false;
+        for (const id of uniqueSorted) {
+          const unit = s.units[id];
+          if (!canCommandUnit(s, unit)) continue;
+          nextUnits[id] = {
+            ...unit,
+            waypoints: [],
+            navigationMode: 'manual',
+            missionTargetId: undefined,
+            formationLeaderId: undefined,
+            formationOffset: undefined,
+          };
+          changed = true;
+        }
+        return changed ? { units: nextUnits } : s;
+      }),
+
     setGroupFormation: (groupId: string, leaderUnitId?: string, spacingKm = 10) => set((s) => {
       if (s.battleResult || !Number.isFinite(spacingKm) || spacingKm < 1 || spacingKm > 100) return s;
       const members = Object.values(s.units).filter((unit) => unit.parentGroupId === groupId &&
@@ -385,6 +476,56 @@ export function createCommandSlice(set: StoreSet) {
             },
           },
           logs: [newLog, ...s.logs].slice(0, 250),
+        };
+      }),
+
+    batchUpdateUnitDoctrine: (unitIds: string[], patch: Partial<UnitDoctrine>) =>
+      set((s) => {
+        if (!Array.isArray(unitIds) || unitIds.length === 0) return s;
+        if (patch.salvoSize !== undefined && (!Number.isSafeInteger(patch.salvoSize) || patch.salvoSize < 1) ||
+            patch.automaticFireRangeFraction !== undefined && (!Number.isFinite(patch.automaticFireRangeFraction) ||
+              patch.automaticFireRangeFraction < 0.05 || patch.automaticFireRangeFraction > 1) ||
+            patch.minimumWeaponReserve !== undefined && (!Number.isSafeInteger(patch.minimumWeaponReserve) || patch.minimumWeaponReserve < 0) ||
+            patch.minimumAutomaticThreat !== undefined && !THREAT_LEVELS.includes(patch.minimumAutomaticThreat) ||
+            patch.bvrTactics !== undefined && !['standard', 'crank_pump'].includes(patch.bvrTactics) ||
+            patch.automaticTargetDomains !== undefined && (!Array.isArray(patch.automaticTargetDomains) ||
+              new Set(patch.automaticTargetDomains).size !== patch.automaticTargetDomains.length ||
+              patch.automaticTargetDomains.some((domain) => !TARGET_DOMAINS.includes(domain)))) return s;
+
+        const uniqueSorted = [...new Set(unitIds)].sort((a, b) => a.localeCompare(b));
+        const nextUnits = { ...s.units };
+        let appliedCount = 0;
+        let logSide: SideId = s.playerSide;
+
+        for (const id of uniqueSorted) {
+          const unit = s.units[id];
+          if (!canCommandUnit(s, unit)) continue;
+          nextUnits[id] = {
+            ...unit,
+            doctrine: {
+              ...unit.doctrine,
+              ...patch,
+              automaticTargetDomains: patch.automaticTargetDomains
+                ? [...patch.automaticTargetDomains]
+                : [...unit.doctrine.automaticTargetDomains],
+            },
+          };
+          logSide = unit.side;
+          appliedCount += 1;
+        }
+        if (appliedCount === 0) return s;
+        const batchLog: CombatLogEntry = {
+          id: `log_batch_doc_${s.tick}_${s.commandSequence}`,
+          simTime: s.simTime,
+          side: logSide,
+          category: 'DOCTRINE',
+          severity: 'info',
+          title: `[编组批量条令] 已同步调整 ${appliedCount} 个作战单元交战/电磁管控`,
+          message: `批量指令已原子下发至所选 ${appliedCount} 个单元。`,
+        };
+        return {
+          units: nextUnits,
+          logs: [batchLog, ...s.logs].slice(0, 250),
         };
       }),
 

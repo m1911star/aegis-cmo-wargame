@@ -39,6 +39,7 @@ import type { BattleRecording, BattleSnapshot } from './battleRecording';
 
 export type MapInteractionMode =
   | 'select'
+  | 'box_select'
   | 'plot_waypoint'
   | 'manual_engage'
   | 'place_ref_point'
@@ -152,6 +153,7 @@ export interface WargameStoreState {
 
   // --- C2 指挥台交互状态 ---
   selectedUnitId: string | null;
+  selectedUnitIds: string[];
   selectedContactId: string | null;
   interactionMode: MapInteractionMode;
   pendingWeaponIdForEngage: string | null;
@@ -199,6 +201,8 @@ export interface WargameStoreState {
   clearAutoPauseBanner: () => void;
 
   selectUnit: (unitId: string | null) => void;
+  selectMultipleUnits: (unitIds: string[], additive?: boolean) => void;
+  toggleUnitSelection: (unitId: string) => void;
   selectContact: (contactId: string | null) => void;
   setInteractionMode: (mode: MapInteractionMode) => void;
   startManualEngage: (weaponId?: string, salvoCount?: number) => void;
@@ -221,15 +225,22 @@ export interface WargameStoreState {
     speedKts?: number,
     altitudeM?: number
   ) => void;
+  batchAppendUnitWaypoint: (
+    unitIds: string[],
+    coord: [number, number],
+    replaceAll?: boolean
+  ) => void;
   updateUnitWaypoint: (unitId: string, index: number, patch: Partial<RouteLeg>) => void;
   removeUnitWaypoint: (unitId: string, index: number) => void;
   clearUnitWaypoints: (unitId: string) => void;
+  batchClearUnitWaypoints: (unitIds: string[]) => void;
   setGroupFormation: (groupId: string, leaderUnitId?: string, spacingKm?: number) => void;
   requestAirRefuel: (receiverUnitId: string, tankerUnitId: string) => void;
   deployCarriedPlatform: (launcherUnitId: string, platformId: string) => void;
   deployCountermeasure: (unitId: string, kind: 'chaff' | 'flares' | 'acousticDecoys') => void;
   cancelUnitReturn: (unitId: string) => void;
   updateUnitDoctrine: (unitId: string, patch: Partial<UnitDoctrine>) => void;
+  batchUpdateUnitDoctrine: (unitIds: string[], patch: Partial<UnitDoctrine>) => void;
   updateUnitKinematics: (
     unitId: string,
     speedKts?: number,

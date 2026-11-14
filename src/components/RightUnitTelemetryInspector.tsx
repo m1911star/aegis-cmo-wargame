@@ -22,6 +22,10 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const rawUnit = useWargameStore((state) =>
     state.selectedUnitId ? state.units[state.selectedUnitId] ?? null : null
   );
+  const selectedUnitIds = useWargameStore((s) => s.selectedUnitIds);
+  const selectUnit = useWargameStore((s) => s.selectUnit);
+  const batchUpdateUnitDoctrine = useWargameStore((s) => s.batchUpdateUnitDoctrine);
+  const batchClearUnitWaypoints = useWargameStore((s) => s.batchClearUnitWaypoints);
   const rawContact = useWargameStore((state) =>
     state.selectedContactId ? state.contacts[state.selectedContactId] ?? null : null
   );
@@ -192,6 +196,98 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
       </div>
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 inspector-content">
+        {selectedUnitIds.length > 1 && (
+          <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-400/35 space-y-2 text-[11px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-cyan-300 font-semibold">
+                编组多选批量指控 ({selectedUnitIds.length} 个单元)
+              </span>
+              <button
+                type="button"
+                onClick={() => selectUnit(selectedUnit.id)}
+                className="text-[10px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+              >
+                仅留当前
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {selectedUnitIds.map((uid) => {
+                const u = units[uid];
+                if (!u) return null;
+                return (
+                  <button
+                    key={uid}
+                    type="button"
+                    onClick={() => selectUnit(uid)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] border cursor-pointer ${
+                      uid === selectedUnit.id
+                        ? 'bg-cyan-400/20 border-cyan-400 text-cyan-100 font-semibold'
+                        : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {u.callsign}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-border/60">
+              <Button
+                size="xs"
+                variant={interactionMode === 'plot_waypoint' ? 'default' : 'tactical'}
+                onClick={() => setInteractionMode(interactionMode === 'plot_waypoint' ? 'select' : 'plot_waypoint')}
+              >
+                [F3] 批量标绘航点
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => batchClearUnitWaypoints(selectedUnitIds)}
+              >
+                清空编组航线
+              </Button>
+            </div>
+            <div className="grid grid-cols-3 gap-1 pt-1">
+              <Button
+                size="xs"
+                variant="destructive"
+                onClick={() => batchUpdateUnitDoctrine(selectedUnitIds, { roe: 'free' })}
+              >
+                全员自由开火
+              </Button>
+              <Button
+                size="xs"
+                variant="warning"
+                onClick={() => batchUpdateUnitDoctrine(selectedUnitIds, { roe: 'tight' })}
+              >
+                全员自卫反导
+              </Button>
+              <Button
+                size="xs"
+                variant="success"
+                onClick={() => batchUpdateUnitDoctrine(selectedUnitIds, { roe: 'hold' })}
+              >
+                全员停火
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => batchUpdateUnitDoctrine(selectedUnitIds, { emconRadar: true })}
+              >
+                全员开雷达
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => batchUpdateUnitDoctrine(selectedUnitIds, { emconRadar: false, emconSonar: false, emconJamming: false })}
+              >
+                全员电磁静默
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="text-[11px] bg-card/85 border border-border space-y-1.5 text-foreground leading-relaxed">
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted-foreground">能力状态</span>

@@ -65,4 +65,14 @@ test('pure tactical projection builds every GeoJSON family without exposing hidd
     ],
   });
   expect(jointProjection.controlZones).toHaveLength(1);
+
+  const multiSelectProjection = projectTacticalState({
+    ...input,
+    selectedUnitIds: ['red_j20_alpha', 'red_055_nanchang'],
+  });
+  const selectedIcons = multiSelectProjection.units
+    .filter((f) => f.properties?.entityType === 'unit' && String(f.properties?.icon).endsWith('__SELECTED'))
+    .map((f) => f.properties?.id)
+    .sort();
+  expect(selectedIcons).toEqual(['red_055_nanchang', 'red_j20_alpha']);
 });

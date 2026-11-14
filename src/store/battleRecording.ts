@@ -174,6 +174,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
       timeScale: 0,
       pendingSimSeconds: 0,
       selectedUnitId: null,
+      selectedUnitIds: [],
       selectedContactId: null,
       pendingRiskEngagement: null,
       pendingSpawnConfig: null,

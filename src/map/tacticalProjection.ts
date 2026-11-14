@@ -37,6 +37,7 @@ export type TacticalProjectionInput = {
   referencePoints: ReferencePoint[];
   activePerspective: ActivePerspective;
   selectedUnitId: string | null;
+  selectedUnitIds?: readonly string[];
   selectedContactId: string | null;
   mapLayers: ProjectionLayers;
   catalog: EquipmentCatalog;
@@ -63,9 +64,11 @@ export type TacticalProjection = {
 export function projectTacticalState(input: TacticalProjectionInput): TacticalProjection {
   const {
     units, contacts, weaponsInFlight, explosions, missions, referencePoints,
-    activePerspective, selectedUnitId, selectedContactId, mapLayers, catalog, simTime,
+    activePerspective, selectedUnitId, selectedUnitIds, selectedContactId, mapLayers, catalog, simTime,
     environment, objectives,
   } = input;
+  const selectedSet = new Set<string>(selectedUnitIds ?? (selectedUnitId ? [selectedUnitId] : []));
+  if (selectedUnitId) selectedSet.add(selectedUnitId);
 
   const terrainRidges: GeoJSON.Feature[] = (environment?.landPolygons ?? [])
     .filter((polygon) => (polygon.elevationM ?? 0) > 0 && polygon.areaPolygon.length >= 3)
@@ -119,7 +122,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
 
   const envelopeFeatures: GeoJSON.Feature[] = [];
   for (const unit of visibleUnits) {
-    const isSelected = unit.id === selectedUnitId;
+    const isSelected = selectedSet.has(unit.id);
     const spec = catalog.platforms[unit.platformId];
     if (!spec) continue;
     const configuration = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
@@ -182,7 +185,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
   const waypointNodes: GeoJSON.Feature[] = [];
   if (mapLayers.showWaypoints) for (const unit of visibleUnits) {
     if (unit.waypoints.length) {
-      waypointLines.push({ type: 'Feature', properties: { unitId: unit.id, side: unit.side, isSelected: unit.id === selectedUnitId },
+      waypointLines.push({ type: 'Feature', properties: { unitId: unit.id, side: unit.side, isSelected: selectedSet.has(unit.id) },
         geometry: { type: 'LineString', coordinates: [unit.position, ...unit.waypoints.map((waypoint) => waypoint.position)] } });
       unit.waypoints.forEach((waypoint, index) => waypointNodes.push({
         type: 'Feature', properties: { unitId: unit.id,
@@ -219,7 +222,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
     const altitude = unit.domain === 'air' ? `FL${Math.round(unit.altitudeM / 30.48).toString().padStart(3, '0')}`
       : unit.domain === 'subsurface' ? `${Math.round(unit.altitudeM)}m` : `${Math.round(unit.speedKts)}kt`;
     return { type: 'Feature', properties: { id: unit.id, entityType: 'unit', callsign: unit.callsign,
-      name: unit.name, side: unit.side, icon: `${unit.sidc}__${unit.id === selectedUnitId ? 'SELECTED' : 'NORMAL'}`,
+      name: unit.name, side: unit.side, icon: `${unit.sidc}__${selectedSet.has(unit.id) ? 'SELECTED' : 'NORMAL'}`,
       subLabel: `${unit.callsign} [${altitude}]`, hpPct: Math.round(unit.hp / unit.maxHp * 100),
       emconStr: unit.doctrine.emconRadar ? 'RADAR:ON' : 'EMCON' }, geometry: { type: 'Point', coordinates: unit.position } };
   });
