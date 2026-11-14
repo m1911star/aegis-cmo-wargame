@@ -168,7 +168,7 @@ tests/
 | `bun run test:e2e` | 运行 Playwright Chromium 关键流程 |
 | `bun run build` | TypeScript 检查与 Vite 生产构建 |
 | `bun run validate:db` | 验证装备数据库与全部想定首Tick完整性 |
-| `bun run smoke:scenarios` | 以固定种子无命令运行4个想定并更新可复核JSON摘要 |
+| `bun run smoke:scenarios` | 以固定种子无命令运行全部内置想定并更新可复核JSON摘要 |
 
 首次运行 E2E 前安装浏览器：
 
@@ -177,12 +177,7 @@ bunx playwright install chromium
 bun run test:e2e
 ```
 
-当前内容扩充基线：
-
-- Bun unit / integration：**180 pass，0 fail**
-- Playwright E2E：**18 pass，0 fail**
-- Engine 聚合行覆盖率：**96.94%（3424/3532）**，门禁要求 ≥80%
-- 四想定固定种子摘要：[`docs/SCENARIO_SMOKE_RESULTS.json`](docs/SCENARIO_SMOKE_RESULTS.json)
+当前门禁结果以命令输出为准，避免在多个文档中复制容易过期的测试快照。`test:coverage` 强制执行 engine 聚合行覆盖率 ≥80%；全部内置想定的固定种子摘要见 [`docs/SCENARIO_SMOKE_RESULTS.json`](docs/SCENARIO_SMOKE_RESULTS.json)。
 
 ## API 文档
 
@@ -202,4 +197,4 @@ bun run docs:api
 - 想定导出与指令重放用途不同，不能相互替代。
 - `useWargameStore` 是唯一权威状态源，以保证跨仿真、命令记录和回放的原子更新；显示态通过细粒度 selector 隔离。
 
-最终验收与质量门禁报告见 [docs/FINAL_VERIFICATION.md](docs/FINAL_VERIFICATION.md)。
+当前文档入口与历史材料说明见 [docs/README.md](docs/README.md)。

@@ -3,7 +3,7 @@
     "fixedStepSec": 0.25,
     "commandMode": "no-command",
     "recordingVersion": 2,
-    "scenarios": 4
+    "scenarios": 7
   },
   "summaries": [
     {
@@ -23,12 +23,12 @@
         "blue": 8
       },
       "missilesFired": {
-        "red": 180,
-        "blue": 166
+        "red": 172,
+        "blue": 158
       },
       "interceptions": {
-        "red": 42,
-        "blue": 32
+        "red": 38,
+        "blue": 27
       },
       "score": {
         "red": 1350,
@@ -83,15 +83,15 @@
         "east_red_preserve_y9g": "achieved",
         "east_blue_preserve_mq4c": "achieved"
       },
-      "aarEvents": 268,
+      "aarEvents": 256,
       "finiteState": true
     },
     {
       "scenarioId": "op_deep_sea_carrier_hunt_2028",
       "title": "作战想定 02 // 《深海猎杀：福建舰与美核航母打击群大洋决战》",
       "seed": 5252,
-      "tick": 7385,
-      "elapsedSec": 1846.25,
+      "tick": 10379,
+      "elapsedSec": 2594.75,
       "configuredDurationSec": 5400,
       "terminalReason": "critical_objective",
       "outcomes": {
@@ -103,12 +103,12 @@
         "blue": 4
       },
       "missilesFired": {
-        "red": 100,
-        "blue": 120
+        "red": 102,
+        "blue": 134
       },
       "interceptions": {
-        "red": 15,
-        "blue": 34
+        "red": 20,
+        "blue": 35
       },
       "score": {
         "red": 1190,
@@ -138,7 +138,7 @@
         },
         {
           "id": "ev_red_csg_blink_emcon",
-          "fireCount": 61,
+          "fireCount": 86,
           "lastFiredElapsedSec": null
         }
       ],
@@ -154,7 +154,7 @@
         "deep_blue_preserve_cvn": "failed",
         "deep_blue_disable_wolfpack": "pending"
       },
-      "aarEvents": 168,
+      "aarEvents": 189,
       "finiteState": true
     },
     {
@@ -170,20 +170,20 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 4,
+        "red": 2,
         "blue": 9
       },
       "missilesFired": {
-        "red": 124,
-        "blue": 142
+        "red": 156,
+        "blue": 170
       },
       "interceptions": {
-        "red": 24,
-        "blue": 30
+        "red": 32,
+        "blue": 45
       },
       "score": {
-        "red": 1790,
-        "blue": 1275
+        "red": 1990,
+        "blue": 1002
       },
       "sortiesLaunched": 5,
       "events": [
@@ -267,7 +267,105 @@
         "bashi_blue_disable_coastal": "failed",
         "bashi_blue_preserve_mq4c": "failed"
       },
-      "aarEvents": 218,
+      "aarEvents": 276,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "op_joint_amphibious_assault_2027",
+      "title": "作战想定 03 // 《联合登岛：海陆空立体夺控作战》",
+      "seed": 8484,
+      "tick": 10800,
+      "elapsedSec": 2700,
+      "configuredDurationSec": 2700,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "defeat",
+        "BLUE": "costly_victory"
+      },
+      "losses": {
+        "red": 1,
+        "blue": 3
+      },
+      "missilesFired": {
+        "red": 56,
+        "blue": 54
+      },
+      "interceptions": {
+        "red": 12,
+        "blue": 5
+      },
+      "score": {
+        "red": 450,
+        "blue": 530
+      },
+      "sortiesLaunched": 1,
+      "events": [
+        {
+          "id": "ev_joint_blue_scramble",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        }
+      ],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "joint_red_control_beach": "failed",
+        "joint_red_disable_airbase": "failed",
+        "joint_blue_hold_beach": "achieved",
+        "joint_blue_preserve_airbase": "achieved"
+      },
+      "aarEvents": 81,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "op_inland_mountain_strike_2027",
+      "title": "作战想定 04 // 《山谷突防：纯陆空内陆联合作战》",
+      "seed": 9595,
+      "tick": 9600,
+      "elapsedSec": 2400,
+      "configuredDurationSec": 2400,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "defeat",
+        "BLUE": "costly_victory"
+      },
+      "losses": {
+        "red": 1,
+        "blue": 1
+      },
+      "missilesFired": {
+        "red": 22,
+        "blue": 16
+      },
+      "interceptions": {
+        "red": 5,
+        "blue": 3
+      },
+      "score": {
+        "red": 150,
+        "blue": 530
+      },
+      "sortiesLaunched": 1,
+      "events": [
+        {
+          "id": "ev_inland_red_second_wave",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        }
+      ],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "inland_red_control_pass": "failed",
+        "inland_red_disable_radar": "failed",
+        "inland_blue_hold_pass": "achieved",
+        "inland_blue_preserve_airbase": "achieved"
+      },
+      "aarEvents": 30,
       "finiteState": true
     },
     {
@@ -309,6 +407,48 @@
         "red_preserve": "achieved",
         "blue_primary": "achieved",
         "blue_observe": "achieved"
+      },
+      "aarEvents": 0,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "interactive_command_tutorial",
+      "title": "教学想定 00 // 《联合作战指挥基础演练》",
+      "seed": 1010,
+      "tick": 2400,
+      "elapsedSec": 600,
+      "configuredDurationSec": 600,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "defeat",
+        "BLUE": "victory"
+      },
+      "losses": {
+        "red": 0,
+        "blue": 0
+      },
+      "missilesFired": {
+        "red": 0,
+        "blue": 0
+      },
+      "interceptions": {
+        "red": 0,
+        "blue": 0
+      },
+      "score": {
+        "red": 60,
+        "blue": 150
+      },
+      "sortiesLaunched": 0,
+      "events": [],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "tut_red_disable_ddg": "failed",
+        "tut_red_preserve_awacs": "achieved",
+        "tut_blue_survive": "achieved"
       },
       "aarEvents": 0,
       "finiteState": true
