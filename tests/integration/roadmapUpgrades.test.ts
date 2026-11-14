@@ -352,4 +352,13 @@ describe('P0/P1 tactical controls, identified-only doctrine & shareable AAR', ()
     expect(pkg.kind).toBe('aegis_aar_package');
     expect(pkg.catalogSnapshot.version).toBe(store.getState().catalog.version);
   });
+
+  test('defaults autoPause triggers to disabled so player controls pausing manually', () => {
+    store.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 42);
+    expect(store.getState().autoPause).toEqual({
+      onNewContact: false,
+      onMissileDetected: false,
+      onUnitHitOrDestroyed: false,
+    });
+  });
 });
