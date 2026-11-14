@@ -1,6 +1,8 @@
 import { memo, useMemo, useState } from 'react';
+import * as turf from '@turf/turf';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
+import { isActiveUnit } from '../engine/unitCapabilities';
 import { useWargameStore } from '../store/useWargameStore';
 
 const OUTCOME_LABELS = {
@@ -14,6 +16,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const [expanded, setExpanded] = useState(false);
   const scenario = useWargameStore((state) => state.currentScenario);
   const allObjectives = useWargameStore((state) => state.objectives);
+  const units = useWargameStore((state) => state.units);
   const side = useWargameStore((state) => state.playerSide);
   const progress = useShallow ? useWargameStore(useShallow((state) => state.objectiveProgress)) : {};
   const result = useWargameStore((state) => state.battleResult);
@@ -60,30 +63,42 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
               本想定按时间与积分结算；目标型体验请选择「有限信息演练」。
             </p>
           )}
-          {objectives.map((objective) => (
-            <div key={objective.id} className="border-t border-slate-800 pt-2">
-              <span
-                className={
-                  progress[objective.id] === 'achieved'
-                    ? 'text-emerald-300'
+          {objectives.map((objective) => {
+            let controlHint = '';
+            if (objective.type === 'control_area' && !result && objective.areaPolygon && objective.areaPolygon.length >= 3) {
+              const area = turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]]);
+              const domains = objective.controlDomains?.length ? objective.controlDomains : ['land', 'surface'];
+              const ownInside = Object.values(units).some((u) =>
+                u.side === side && isActiveUnit(u) && domains.includes(u.domain) && turf.booleanPointInPolygon(u.position, area)
+              );
+              controlHint = ownInside ? ' · 己方力量已进驻' : ' · 待推进进驻';
+            }
+            return (
+              <div key={objective.id} className="border-t border-slate-800 pt-2">
+                <span
+                  className={
+                    progress[objective.id] === 'achieved'
+                      ? 'text-emerald-300'
+                      : progress[objective.id] === 'failed'
+                        ? 'text-rose-300'
+                        : 'text-slate-200'
+                  }
+                >
+                  {progress[objective.id] === 'achieved'
+                    ? '已达成'
                     : progress[objective.id] === 'failed'
-                      ? 'text-rose-300'
-                      : 'text-slate-200'
-                }
-              >
-                {progress[objective.id] === 'achieved'
-                  ? '已达成'
-                  : progress[objective.id] === 'failed'
-                    ? '未达成'
-                    : '进行中'}{' '}
-                · {objective.title}
-              </span>
-              <p className="text-slate-400 mt-1">
-                {objective.required ? '主要目标' : '次要目标'} · {objective.points} 分
-                {objective.criticalFailure ? ' · 损失将终止任务' : ''}
-              </p>
-            </div>
-          ))}
+                      ? '未达成'
+                      : '进行中'}{' '}
+                  · {objective.title}
+                </span>
+                <p className="text-slate-400 mt-1">
+                  {objective.required ? '主要目标' : '次要目标'} · {objective.points} 分
+                  {objective.criticalFailure ? ' · 损失将终止任务' : ''}
+                  {controlHint}
+                </p>
+              </div>
+            );
+          })}
           {result && (
             <div className="space-y-2">
               <p className="text-slate-400">

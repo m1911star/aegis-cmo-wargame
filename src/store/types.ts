@@ -59,6 +59,8 @@ export interface ObjectiveDraft {
   side: 'RED' | 'BLUE';
   type: ScenarioObjective['type'];
   unitIds: string[];
+  areaPolygon?: [number, number][];
+  controlDomains?: Domain[];
   required: boolean;
   points: number;
   criticalFailure?: boolean;

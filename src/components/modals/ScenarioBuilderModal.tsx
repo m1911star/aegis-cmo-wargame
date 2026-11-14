@@ -23,8 +23,9 @@ export const ScenarioBuilderModal: React.FC = () => {
   const [builderUnitId, setBuilderUnitId] = useState('');
   const [objectiveTitle, setObjectiveTitle] = useState('新建目标');
   const [objectiveSide, setObjectiveSide] = useState<'RED' | 'BLUE'>('RED');
-  const [objectiveType, setObjectiveType] = useState<'destroy' | 'disable' | 'preserve' | 'observe' | 'withdraw'>('destroy');
+  const [objectiveType, setObjectiveType] = useState<'destroy' | 'disable' | 'preserve' | 'observe' | 'withdraw' | 'control_area'>('destroy');
   const [objectiveUnitId, setObjectiveUnitId] = useState('');
+  const [objectiveReferenceIds, setObjectiveReferenceIds] = useState<string[]>([]);
   const [areaEventName, setAreaEventName] = useState('区域进入警报');
   const [areaEventMessage, setAreaEventMessage] = useState('侦测到单位进入指定区域。');
   const [areaEventSide, setAreaEventSide] = useState<SideId>('RED');
@@ -87,21 +88,54 @@ export const ScenarioBuilderModal: React.FC = () => {
           </div>
           <input aria-label="目标标题" value={objectiveTitle} onChange={(event) => setObjectiveTitle(event.target.value)} className="w-full bg-slate-900 rounded p-2" />
           <div className="grid grid-cols-2 gap-2">
-            <select aria-label="目标阵营" value={objectiveSide} onChange={(event) => setObjectiveSide(event.target.value as 'RED' | 'BLUE')} className="bg-slate-900 rounded p-2">
+            <select aria-label="目标阵营" value={objectiveSide} onChange={(event) => { setObjectiveSide(event.target.value as 'RED' | 'BLUE'); setObjectiveReferenceIds([]); }} className="bg-slate-900 rounded p-2">
               <option value="RED">RED</option><option value="BLUE">BLUE</option>
             </select>
             <select aria-label="目标类型" value={objectiveType} onChange={(event) => setObjectiveType(event.target.value as typeof objectiveType)} className="bg-slate-900 rounded p-2">
-              <option value="destroy">摧毁</option><option value="disable">失能</option><option value="preserve">保全</option><option value="observe">发现</option><option value="withdraw">撤出</option>
+              <option value="destroy">摧毁</option><option value="disable">失能</option><option value="preserve">保全</option><option value="observe">发现</option><option value="withdraw">撤出</option><option value="control_area">区域夺控</option>
             </select>
           </div>
-          <select aria-label="目标单位" value={objectiveUnitId} onChange={(event) => setObjectiveUnitId(event.target.value)} className="w-full bg-slate-900 rounded p-2">
-            <option value="">选择目标单位</option>
-            {Object.values(units).map((unit) => <option key={unit.id} value={unit.id}>{unit.side} · {unit.callsign}</option>)}
-          </select>
-          <button disabled={!objectiveUnitId || !objectiveTitle.trim()} onClick={() => upsertObjective({
-            title: objectiveTitle, side: objectiveSide, type: objectiveType, unitIds: [objectiveUnitId],
-            required: true, points: 100, preserveCapability: objectiveType === 'preserve',
-          })} className="toolbar-button disabled:opacity-35">添加主要目标</button>
+          {objectiveType === 'control_area' ? (
+            <div className="grid grid-cols-2 gap-1 max-h-24 overflow-y-auto">
+              {referencePoints.filter((point) => point.side === objectiveSide).map((point) => (
+                <label key={point.id} className="flex gap-1 items-center">
+                  <input
+                    type="checkbox"
+                    checked={objectiveReferenceIds.includes(point.id)}
+                    onChange={(event) => setObjectiveReferenceIds((current) => event.target.checked
+                      ? [...current, point.id]
+                      : current.filter((id) => id !== point.id))}
+                  />
+                  <span>{point.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <select aria-label="目标单位" value={objectiveUnitId} onChange={(event) => setObjectiveUnitId(event.target.value)} className="w-full bg-slate-900 rounded p-2">
+              <option value="">选择目标单位</option>
+              {Object.values(units).map((unit) => <option key={unit.id} value={unit.id}>{unit.side} · {unit.callsign}</option>)}
+            </select>
+          )}
+          <button
+            disabled={!objectiveTitle.trim() || (objectiveType === 'control_area' ? objectiveReferenceIds.length < 3 : !objectiveUnitId)}
+            onClick={() => {
+              if (objectiveType === 'control_area') {
+                const polygon = objectiveReferenceIds
+                  .map((id) => referencePoints.find((point) => point.id === id)?.position)
+                  .filter((pos): pos is [number, number] => !!pos);
+                upsertObjective({
+                  title: objectiveTitle, side: objectiveSide, type: 'control_area', unitIds: [],
+                  areaPolygon: polygon, controlDomains: ['land', 'surface'], required: true, points: 200,
+                });
+              } else {
+                upsertObjective({
+                  title: objectiveTitle, side: objectiveSide, type: objectiveType, unitIds: [objectiveUnitId],
+                  required: true, points: 100, preserveCapability: objectiveType === 'preserve',
+                });
+              }
+            }}
+            className="toolbar-button disabled:opacity-35"
+          >添加主要目标</button>
         </section>
 
         <section className="md:col-span-2 p-3 rounded bg-slate-950/80 border border-slate-700 space-y-3">

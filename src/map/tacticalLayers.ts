@@ -15,6 +15,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
     type: 'FeatureCollection',
     features: [],
   };
+  addSource('terrain-source', { type: 'geojson', data: emptyFC });
+  addSource('control-zones-source', { type: 'geojson', data: emptyFC });
   addSource('missions-source', { type: 'geojson', data: emptyFC });
   addSource('envelopes-source', { type: 'geojson', data: emptyFC });
   addSource('aou-source', { type: 'geojson', data: emptyFC });
@@ -26,6 +28,60 @@ export function installTacticalLayers(map: TacticalLayerHost) {
   addSource('explosions-source', { type: 'geojson', data: emptyFC });
   addSource('units-source', { type: 'geojson', data: emptyFC });
   addSource('ruler-source', { type: 'geojson', data: emptyFC });
+
+  // 0. 地形高程遮蔽区与区域夺控区图层
+  addLayer({
+    id: 'terrain-fill-layer',
+    type: 'fill',
+    source: 'terrain-source',
+    paint: {
+      'fill-color': 'rgba(180, 83, 9, 0.14)',
+    },
+  });
+  addLayer({
+    id: 'terrain-line-layer',
+    type: 'line',
+    source: 'terrain-source',
+    paint: {
+      'line-color': 'rgba(217, 119, 6, 0.45)',
+      'line-width': 1.2,
+      'line-dasharray': [2, 2],
+    },
+  });
+  addLayer({
+    id: 'control-zones-fill-layer',
+    type: 'fill',
+    source: 'control-zones-source',
+    paint: {
+      'fill-color': 'rgba(16, 185, 129, 0.10)',
+    },
+  });
+  addLayer({
+    id: 'control-zones-line-layer',
+    type: 'line',
+    source: 'control-zones-source',
+    paint: {
+      'line-color': 'rgba(16, 185, 129, 0.8)',
+      'line-width': 2.0,
+      'line-dasharray': [5, 3],
+    },
+  });
+  addLayer({
+    id: 'control-zones-label-layer',
+    type: 'symbol',
+    source: 'control-zones-source',
+    layout: {
+      'text-font': ['Noto Sans Regular'],
+      'text-field': ['get', 'label'],
+      'text-size': 11,
+      'text-allow-overlap': false,
+    },
+    paint: {
+      'text-color': '#6ee7b7',
+      'text-halo-color': '#020617',
+      'text-halo-width': 1.8,
+    },
+  });
 
   // 1. 巡逻区多边形图层
   addLayer({
