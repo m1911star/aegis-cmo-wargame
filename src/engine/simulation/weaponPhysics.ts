@@ -3,13 +3,14 @@ import type {
   CombatLogEntry,
   EquipmentCatalog,
   RuntimeUnit,
+  ScenarioEnvironment,
   ScoreLedger,
   TacticalContact,
   TacticalExplosionEffect,
   VictoryConditionRule,
   WeaponInFlight,
 } from '../../types/wargame';
-import { advanceGuidance, seekerCanObserve } from '../guidance';
+import { advanceGuidance, computeMissileEnergyFactor, seekerCanObserve } from '../guidance';
 import { getDistanceKm } from '../geometry';
 import { creditDamage } from '../objectives';
 import { evaluateTargetEcmSuppression, observeMissile } from '../sensors';
@@ -22,6 +23,7 @@ export type WeaponPhysicsContext = {
   weaponsInFlight: Record<string, WeaponInFlight>;
   previousExplosions: TacticalExplosionEffect[];
   catalog: EquipmentCatalog;
+  environment?: ScenarioEnvironment;
   nextSimTime: number;
   dtSec: number;
   score: ScoreLedger;
@@ -40,6 +42,7 @@ export function advanceWeaponPhysics({
   weaponsInFlight,
   previousExplosions,
   catalog,
+  environment,
   nextSimTime,
   dtSec,
   score,
@@ -77,9 +80,41 @@ export function advanceWeaponPhysics({
     if (missile.targetType === 'area') {
       target = aliveUnits.filter((candidate) =>
         candidate.side !== missile.side && candidate.side !== 'NEUTRAL' &&
-        seekerCanObserve(missile, weapon, candidate, catalog, false)
+        seekerCanObserve(missile, weapon, candidate, catalog, false, environment)
       ).sort((a, b) => getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
         a.id.localeCompare(b.id))[0];
+    } else if (
+      missile.targetType === 'unit' &&
+      weapon.guidance !== 'semi_active_radar' &&
+      (missile.seekerState === 'terminal_searching' || !target || !isActiveUnit(target as RuntimeUnit))
+    ) {
+      const canStayOnPrimary = target && isActiveUnit(target as RuntimeUnit) &&
+        seekerCanObserve(missile, weapon, target, catalog, false, environment);
+      if (!canStayOnPrimary && missile.seekerState?.startsWith('terminal')) {
+        const alternative = aliveUnits.filter((candidate) =>
+          candidate.side !== missile.side && candidate.side !== 'NEUTRAL' &&
+          candidate.id !== missile.targetId &&
+          seekerCanObserve(missile, weapon, candidate, catalog, false, environment)
+        ).sort((a, b) =>
+          getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
+          a.id.localeCompare(b.id)
+        )[0];
+        if (alternative) {
+          missile.targetId = alternative.id;
+          target = alternative;
+          logs.push({
+            id: `log_reacquire_${nextSimTime}_${missile.id}_${alternative.id}`,
+            simTime: nextSimTime,
+            side: missile.side,
+            category: 'EVENT',
+            severity: 'info',
+            title: `${missile.name} 末段导引头切换捕获目标`,
+            message: '原目标失去锁定或被摧毁，导引头在搜索视场内重新捕获到有效目标信号。',
+            position: [...missile.position],
+            unitId: missile.shooterId,
+          });
+        }
+      }
     }
     const contact = missile.targetType === 'missile'
       ? target
@@ -89,7 +124,8 @@ export function advanceWeaponPhysics({
             units,
             catalog,
             nextSimTime,
-            units[missile.shooterId]
+            units[missile.shooterId],
+            environment
           )
         : undefined
       : missile.targetType === 'unit' ? contacts[`${missile.side}_CONTACT_${missile.targetId}`] : undefined;
@@ -101,7 +137,8 @@ export function advanceWeaponPhysics({
       catalog,
       nextSimTime,
       dtSec,
-      target
+      target,
+      environment
     );
     if (flight.expired) {
       logs.push({
@@ -169,7 +206,7 @@ export function advanceWeaponPhysics({
       missile.speedKts >= 3800
         ? ciwsProbability * 0.22
         : ciwsProbability * 0.55;
-    let effectivePk = missile.basePk;
+    let effectivePk = missile.basePk * (0.75 + 0.25 * computeMissileEnergyFactor(missile, weapon));
     const targetEcm = evaluateTargetEcmSuppression(
       targetUnit,
       aliveUnits,

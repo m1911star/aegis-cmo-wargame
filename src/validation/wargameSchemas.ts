@@ -116,7 +116,7 @@ const action = taggedUnion({
   AWARD_SCORE: object({ side, points: number(), reason: text }),
 });
 const environmentPolygon = object({
-  id, name: text, areaPolygon: array(coordinate, 3),
+  id, name: text, areaPolygon: array(coordinate, 3), elevationM: optional(number(0, 9000)),
 });
 const scenario = object({
   id, title: text, subtitle: text, theater: text, difficulty: oneOf(['STANDARD', 'HARD', 'EXTREME']),
