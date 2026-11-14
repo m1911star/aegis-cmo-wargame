@@ -215,6 +215,21 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             <button onClick={onToggleRight} aria-expanded={rightOpen} aria-controls="inspector-panel" className={`toolbar-button ${rightOpen ? 'panel-active' : ''}`}>
               <PanelRight /><span>详情</span>
             </button>
+            <button
+              onClick={() => {
+                if (leftOpen || rightOpen) {
+                  if (leftOpen) onToggleLeft();
+                  if (rightOpen) onToggleRight();
+                } else {
+                  onToggleLeft();
+                  onToggleRight();
+                }
+              }}
+              title="快捷键 [Tab]：切换纯净全屏地图"
+              className={`toolbar-button ${!leftOpen && !rightOpen ? 'panel-active' : ''}`}
+            >
+              <span>全屏</span>
+            </button>
           </div>
         </div>
       </div>

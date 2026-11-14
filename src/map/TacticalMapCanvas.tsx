@@ -13,7 +13,13 @@ import { getBearingDeg, getDistanceKm } from '../engine/simulationEngine';
 // 架构亮点：通过 Zustand subscribe 直推 GeoJSON Source，60FPS 零 React VDOM 重绘抖动
 // ============================================================================
 
-export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
+export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
+  leftOpen = true,
+  rightOpen = true,
+}: {
+  leftOpen?: boolean;
+  rightOpen?: boolean;
+}) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const basemapLoaderRef = useRef<BasemapLoader | null>(null);
@@ -464,31 +470,49 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
 
       {basemapState.active === 'offline' && <div className="pointer-events-none absolute inset-0 tactical-scanlines opacity-55" />}
 
-      <section className="basemap-controls tactical-panel" style={{ top: interactionMode === 'select' ? 12 : 70 }} aria-label="底图来源与状态">
-        <select aria-label="底图选择" value={basemapMode} onChange={(e) => setBasemapMode(e.target.value as BasemapMode)}>
-          {Object.entries(BASEMAP_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
-        </select>
-        <p role="status" className={basemapState.status === 'error' || basemapState.status === 'degraded' ? 'text-amber-300' : 'text-slate-400'}>
-          {basemapState.message ?? (basemapState.status === 'loading'
-            ? `加载真实底图中 · 当前${BASEMAP_PRESETS[basemapState.active].label}`
-            : basemapState.active === 'offline' ? '本地简化轮廓 · 非真实地理数据' : 'OpenFreeMap / OpenStreetMap · 非卫星影像')}
-        </p>
+      {/* Compact floating map tools: ruler + basemap status badge */}
+      <div
+        className="basemap-controls tactical-panel"
+        style={{
+          top: interactionMode === 'select' ? 10 : 56,
+          right: rightOpen ? 'clamp(278px, calc(20vw + 18px), 310px)' : 12,
+        }}
+        aria-label="地图工具"
+      >
+        <span
+          role="status"
+          className={`text-[10px] ${basemapState.status === 'error' || basemapState.status === 'degraded' ? 'text-amber-300' : 'text-slate-400'}`}
+          title={basemapState.message ?? BASEMAP_PRESETS[basemapMode].label}
+        >
+          {basemapState.active === 'offline' ? '离线底图' : 'OSM底图'}
+        </span>
         <button
           aria-pressed={interactionMode === 'measure'}
           onClick={() => setInteractionMode(interactionMode === 'measure' ? 'select' : 'measure')}
-          className="w-full mt-1 px-2 py-1 rounded bg-yellow-500/15 border border-yellow-500/40 text-yellow-200 cursor-pointer"
+          className={`px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+            interactionMode === 'measure'
+              ? 'bg-yellow-400 text-slate-950 border-yellow-300 font-bold'
+              : 'bg-yellow-500/15 border-yellow-500/40 text-yellow-200'
+          }`}
         >
           测距尺
         </button>
-        {(basemapState.status === 'error' || basemapState.status === 'degraded') && <div className="flex gap-2 mt-1">
-          <button type="button" className="text-cyan-300 underline" onClick={() => { void basemapLoaderRef.current?.select(basemapMode, true); }}>重试在线地图</button>
-          <button type="button" className="text-slate-300 underline" onClick={() => setBasemapMode('offline')}>使用离线示意</button>
-        </div>}
-      </section>
+        {(basemapState.status === 'error' || basemapState.status === 'degraded') && (
+          <button type="button" className="text-[10px] text-cyan-300 underline" onClick={() => { void basemapLoaderRef.current?.select(basemapMode, true); }}>
+            重试
+          </button>
+        )}
+      </div>
 
       {/* 顶部模式浮动战术横幅 (当处于 F3 航线标绘 / F1 手动交战 / 算子投放模式时高亮提示) */}
       {interactionMode !== 'select' && (
-        <div className="absolute top-3 left-3 right-3 z-20 flex items-center gap-3 px-3 py-2 rounded bg-cyan-950/90 border border-cyan-400/70 shadow-[0_0_25px_rgba(34,211,238,0.35)] text-xs font-mono text-cyan-200">
+        <div
+          className="absolute top-2.5 z-20 flex items-center gap-3 px-3 py-1.5 rounded bg-cyan-950/90 border border-cyan-400/70 shadow-[0_0_25px_rgba(34,211,238,0.35)] text-xs font-mono text-cyan-200"
+          style={{
+            left: leftOpen ? 'clamp(248px, calc(18vw + 16px), 276px)' : 52,
+            right: rightOpen ? 'clamp(278px, calc(20vw + 18px), 310px)' : 12,
+          }}
+        >
           <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
           {interactionMode === 'plot_waypoint' && (
             <span>
@@ -530,32 +554,21 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas() {
         </div>
       )}
 
-      {/* 左下角经纬度遥测坐标与图例浮窗 */}
-      <div className="map-status tactical-panel" style={{ zIndex: 30, pointerEvents: 'auto' }}>
-        <div className="flex items-center gap-1.5">
-          <span className="text-cyan-400 font-semibold">光标</span>
-          <span>
-            {cursorCoord[1].toFixed(3)}°N, {cursorCoord[0].toFixed(3)}°E
-          </span>
-        </div>
+      {/* 底部居中精简坐标与图例条 */}
+      <div className="map-status tactical-panel" style={{ zIndex: 15 }}>
+        <span className="text-cyan-400 font-semibold font-mono">
+          {cursorCoord[1].toFixed(3)}°N, {cursorCoord[0].toFixed(3)}°E
+        </span>
         {rulerMeasurement && (
-          <div className="text-yellow-200 font-semibold text-[10px]">
+          <span className="text-yellow-200 font-semibold">
             {rulerMeasurement.distanceKm.toFixed(1)} km · {rulerMeasurement.bearingDeg.toFixed(1)}°T
-          </div>
+          </span>
         )}
         <div className="map-legend">
-          <span className="flex items-center gap-1">
-            <i className="w-2.5 h-0.5 bg-cyan-400 inline-block" /> 雷达视距圈
-          </span>
-          <span className="flex items-center gap-1">
-            <i className="w-2.5 h-0.5 bg-rose-500 inline-block" /> 武器射程圈
-          </span>
-          <span className="flex items-center gap-1">
-            <i className="w-2.5 h-0.5 bg-amber-400 inline-block" /> 盲区 / 定位误差
-          </span>
-          <span className="flex items-center gap-1">
-            <i className="w-2.5 h-0.5 bg-emerald-400 inline-block" /> 水下声呐圈
-          </span>
+          <span><i className="w-2.5 h-0.5 bg-cyan-400 inline-block" /> 雷达</span>
+          <span><i className="w-2.5 h-0.5 bg-rose-500 inline-block" /> 射程</span>
+          <span><i className="w-2.5 h-0.5 bg-amber-400 inline-block" /> 误差/盲区</span>
+          <span><i className="w-2.5 h-0.5 bg-emerald-400 inline-block" /> 声呐/夺控</span>
         </div>
       </div>
     </div>

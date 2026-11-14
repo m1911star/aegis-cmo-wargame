@@ -181,6 +181,13 @@ export default function App() {
             });
           }
         }
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        setLeftOpen((prevLeft) => {
+          const next = !(prevLeft || rightOpen);
+          setRightOpen(next);
+          return next;
+        });
       } else if (e.key === 'Escape') {
         if (state.activeModal !== 'none') {
           state.setActiveModal('none');
@@ -220,15 +227,15 @@ export default function App() {
         onToggleRight={toggleRight}
       />
 
-      {/* 中间主体区：左侧 ORBAT/情报/任务树 + 中央 WebGL 海陆空战术态势图 + 右侧单元火控与遥测面板 */}
+      {/* 中间主体区：100%全屏 WebGL 态势地图为底，左右侧栏以半透明悬浮抽屉展开 */}
       <div className="workspace">
         <div id="order-panel" className="workspace-pane order-pane" hidden={!leftOpen}>
           <LeftOrbatMissionSidebar />
         </div>
-        <main className="flex-1 h-full relative min-w-0">
-          <TacticalMapCanvas />
+        <main className="workspace-map-stage" data-left-open={leftOpen} data-right-open={rightOpen}>
+          <TacticalMapCanvas leftOpen={leftOpen} rightOpen={rightOpen} />
           <ReplayPlayerBar />
-          <TutorialChecklistOverlay />
+          <TutorialChecklistOverlay leftOpen={leftOpen} />
         </main>
         <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!rightOpen}>
           <RightUnitTelemetryInspector />

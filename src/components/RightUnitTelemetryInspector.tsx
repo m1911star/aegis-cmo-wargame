@@ -270,26 +270,50 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
         )}
       </div>
 
-      <UnitKinematicsPanel
-        unit={selectedUnit}
-        platformSpec={platformSpec}
-        maxSpeedKts={configuration.maxSpeedKts}
-        rcsPenaltyM2={configuration.rcsPenaltyM2}
-        radarHorizons={radarHorizons}
-        groupUnits={groupUnits}
-      />
+      <details open className="bg-slate-950/60 border border-slate-800/80">
+        <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between">
+          <span>运动与航路控制</span>
+          <span className="text-[10px] text-slate-400 font-normal">▾</span>
+        </summary>
+        <div className="mt-2">
+          <UnitKinematicsPanel
+            unit={selectedUnit}
+            platformSpec={platformSpec}
+            maxSpeedKts={configuration.maxSpeedKts}
+            rcsPenaltyM2={configuration.rcsPenaltyM2}
+            radarHorizons={radarHorizons}
+            groupUnits={groupUnits}
+          />
+        </div>
+      </details>
 
-      <UnitDoctrineWraPanel
-        unit={selectedUnit}
-        platformSpec={platformSpec}
-        eligibleMissions={eligibleMissions}
-      />
+      <details open className="bg-slate-950/60 border border-slate-800/80">
+        <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between">
+          <span>条令、EMCON 与 WRA</span>
+          <span className="text-[10px] text-slate-400 font-normal">▾</span>
+        </summary>
+        <div className="mt-2">
+          <UnitDoctrineWraPanel
+            unit={selectedUnit}
+            platformSpec={platformSpec}
+            eligibleMissions={eligibleMissions}
+          />
+        </div>
+      </details>
 
-      <UnitWeaponsHangarPanel
-        unit={selectedUnit}
-        sensorIds={configuration.sensorIds}
-        canFire={!!capabilities?.canFire}
-      />
+      <details open className="bg-slate-950/60 border border-slate-800/80">
+        <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between">
+          <span>传感器、弹药与机库出动</span>
+          <span className="text-[10px] text-slate-400 font-normal">▾</span>
+        </summary>
+        <div className="mt-2 space-y-3">
+          <UnitWeaponsHangarPanel
+            unit={selectedUnit}
+            sensorIds={configuration.sensorIds}
+            canFire={!!capabilities?.canFire}
+          />
+        </div>
+      </details>
     </aside>
   );
 });
