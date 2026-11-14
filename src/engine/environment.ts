@@ -101,6 +101,25 @@ export function hasRadarLineOfSight(
   return true;
 }
 
+export function findShootAndScootDestination(
+  origin: [number, number],
+  environment?: ScenarioEnvironment,
+  distanceKm = 4.5,
+  seedAngle = 0
+): [number, number] | undefined {
+  const angles = [0, 45, 90, 135, 180, 225, 270, 315];
+  for (const offset of angles) {
+    const bearing = (seedAngle + offset) % 360;
+    const candidate = turf.destination(origin, distanceKm, bearing, {
+      units: 'kilometers',
+    }).geometry.coordinates as [number, number];
+    if (isRouteAllowed('land', origin, candidate, environment)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 export function acousticRangeFactor(
   observer: [number, number],
   target: [number, number],

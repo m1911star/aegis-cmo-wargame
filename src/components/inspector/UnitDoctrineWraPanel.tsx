@@ -138,6 +138,18 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         >
           识别后开火：{unit.doctrine.requireIdentifiedForAutoFire ? '开启' : '关闭'}
         </button>
+        {unit.domain === 'land' && platformSpec.maxSpeedKts > 0 && (
+          <button
+            disabled={unitDead}
+            aria-pressed={!!unit.doctrine.shootAndScoot}
+            onClick={() => updateUnitDoctrine(unit.id, { shootAndScoot: !unit.doctrine.shootAndScoot })}
+            className={`col-span-2 px-2 py-1 rounded border text-left cursor-pointer disabled:opacity-35 ${
+              unit.doctrine.shootAndScoot ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200' : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}
+          >
+            发射后机动规避 (Shoot-and-Scoot)：{unit.doctrine.shootAndScoot ? '开启' : '关闭'}
+          </button>
+        )}
       </div>
 
       {platformSpec.availableLoadoutIds && platformSpec.availableLoadoutIds.length > 0 && (

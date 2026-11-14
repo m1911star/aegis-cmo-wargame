@@ -85,6 +85,31 @@ export const MODULAR_LOADOUTS: Record<string, LoadoutSpec> = {
     ],
     description: '双机编队一次齐射8枚3.5马赫鹰击-12重型反舰导弹。',
   },
+  loadout_j20_land_strike: {
+    id: 'loadout_j20_land_strike',
+    name: '歼-20A 对陆精确防区外打击挂载 (AKD-98×2 + PL-15×4)',
+    codeName: 'Stealth Land Strike',
+    role: 'multi_mission',
+    compatiblePlatformIds: ['j20_mighty_dragon'],
+    rcsPenaltyM2: 0.04,
+    speedPenaltyKts: 25,
+    mounts: [
+      { mountId: 'bay_akd98', weaponId: 'akd98_lasm', maxAmmo: 2, reloadTimeSec: 10 },
+      { mountId: 'bay_pl15', weaponId: 'pl15_aam', maxAmmo: 4, reloadTimeSec: 6 },
+    ],
+    description: '兼顾制空自卫与防区外隐身对陆精确突击，用于拔除敌方跑道与防空雷达枢纽。',
+  },
+  loadout_h6n_land_cruise: {
+    id: 'loadout_h6n_land_cruise',
+    name: '轰-6N 远程防区外对陆巡航导弹挂载 (AKD-98×6)',
+    codeName: 'Long-Range Land Cruise',
+    role: 'multi_mission',
+    compatiblePlatformIds: ['h6n_bomber'],
+    mounts: [
+      { mountId: 'wing_akd98', weaponId: 'akd98_lasm', maxAmmo: 6, reloadTimeSec: 10 },
+    ],
+    description: '内陆与联合战区战略对陆精确突击挂载，一次齐射多枚防区外空地导弹。',
+  },
 
   // --- 蓝方战机挂载方案 ---
   loadout_f35c_stealth_cap: {
@@ -99,6 +124,20 @@ export const MODULAR_LOADOUTS: Record<string, LoadoutSpec> = {
       { mountId: 'bay_amraam', weaponId: 'aim120d_aam', maxAmmo: 4, reloadTimeSec: 7 },
     ],
     description: '保持0.005m²全隐身状态实施航母外围防空截击。',
+  },
+  loadout_f35c_land_strike: {
+    id: 'loadout_f35c_land_strike',
+    name: 'F-35C 隐身防区外对陆突击挂载 (JASSM-ER×2 + AIM-120D×4)',
+    codeName: 'Stealth JASSM Land Strike',
+    role: 'multi_mission',
+    compatiblePlatformIds: ['f35c_lightning'],
+    rcsPenaltyM2: 0.05,
+    speedPenaltyKts: 25,
+    mounts: [
+      { mountId: 'pylon_jassm', weaponId: 'agm158b_jassm', maxAmmo: 2, reloadTimeSec: 10 },
+      { mountId: 'bay_amraam', weaponId: 'aim120d_aam', maxAmmo: 4, reloadTimeSec: 8 },
+    ],
+    description: '携带AGM-158B防区外隐身巡航导弹，专用于打击敌方机场与纵深防空阵地。',
   },
   loadout_f35c_lrasm_strike: {
     id: 'loadout_f35c_lrasm_strike',

@@ -15,6 +15,8 @@ import { createRuntimeUnitFromPlacement } from '../engine/simulationEngine';
 import { compileScenario } from './compileScenario';
 import { INFORMATION_EXERCISE } from './informationExercise';
 import { SCENARIO_INTERACTIVE_TUTORIAL } from './tutorialScenario';
+import { SCENARIO_JOINT_AMPHIBIOUS_ASSAULT } from './jointAmphibiousScenario';
+import { SCENARIO_INLAND_AIR_LAND } from './inlandAirLandScenario';
 
 // ============================================================================
 // AEGIS-CMO // 内置战役想定剧本库 v2.0
@@ -1094,6 +1096,8 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
 export const BUILTIN_SCENARIOS: ScenarioDefinition[] = [
   SCENARIO_EAST_SEA_THUNDER,
   SCENARIO_DEEP_SEA_CARRIER_HUNT,
+  SCENARIO_JOINT_AMPHIBIOUS_ASSAULT,
+  SCENARIO_INLAND_AIR_LAND,
   INFORMATION_EXERCISE,
   SCENARIO_INTERACTIVE_TUTORIAL,
 ];
