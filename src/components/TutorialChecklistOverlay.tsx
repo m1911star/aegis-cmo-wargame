@@ -3,7 +3,7 @@ import { CheckCircle2, Circle, GraduationCap, X } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import { SCENARIO_INTERACTIVE_TUTORIAL } from '../scenarios/tutorialScenario';
 
-export const TutorialChecklistOverlay: React.FC = () => {
+export const TutorialChecklistOverlay: React.FC<{ leftOpen?: boolean }> = ({ leftOpen = true }) => {
   const scenarioId = useWargameStore((s) => s.currentScenario.id);
   const tick = useWargameStore((s) => s.tick);
   const units = useWargameStore((s) => s.units);
@@ -12,6 +12,7 @@ export const TutorialChecklistOverlay: React.FC = () => {
   const playerSide = useWargameStore((s) => s.playerSide);
   const objectiveProgress = useWargameStore((s) => s.objectiveProgress);
   const [dismissedForScenario, setDismissedForScenario] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   const steps = useMemo(() => {
     const friendly = Object.values(units).filter((u) => u.side === playerSide);
@@ -41,13 +42,17 @@ export const TutorialChecklistOverlay: React.FC = () => {
   return (
     <aside
       aria-label="新兵互动教学指引"
-      className="absolute bottom-3 left-3 z-20 w-72 rounded-lg border border-cyan-400/50 bg-slate-950/90 backdrop-blur-md p-3 text-xs font-mono shadow-[0_0_25px_rgba(34,211,238,0.2)]"
+      style={{ left: leftOpen ? 'clamp(248px, calc(18vw + 16px), 276px)' : 12 }}
+      className="absolute bottom-11 z-20 w-64 rounded-lg border border-cyan-400/50 bg-slate-950/90 backdrop-blur-md p-2.5 text-xs font-mono shadow-[0_0_25px_rgba(34,211,238,0.2)]"
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 text-cyan-300 font-bold">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          onClick={() => setCollapsed((prev) => !prev)}
+          className="flex items-center gap-1.5 text-cyan-300 font-bold cursor-pointer text-left"
+        >
           <GraduationCap className="w-4 h-4" />
           <span>指挥官教学指引 ({completedCount}/{steps.length})</span>
-        </div>
+        </button>
         <button
           aria-label="关闭教学指引"
           onClick={() => setDismissedForScenario(true)}
@@ -56,21 +61,23 @@ export const TutorialChecklistOverlay: React.FC = () => {
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
-      <ul className="space-y-1.5">
-        {steps.map((step) => (
-          <li
-            key={step.id}
-            className={`flex items-start gap-1.5 ${step.done ? 'text-emerald-300' : 'text-slate-300'}`}
-          >
-            {step.done ? (
-              <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />
-            ) : (
-              <Circle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-slate-500" />
-            )}
-            <span>{step.label}</span>
-          </li>
-        ))}
-      </ul>
+      {!collapsed && (
+        <ul className="space-y-1.5 mt-2">
+          {steps.map((step) => (
+            <li
+              key={step.id}
+              className={`flex items-start gap-1.5 ${step.done ? 'text-emerald-300' : 'text-slate-300'}`}
+            >
+              {step.done ? (
+                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />
+              ) : (
+                <Circle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-slate-500" />
+              )}
+              <span>{step.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </aside>
   );
 };
