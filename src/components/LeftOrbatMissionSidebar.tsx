@@ -21,10 +21,10 @@ export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSideb
   );
 
   const tabs = [
-    { id: 'orbat' as const, label: '编制序列', icon: Radar, activeClass: 'bg-secondary text-cyan-300 shadow-xs border-border' },
-    { id: 'contacts' as const, label: `情报(${visibleContacts.length})`, icon: Crosshair, activeClass: 'bg-secondary text-amber-300 shadow-xs border-border' },
-    { id: 'missions' as const, label: '巡逻任务', icon: Compass, activeClass: 'bg-secondary text-emerald-300 shadow-xs border-border' },
-    { id: 'layers' as const, label: '包线图层', icon: Layers, activeClass: 'bg-secondary text-sky-300 shadow-xs border-border' },
+    { id: 'orbat' as const, label: '编制序列', icon: Radar, activeClass: 'bg-zinc-800 text-zinc-50 shadow-xs border-white/10' },
+    { id: 'contacts' as const, label: `情报(${visibleContacts.length})`, icon: Crosshair, activeClass: 'bg-zinc-800 text-amber-300 shadow-xs border-white/10' },
+    { id: 'missions' as const, label: '巡逻任务', icon: Compass, activeClass: 'bg-zinc-800 text-emerald-300 shadow-xs border-white/10' },
+    { id: 'layers' as const, label: '包线图层', icon: Layers, activeClass: 'bg-zinc-800 text-sky-300 shadow-xs border-white/10' },
   ];
 
   return (

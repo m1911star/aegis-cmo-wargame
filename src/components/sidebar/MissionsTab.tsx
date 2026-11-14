@@ -129,8 +129,8 @@ export const MissionsTab: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-border/80 text-[10px]">
                     <Select
                       aria-label={`${m.name} 任务 ROE`}
-                      wrapperClassName="flex-1 min-w-[104px]"
-                      className="h-7 text-[10px] pl-2 pr-6"
+                      wrapperClassName="flex-1 min-w-[118px]"
+                      className="h-7 text-[10px] px-2 gap-1"
                       value={m.doctrineOverride?.roe ?? ''}
                       onChange={(event) => updateMissionDoctrine(m.id, {
                         roe: (event.target.value || undefined) as 'free' | 'tight' | 'hold' | undefined,
@@ -147,7 +147,7 @@ export const MissionsTab: React.FC = () => {
                       onClick={() => updateMissionDoctrine(m.id, {
                         requireIdentifiedForAutoFire: !m.doctrineOverride?.requireIdentifiedForAutoFire,
                       })}
-                      className="h-7 shrink-0"
+                      className="h-7 px-1.5 shrink-0"
                       title={m.doctrineOverride?.requireIdentifiedForAutoFire ? '仅攻击已识别目标' : '允许攻击已分类目标'}
                     >
                       {m.doctrineOverride?.requireIdentifiedForAutoFire ? '仅攻击已识别' : '允许攻击已分类'}

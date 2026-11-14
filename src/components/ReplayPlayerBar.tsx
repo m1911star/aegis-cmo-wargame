@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { FastForward, Pause, Play, StepForward, X } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
+import { Slider } from './ui/slider';
 
 export const ReplayPlayerBar: React.FC = () => {
   const replayPlayer = useWargameStore((s) => s.replayPlayer);
@@ -48,14 +49,13 @@ export const ReplayPlayerBar: React.FC = () => {
         </button>
       </div>
 
-      <input
+      <Slider
         aria-label="回放播放器时间轴"
-        type="range"
         min={0}
         max={recording.untilTick}
         value={currentTick}
         onChange={(e) => seekReplayPlayer(Number(e.target.value))}
-        className="w-full accent-amber-400 cursor-pointer"
+        rangeClassName="bg-amber-400"
       />
 
       <div className="flex items-center justify-between gap-2">

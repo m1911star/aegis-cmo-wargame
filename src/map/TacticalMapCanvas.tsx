@@ -507,13 +507,13 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       {/* 顶部模式浮动战术横幅 (当处于 F3 航线标绘 / F1 手动交战 / 算子投放模式时高亮提示) */}
       {interactionMode !== 'select' && (
         <div
-          className="absolute top-2.5 z-20 flex items-center gap-3 px-3 py-1.5 rounded bg-cyan-950/90 border border-cyan-400/70 shadow-[0_0_25px_rgba(34,211,238,0.35)] text-xs font-mono text-cyan-200"
+          className="absolute top-2.5 z-20 flex items-center gap-3 px-3.5 py-2 rounded-lg bg-zinc-950/95 border border-white/15 shadow-2xl backdrop-blur-xl text-xs text-zinc-100"
           style={{
-            left: leftOpen ? 'clamp(248px, calc(18vw + 16px), 276px)' : 52,
+            left: leftOpen ? 'clamp(248px, calc(18vw + 16px), 278px)' : 52,
             right: rightOpen ? 'clamp(278px, calc(20vw + 18px), 310px)' : 12,
           }}
         >
-          <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
           {interactionMode === 'plot_waypoint' && (
             <span>
               [F3 航路点标绘模式] 点击海图追加机动航路点 ({selectedUnitCallsign}
@@ -547,7 +547,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
           )}
           <button
             onClick={() => setInteractionMode('select')}
-            className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 cursor-pointer shrink-0 whitespace-nowrap"
+            className="ml-auto px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-zinc-100 cursor-pointer shrink-0 whitespace-nowrap transition-colors"
           >
             退出 [ESC]
           </button>

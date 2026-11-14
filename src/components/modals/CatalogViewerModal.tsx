@@ -103,6 +103,7 @@ export const CatalogViewerModal: React.FC = () => {
           aria-label="按作战域筛选装备"
           value={domainFilter}
           onChange={(e) => setDomainFilter(e.target.value)}
+          className="w-auto min-w-[132px]"
         >
           <option value="ALL">全部作战域</option>
           <option value="air">空中域 (AIR)</option>

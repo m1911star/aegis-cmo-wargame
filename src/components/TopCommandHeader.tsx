@@ -133,7 +133,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             disabled={hasStarted || timeScale !== 0}
             value={playerSide}
             onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')}
-            className="h-7 text-[11px]"
+            className="w-auto min-w-[92px] h-7 text-[11px]"
           >
             <option value="RED">指挥红方</option><option value="BLUE">指挥蓝方</option>
           </Select>

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Flame, Shield } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 import type { RuntimeUnit } from '../../types/wargame';
+import { Button } from '../ui/button';
+import { Select } from '../ui/select';
 
 interface Props {
   unit: RuntimeUnit;
@@ -18,8 +20,8 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
   return (
     <>
       <div className="space-y-1.5">
-        <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold">
-          <Shield className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1.5 text-[11px] text-foreground font-semibold">
+          <Shield className="w-3.5 h-3.5 text-muted-foreground" />
           <span>传感器</span>
         </div>
         <div className="space-y-1.5">
@@ -37,17 +39,17 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
             return (
               <div
                 key={sId}
-                className="px-2 py-1.5 rounded bg-slate-900/75 border border-slate-800/80 stat-line flex items-center justify-between text-[11px]"
+                className="px-2.5 py-2 rounded-lg bg-muted/40 border border-border stat-line flex items-center justify-between text-[11px]"
               >
                 <div className="min-w-0">
-                  <div className="text-slate-200 font-medium truncate">{sensor.name}</div>
-                  <div className="text-[10px] text-slate-400">
+                  <div className="text-foreground font-medium truncate">{sensor.name}</div>
+                  <div className="text-[10px] text-muted-foreground">
                     {sensor.frequencyBand} · 最大距离 {sensor.maxRangeKm} km
                   </div>
                 </div>
                 <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0 ${
-                    isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-500'
+                  className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold shrink-0 border ${
+                    isOnline ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-secondary text-muted-foreground border-border'
                   }`}
                 >
                   {isOnline ? '在线' : '静默'}
@@ -58,37 +60,38 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
         </div>
       </div>
 
-      <div className="pt-2.5 border-t border-slate-800/80 space-y-2">
-        <div className="flex items-center gap-1 text-[11px] text-rose-400 font-bold">
-          <Flame className="w-3.5 h-3.5" />
+      <div className="pt-2.5 border-t border-border space-y-2">
+        <div className="flex items-center gap-1.5 text-[11px] text-foreground font-semibold">
+          <Flame className="w-3.5 h-3.5 text-rose-400" />
           <span>武器与弹药</span>
         </div>
 
         {unit.mounts.length === 0 ? (
-          <div className="text-[11px] text-slate-500 py-1">该平台为纯支援/侦察节点，无进攻性武器挂架</div>
+          <div className="text-[11px] text-muted-foreground py-1">该平台为纯支援/侦察节点，无进攻性武器挂架</div>
         ) : (
           <div className="space-y-2">
             {unit.mounts.map((m) => {
               const wSpec = catalog.weapons[m.weaponId];
               if (!wSpec) return null;
               return (
-                <div key={m.mountId} className="p-2 rounded bg-slate-900/85 border border-slate-800/90 space-y-1.5">
+                <div key={m.mountId} className="p-2.5 rounded-lg bg-muted/40 border border-border space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-slate-100 truncate">{wSpec.name}</span>
-                    <span className="text-xs font-bold text-cyan-300 font-mono tabular-nums shrink-0">{m.currentAmmo} / {m.maxAmmo} 发</span>
+                    <span className="text-xs font-semibold text-foreground truncate">{wSpec.name}</span>
+                    <span className="text-xs font-semibold text-foreground font-mono tabular-nums shrink-0">{m.currentAmmo} / {m.maxAmmo} 发</span>
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
                     <span>
                       射程: {wSpec.maxRangeKm}km · 速度: {(wSpec.speedKts / 661).toFixed(1)}马赫 · 基准 Pk: {Math.round(wSpec.basePk * 100)}%
                       {wSpec.requiresDatalinkBeyondHorizon ? ' · CEC中继' : ''}
                     </span>
-                    <button
+                    <Button
+                      size="xs"
+                      variant="destructive"
                       disabled={m.currentAmmo <= 0 || m.cooldownRemainingSec > 0 || !canFire}
                       onClick={() => startManualEngage(m.weaponId, unit.doctrine.salvoSize)}
-                      className="px-2 py-0.5 rounded bg-rose-600/85 hover:bg-rose-500 disabled:opacity-30 text-white font-bold cursor-pointer transition"
                     >
                       点选目标发射
-                    </button>
+                    </Button>
                   </div>
                 </div>
               );
@@ -98,8 +101,8 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
       </div>
 
       {unit.hangar && unit.hangar.length > 0 && (
-        <div className="pt-2.5 border-t border-slate-800/80 space-y-2">
-          <div className="text-[11px] text-emerald-300 font-bold">母舰机库与甲板弹射</div>
+        <div className="pt-2.5 border-t border-border space-y-2">
+          <div className="text-[11px] text-emerald-300 font-semibold">母舰机库与甲板弹射</div>
           <div className="space-y-2">
             {unit.hangar.map((slot) => {
               const selectionKey = `${unit.id}:${slot.slotId}`;
@@ -108,37 +111,40 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
                 ? pendingSelection
                 : slot.selectedLoadoutId;
               return (
-                <div key={slot.slotId} className="p-2 rounded bg-emerald-950/20 border border-emerald-500/35 space-y-1.5">
+                <div key={slot.slotId} className="p-2.5 rounded-lg bg-emerald-500/8 border border-emerald-500/25 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-slate-100 truncate">{slot.squadronName}</span>
-                    <span className="text-[11px] font-bold text-emerald-400 font-mono tabular-nums shrink-0">待命: {slot.readyAirframes}/{slot.totalAirframes} 批</span>
+                    <span className="text-xs font-semibold text-foreground truncate">{slot.squadronName}</span>
+                    <span className="text-[11px] font-semibold text-emerald-300 font-mono tabular-nums shrink-0">待命: {slot.readyAirframes}/{slot.totalAirframes} 批</span>
                   </div>
-                  <div className="text-[10px] text-slate-400">
+                  <div className="text-[10px] text-muted-foreground">
                     回收整备: {slot.turnaroundQueue.length} 批 · 可用补给: {slot.turnaroundSupplies} 批
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <select
+                    <Select
                       aria-label={`${slot.squadronName} 起飞挂载`}
                       value={selectedLoadoutId}
                       onChange={(event) => setHangarLoadoutSelections((current) => ({
                         ...current,
                         [selectionKey]: event.target.value,
                       }))}
-                      className="min-w-0 flex-1 h-7 bg-slate-900 border border-emerald-500/35 rounded px-1.5 text-[10px] text-emerald-100 cursor-pointer"
+                      wrapperClassName="flex-1"
+                      className="h-7 text-[10px] border-emerald-500/35"
                     >
                       {slot.availableLoadoutIds.map((loadoutId) => (
                         <option key={loadoutId} value={loadoutId}>
                           {catalog.loadouts[loadoutId]?.name || loadoutId}
                         </option>
                       ))}
-                    </select>
-                    <button
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="success"
                       disabled={slot.readyAirframes <= 0 || slot.cooldownRemainingSec > 0}
                       onClick={() => launchCarrierAircraft(unit.id, slot.slotId, selectedLoadoutId)}
-                      className="h-7 px-2.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-35 text-slate-950 font-bold text-[11px] cursor-pointer shrink-0 transition"
+                      className="shrink-0"
                     >
                       {slot.cooldownRemainingSec > 0 ? `甲板整备 (${slot.cooldownRemainingSec}s)` : '弹射升空'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               );

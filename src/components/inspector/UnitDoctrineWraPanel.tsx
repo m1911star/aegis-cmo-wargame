@@ -5,6 +5,8 @@ import { domainLabels } from '../../ui/labels';
 import type { Domain, PlatformSpec, ROEStatus, RuntimeUnit, TacticalMission, ThreatLevel } from '../../types/wargame';
 import { Input } from '../ui/input';
 import { Select } from '../ui/select';
+import { Separator } from '../ui/separator';
+import { Switch } from '../ui/switch';
 
 interface Props {
   unit: RuntimeUnit;
@@ -24,29 +26,29 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
   const unitDead = unit.hp <= 0 || unit.status === 'destroyed';
 
   return (
-    <div className="space-y-2.5">
-      <div className="stat-line telemetry-heading flex items-center justify-between text-[11px] text-cyan-400 font-bold">
-        <span className="flex items-center gap-1">
-          <Radio className="w-3.5 h-3.5" /> 电磁管控与交战条令
+    <div className="space-y-3">
+      <div className="stat-line telemetry-heading flex items-center justify-between text-[11px] text-foreground font-semibold">
+        <span className="flex items-center gap-1.5">
+          <Radio className="w-3.5 h-3.5 text-muted-foreground" /> 电磁管控与交战条令
         </span>
-        <span className="text-[10px] text-slate-500 font-mono">[F9]</span>
+        <span className="text-[10px] text-muted-foreground font-mono">[F9]</span>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 text-[10px]">
+      <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-muted/70 border border-border text-[10px]">
         {(
           [
-            { id: 'free', label: '自由开火', color: 'bg-rose-600 text-white border-rose-500' },
-            { id: 'tight', label: '自卫反导', color: 'bg-amber-500 text-slate-950 border-amber-400' },
-            { id: 'hold', label: '停止自动开火', color: 'bg-emerald-600 text-white border-emerald-500' },
+            { id: 'free', label: '自由开火', color: 'bg-rose-600 text-white shadow-xs' },
+            { id: 'tight', label: '自卫反导', color: 'bg-amber-500 text-zinc-950 shadow-xs' },
+            { id: 'hold', label: '停止自动开火', color: 'bg-emerald-600 text-white shadow-xs' },
           ] as { id: ROEStatus; label: string; color: string }[]
         ).map((r) => (
           <button
             key={r.id}
             onClick={() => updateUnitDoctrine(unit.id, { roe: r.id })}
-            className={`h-7 px-1 rounded border font-bold cursor-pointer transition whitespace-nowrap ${
+            className={`h-7 px-1 rounded-md font-semibold cursor-pointer transition-colors whitespace-nowrap ${
               unit.doctrine.roe === r.id
                 ? r.color
-                : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 border-slate-800'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
             }`}
           >
             {r.label}
@@ -57,139 +59,135 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
       <div className="grid grid-cols-3 gap-1.5">
         <button
           onClick={() => updateUnitDoctrine(unit.id, { emconRadar: !unit.doctrine.emconRadar })}
-          className={`px-2 py-1.5 rounded border text-left cursor-pointer transition ${
+          className={`px-2 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
             unit.doctrine.emconRadar
-              ? 'bg-cyan-500/20 border-cyan-400/80 text-cyan-200'
-              : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700'
+              ? 'bg-sky-500/15 border-sky-400/50 text-sky-200'
+              : 'bg-secondary/60 border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground'
           }`}
         >
-          <div className="text-[10px] text-slate-400 leading-tight">主动雷达</div>
-          <div className="flex items-center gap-1 text-[11px] font-bold mt-1 whitespace-nowrap">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${unit.doctrine.emconRadar ? 'bg-cyan-300 shadow-[0_0_6px_#67e8f9]' : 'bg-slate-600'}`} />
+          <div className="text-[10px] text-muted-foreground leading-tight">主动雷达</div>
+          <div className="flex items-center gap-1 text-[11px] font-semibold mt-1 whitespace-nowrap">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${unit.doctrine.emconRadar ? 'bg-sky-400' : 'bg-zinc-600'}`} />
             <span>{unit.doctrine.emconRadar ? '雷达开启' : '电磁静默'}</span>
           </div>
         </button>
 
         <button
           onClick={() => updateUnitDoctrine(unit.id, { emconJamming: !unit.doctrine.emconJamming })}
-          className={`px-2 py-1.5 rounded border text-left cursor-pointer transition ${
+          className={`px-2 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
             unit.doctrine.emconJamming
-              ? 'bg-purple-500/25 border-purple-400/80 text-purple-200'
-              : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700'
+              ? 'bg-purple-500/20 border-purple-400/50 text-purple-200'
+              : 'bg-secondary/60 border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground'
           }`}
         >
-          <div className="text-[10px] text-slate-400 leading-tight">有源干扰</div>
-          <div className="flex items-center gap-1 text-[11px] font-bold mt-1 whitespace-nowrap">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${unit.doctrine.emconJamming ? 'bg-purple-300 shadow-[0_0_6px_#d8b4fe]' : 'bg-slate-600'}`} />
+          <div className="text-[10px] text-muted-foreground leading-tight">有源干扰</div>
+          <div className="flex items-center gap-1 text-[11px] font-semibold mt-1 whitespace-nowrap">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${unit.doctrine.emconJamming ? 'bg-purple-400' : 'bg-zinc-600'}`} />
             <span>{unit.doctrine.emconJamming ? '压制开启' : '干扰静默'}</span>
           </div>
         </button>
 
         <button
           onClick={() => updateUnitDoctrine(unit.id, { emconSonar: !unit.doctrine.emconSonar })}
-          className={`px-2 py-1.5 rounded border text-left cursor-pointer transition ${
+          className={`px-2 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
             unit.doctrine.emconSonar
-              ? 'bg-emerald-500/20 border-emerald-400/80 text-emerald-200'
-              : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700'
+              ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-200'
+              : 'bg-secondary/60 border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground'
           }`}
         >
-          <div className="text-[10px] text-slate-400 leading-tight">主动声呐</div>
-          <div className="flex items-center gap-1 text-[11px] font-bold mt-1 whitespace-nowrap">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${unit.doctrine.emconSonar ? 'bg-emerald-300 shadow-[0_0_6px_#6ee7b7]' : 'bg-slate-600'}`} />
+          <div className="text-[10px] text-muted-foreground leading-tight">主动声呐</div>
+          <div className="flex items-center gap-1 text-[11px] font-semibold mt-1 whitespace-nowrap">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${unit.doctrine.emconSonar ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
             <span>{unit.doctrine.emconSonar ? '主动探测' : '被动监听'}</span>
           </div>
         </button>
       </div>
 
-      <div className="space-y-1 pt-1.5 border-t border-slate-800/80 text-[10px]">
-        <div className="text-slate-400">软杀伤手动投放</div>
+      <Separator />
+
+      <div className="space-y-1.5 text-[10px]">
+        <div className="text-muted-foreground">软杀伤手动投放</div>
         <div className="grid grid-cols-3 gap-1.5">
           <button
             disabled={unitDead || unit.countermeasures.chaff <= 0}
             onClick={() => deployCountermeasure(unit.id, 'chaff')}
-            className="h-6 px-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer font-mono tabular-nums whitespace-nowrap transition"
+            className="h-7 px-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-200 disabled:opacity-35 cursor-pointer font-mono tabular-nums whitespace-nowrap transition-colors"
           >
             箔条({unit.countermeasures.chaff})
           </button>
           <button
             disabled={unitDead || unit.countermeasures.flares <= 0}
             onClick={() => deployCountermeasure(unit.id, 'flares')}
-            className="h-6 px-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer font-mono tabular-nums whitespace-nowrap transition"
+            className="h-7 px-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-200 disabled:opacity-35 cursor-pointer font-mono tabular-nums whitespace-nowrap transition-colors"
           >
             红外({unit.countermeasures.flares})
           </button>
           <button
             disabled={unitDead || unit.countermeasures.acousticDecoys <= 0}
             onClick={() => deployCountermeasure(unit.id, 'acousticDecoys')}
-            className="h-6 px-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer font-mono tabular-nums whitespace-nowrap transition"
+            className="h-7 px-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-200 disabled:opacity-35 cursor-pointer font-mono tabular-nums whitespace-nowrap transition-colors"
           >
             声诱饵({unit.countermeasures.acousticDecoys})
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-        <button
-          disabled={unitDead}
-          aria-pressed={unit.doctrine.autoEvade}
-          onClick={() => updateUnitDoctrine(unit.id, { autoEvade: !unit.doctrine.autoEvade })}
-          className={`h-7 px-2 rounded border flex items-center justify-between cursor-pointer disabled:opacity-35 transition whitespace-nowrap ${
-            unit.doctrine.autoEvade ? 'bg-cyan-500/20 border-cyan-400/80 text-cyan-200' : 'bg-slate-900/90 border-slate-800 text-slate-400'
-          }`}
-        >
-          <span>自动规避</span>
-          <span className="font-bold">{unit.doctrine.autoEvade ? '开启' : '关闭'}</span>
-        </button>
-        <button
-          disabled={unitDead}
-          aria-pressed={!!unit.doctrine.requireIdentifiedForAutoFire}
-          onClick={() => updateUnitDoctrine(unit.id, { requireIdentifiedForAutoFire: !unit.doctrine.requireIdentifiedForAutoFire })}
-          className={`h-7 px-2 rounded border flex items-center justify-between cursor-pointer disabled:opacity-35 transition whitespace-nowrap ${
-            unit.doctrine.requireIdentifiedForAutoFire ? 'bg-amber-500/20 border-amber-400/80 text-amber-200' : 'bg-slate-900/90 border-slate-800 text-slate-400'
-          }`}
-        >
-          <span>识别后开火</span>
-          <span className="font-bold">{unit.doctrine.requireIdentifiedForAutoFire ? '开启' : '关闭'}</span>
-        </button>
-        {unit.domain === 'land' && platformSpec.maxSpeedKts > 0 && (
-          <button
+      <div className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-2 text-[11px]">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-foreground">自动规避威胁</span>
+          <Switch
+            aria-label="自动规避"
             disabled={unitDead}
-            aria-pressed={!!unit.doctrine.shootAndScoot}
-            onClick={() => updateUnitDoctrine(unit.id, { shootAndScoot: !unit.doctrine.shootAndScoot })}
-            className={`col-span-2 h-7 px-2 rounded border flex items-center justify-between cursor-pointer disabled:opacity-35 transition ${
-              unit.doctrine.shootAndScoot ? 'bg-emerald-500/20 border-emerald-400/80 text-emerald-200' : 'bg-slate-900/90 border-slate-800 text-slate-400'
-            }`}
-          >
-            <span>发射后机动规避 (Shoot-and-Scoot)</span>
-            <span className="font-bold">{unit.doctrine.shootAndScoot ? '开启' : '关闭'}</span>
-          </button>
+            checked={unit.doctrine.autoEvade}
+            onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { autoEvade: checked })}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-foreground">仅攻击已识别目标</span>
+          <Switch
+            aria-label="识别后开火"
+            disabled={unitDead}
+            checked={!!unit.doctrine.requireIdentifiedForAutoFire}
+            onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { requireIdentifiedForAutoFire: checked })}
+          />
+        </div>
+        {unit.domain === 'land' && platformSpec.maxSpeedKts > 0 && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+            <span className="text-foreground">发射后机动规避</span>
+            <Switch
+              aria-label="发射后机动规避"
+              disabled={unitDead}
+              checked={!!unit.doctrine.shootAndScoot}
+              onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { shootAndScoot: checked })}
+            />
+          </div>
         )}
       </div>
 
       {platformSpec.availableLoadoutIds && platformSpec.availableLoadoutIds.length > 0 && (
-        <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+        <div className="pt-2 border-t border-border space-y-1.5">
           <div className="flex items-center justify-between text-[10px]">
-            <span className="text-amber-300 font-bold">战术挂载方案切换</span>
-            {loadoutLocked && <span className="text-slate-400">推演中锁定（沙盒可改）</span>}
+            <span className="text-amber-300 font-semibold">战术挂载方案切换</span>
+            {loadoutLocked && <span className="text-muted-foreground">推演中锁定（沙盒可改）</span>}
           </div>
-          <select
+          <Select
             aria-label="战术挂载方案切换"
             disabled={loadoutLocked || unitDead}
             value={unit.activeLoadoutId || ''}
             onChange={(e) => switchUnitLoadout(unit.id, e.target.value)}
-            className="w-full h-7 bg-background/90 border border-amber-500/40 rounded-md px-2 text-[11px] text-amber-200 cursor-pointer disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-7 text-[11px] border-amber-500/35 text-amber-200"
           >
             {platformSpec.availableLoadoutIds.map((lid) => {
               const lSpec = catalog.loadouts[lid];
               return <option key={lid} value={lid}>{lSpec ? lSpec.name : lid}</option>;
             })}
-          </select>
+          </Select>
         </div>
       )}
 
-      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border/80">
+      <div className="flex items-center justify-between text-[11px] pt-2 border-t border-border">
         <span className="text-muted-foreground">单次齐射</span>
-        <div className="inline-flex p-0.5 rounded-md bg-background/85 border border-border gap-0.5">
+        <div className="inline-flex p-0.5 rounded-md bg-muted border border-border gap-0.5">
           {[1, 2, 4].map((num) => (
             <button
               key={num}
@@ -204,14 +202,14 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-[10px] pt-1.5 border-t border-border/80">
+      <div className="grid grid-cols-2 gap-2 text-[10px] pt-2 border-t border-border">
         <label className="space-y-1 text-muted-foreground">
           <span className="block">自动开火距离</span>
           <Select
             aria-label="自动开火最大射程比例"
             value={unit.doctrine.automaticFireRangeFraction}
             onChange={(event) => updateUnitDoctrine(unit.id, { automaticFireRangeFraction: Number(event.target.value) })}
-            className="h-7 text-[11px] pl-2 pr-6"
+            className="h-7 text-[11px]"
           >
             <option value={0.5}>最大射程 50%</option>
             <option value={0.75}>最大射程 75%</option>
@@ -236,8 +234,7 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
             aria-label="自动开火最低威胁等级"
             value={unit.doctrine.minimumAutomaticThreat}
             onChange={(event) => updateUnitDoctrine(unit.id, { minimumAutomaticThreat: event.target.value as ThreatLevel })}
-            wrapperClassName="min-w-[88px]"
-            className="h-7 text-[11px] pl-2 pr-6"
+            className="w-auto min-w-[96px] h-7 text-[11px]"
           >
             <option value="low">低</option>
             <option value="medium">中</option>
@@ -260,7 +257,7 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
                       : [...unit.doctrine.automaticTargetDomains, domain],
                   })}
                   className={`h-7 px-1 rounded-md border cursor-pointer transition-colors ${
-                    enabled ? 'bg-cyan-500/15 text-cyan-200 border-cyan-400/50 font-medium' : 'bg-secondary/50 text-muted-foreground border-border hover:text-foreground'
+                    enabled ? 'bg-primary text-primary-foreground border-primary font-semibold' : 'bg-secondary/50 text-muted-foreground border-border hover:text-foreground'
                   }`}
                 >
                   {domainLabels[domain]}
@@ -271,13 +268,13 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
         </div>
       </div>
 
-      <label className="block space-y-1 pt-1.5 border-t border-border/80 text-[10px]">
+      <label className="block space-y-1 pt-2 border-t border-border text-[10px]">
         <span className="block text-muted-foreground">配属任务</span>
         <Select
           aria-label="配属任务"
           value={unit.assignedMissionId || ''}
           onChange={(e) => assignUnitMission(unit.id, e.target.value ? e.target.value : undefined)}
-          className="h-7 text-[11px] pl-2 pr-6"
+          className="h-7 text-[11px]"
         >
           <option value="">-- 人工直接指挥 --</option>
           {eligibleMissions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}

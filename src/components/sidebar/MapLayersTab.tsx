@@ -2,6 +2,7 @@ import React from 'react';
 import { BASEMAP_PRESETS, type BasemapMode } from '../../map/basemaps';
 import { useWargameStore, type MapLayerVisibility } from '../../store/useWargameStore';
 import { Select } from '../ui/select';
+import { Switch } from '../ui/switch';
 
 const LAYER_ITEMS: {
   key: keyof MapLayerVisibility;
@@ -45,18 +46,20 @@ export const MapLayersTab: React.FC = () => {
           <div
             key={item.key}
             onClick={() => toggleMapLayer(item.key)}
-            className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-              active ? 'bg-cyan-500/10 border-cyan-500/35 text-foreground' : 'bg-card/60 border-border text-muted-foreground hover:bg-accent/40'
+            className={`p-2.5 rounded-lg border flex items-center justify-between gap-2.5 cursor-pointer transition-colors ${
+              active ? 'bg-card border-white/15 text-foreground' : 'bg-card/50 border-border text-muted-foreground hover:bg-accent/40'
             }`}
           >
             <div className="min-w-0">
               <div className="text-xs font-medium">{item.label}</div>
               <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{item.desc}</div>
             </div>
-            <div className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-              active ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary text-muted-foreground border-border'
-            }`}>
-              {active ? '开' : '关'}
+            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+              <Switch
+                aria-label={item.label}
+                checked={active}
+                onCheckedChange={() => toggleMapLayer(item.key)}
+              />
             </div>
           </div>
         );

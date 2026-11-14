@@ -16,6 +16,7 @@ import { useWargameStore } from '../../store/useWargameStore';
 import { Button } from '../ui/button';
 import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
 import { Input } from '../ui/input';
+import { Slider } from '../ui/slider';
 import { Textarea } from '../ui/textarea';
 
 function recordingUntilTick(jsonText: string): number | undefined {
@@ -147,14 +148,12 @@ export const ScenarioIoModal: React.FC = () => {
               <span>REPLAY TIMELINE</span>
               <span className="font-mono">Tick {selectedReplayTick} / {replayUntilTick}</span>
             </div>
-            <input
+            <Slider
               aria-label="回放时间轴"
-              type="range"
               min={0}
               max={replayUntilTick}
               value={selectedReplayTick}
               onChange={(event) => setReplayTick(Number(event.target.value))}
-              className="w-full accent-cyan-400"
             />
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => {
