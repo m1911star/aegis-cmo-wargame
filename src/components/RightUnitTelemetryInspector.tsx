@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Crosshair, Navigation } from 'lucide-react';
+import { ChevronDown, Crosshair, Navigation } from 'lucide-react';
 import ms from 'milsymbol';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 import { calculateRadarHorizonKm } from '../engine/simulationEngine';
@@ -124,20 +124,20 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const isDestroyed = selectedUnit.hp <= 0 || selectedUnit.status === 'destroyed';
 
   return (
-    <aside className="z-20 w-full h-full tactical-panel border-l border-cyan-500/25 flex flex-col overflow-y-auto p-3 space-y-4 inspector-content">
-      <div className="sticky top-0 z-10 -mx-1 px-2.5 py-2 rounded bg-slate-950/95 border border-cyan-500/40 shadow-lg space-y-2">
-        <div className="flex items-center gap-3">
+    <aside className="z-20 w-full h-full tactical-panel border-l border-cyan-500/25 flex flex-col overflow-hidden">
+      <div className="flex-none p-2.5 bg-[#060d1b] border-b border-cyan-500/30 shadow-md space-y-2">
+        <div className="flex items-center gap-2.5">
           <div className="w-10 h-10 flex items-center justify-center shrink-0" dangerouslySetInnerHTML={{ __html: symbolSvgHtml }} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
                 selectedUnit.side === 'RED'
                   ? 'bg-rose-500/25 text-rose-300 border border-rose-500/40'
                   : 'bg-sky-500/25 text-sky-300 border border-sky-500/40'
               }`}>
                 {selectedUnit.callsign}
               </span>
-              <span className="text-[10px] text-cyan-300 uppercase">
+              <span className="text-[10px] text-cyan-300 uppercase truncate">
                 {domainLabels[selectedUnit.domain]} · {statusLabels[selectedUnit.status]}
               </span>
             </div>
@@ -145,16 +145,16 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
+        <div className="grid grid-cols-3 gap-2 text-[10px] font-mono tabular-nums">
           <div>
             <div className="flex justify-between text-slate-300"><span>耐久</span><span>{hpPct}%</span></div>
-            <div className="h-1 bg-slate-800 rounded overflow-hidden mt-0.5">
+            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5">
               <div className={`h-full ${hpPct > 50 ? 'bg-emerald-400' : hpPct > 25 ? 'bg-amber-400' : 'bg-rose-500'}`} style={{ width: `${hpPct}%` }} />
             </div>
           </div>
           <div>
             <div className="flex justify-between text-slate-300"><span>燃油</span><span>{selectedUnit.domain === 'air' ? `${fuelPct}%` : '常驻'}</span></div>
-            <div className="h-1 bg-slate-800 rounded overflow-hidden mt-0.5">
+            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5">
               <div className="h-full bg-cyan-400" style={{ width: `${fuelPct}%` }} />
             </div>
           </div>
@@ -165,11 +165,11 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
         </div>
 
         {(readyHangarSlot || selectedUnit.status === 'returning') && !isDestroyed && (
-          <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/80">
+          <div className="flex flex-wrap gap-1.5 pt-1.5 border-t border-slate-800/80">
             {readyHangarSlot && (
               <button
                 onClick={() => launchCarrierAircraft(selectedUnit.id, readyHangarSlot.slotId, readyHangarSlot.selectedLoadoutId)}
-                className="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[10px] cursor-pointer"
+                className="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[10px] cursor-pointer transition"
               >
                 快捷出动 {readyHangarSlot.squadronName.slice(0, 12)}
               </button>
@@ -178,7 +178,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
               <button
                 disabled={selectedUnit.fuelRemainingSec <= 0}
                 onClick={() => cancelUnitReturn(selectedUnit.id)}
-                className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-[10px] cursor-pointer"
+                className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-[10px] cursor-pointer transition"
                 title={selectedUnit.fuelRemainingSec <= 0 ? '燃油耗尽不可取消返航' : '中断返航并恢复人工接管'}
               >
                 取消返航
@@ -191,129 +191,144 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
         )}
       </div>
 
-      <div className="text-xs p-2 rounded bg-slate-950/80 border border-slate-800 space-y-1">
-        <p>能力状态：{capabilities?.state === 'mission_killed' ? '任务失能' : capabilities?.state === 'damaged' ? '受损降级' : '正常'}</p>
-        {selectedUnit.domain === 'air' && <p>剩余燃油预算：{Math.floor(selectedUnit.fuelRemainingSec / 60)} 分钟（按巡航基准）</p>}
-        <p>导航：{selectedUnit.status === 'returning' ? '资源约束返航' : selectedUnit.navigationMode === 'manual' ? '人工指挥' : '任务自动驾驶'}</p>
-      </div>
-
-      {selectedUnit.category === 'tanker' && (
-        <div className="p-2 rounded bg-sky-950/30 border border-sky-500/30 text-[11px] text-sky-200">
-          可转移燃油：{Math.round(selectedUnit.aarFuelRemainingSec)} 秒 · 等待队列 {selectedUnit.aarQueue.length} 架
-        </div>
-      )}
-      {selectedUnit.domain === 'air' && selectedUnit.category !== 'tanker' && availableTankers.length > 0 && (
-        <div className="p-2 rounded bg-sky-950/30 border border-sky-500/30 flex items-center gap-2 text-[11px]">
-          <select aria-label="选择加油机" value={selectedTanker?.id ?? ''} onChange={(event) => setSelectedTankerId(event.target.value)}
-            className="min-w-0 flex-1 bg-slate-900 rounded p-1 text-sky-200">
-            {availableTankers.map((tanker) => <option key={tanker.id} value={tanker.id}>{tanker.callsign} · {Math.round(tanker.aarFuelRemainingSec)}秒</option>)}
-          </select>
-          <button disabled={!selectedTanker || !!selectedUnit.airRefuelState || selectedUnit.fuelRemainingSec >= selectedUnit.maxFuelSec}
-            onClick={() => selectedTanker && requestAirRefuel(selectedUnit.id, selectedTanker.id)}
-            className="px-2 py-1 rounded bg-sky-500 text-slate-950 font-bold disabled:opacity-35">
-            {selectedUnit.airRefuelState ? selectedUnit.airRefuelState.phase === 'rendezvous' ? '会合中' : '加油中' : '请求加油'}
-          </button>
-        </div>
-      )}
-      {Object.entries(selectedUnit.deployableInventory).some(([, count]) => count > 0) && (
-        <div className="p-2 rounded bg-violet-950/30 border border-violet-500/30 space-y-1 text-[11px]">
-          <div className="text-violet-300 font-bold">携带式无人/诱饵平台</div>
-          {Object.entries(selectedUnit.deployableInventory).map(([pid, count]) => (
-            <div key={pid} className="flex items-center justify-between gap-2">
-              <span>{catalog.platforms[pid]?.name ?? pid} · {count}</span>
-              <button disabled={count <= 0} onClick={() => deployCarriedPlatform(selectedUnit.id, pid)}
-                className="px-2 py-1 rounded bg-violet-500 text-white disabled:opacity-35">释放</button>
+      <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 inspector-content">
+        <div className="text-[11px] bg-slate-950/70 border border-slate-800/90 space-y-1 text-slate-300 leading-relaxed">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-slate-400">能力状态</span>
+            <span className={capabilities?.state === 'mission_killed' ? 'text-rose-300 font-semibold' : capabilities?.state === 'damaged' ? 'text-amber-300 font-semibold' : 'text-emerald-300 font-semibold'}>
+              {capabilities?.state === 'mission_killed' ? '任务失能' : capabilities?.state === 'damaged' ? '受损降级' : '正常'}
+            </span>
+          </div>
+          {selectedUnit.domain === 'air' && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-slate-400">剩余燃油预算</span>
+              <span className="font-mono tabular-nums text-cyan-300">{Math.floor(selectedUnit.fuelRemainingSec / 60)} 分钟</span>
             </div>
-          ))}
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-slate-400">导航模式</span>
+            <span className="text-slate-200">{selectedUnit.status === 'returning' ? '资源约束返航' : selectedUnit.navigationMode === 'manual' ? '人工指挥' : '任务自动驾驶'}</span>
+          </div>
         </div>
-      )}
 
-      <div className="unit-actions grid grid-cols-2 gap-2">
-        <button
-          onClick={() => setInteractionMode(interactionMode === 'plot_waypoint' ? 'select' : 'plot_waypoint')}
-          className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded text-xs font-bold border cursor-pointer transition ${
-            interactionMode === 'plot_waypoint'
-              ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
-              : 'bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-200 border-cyan-500/40'
-          }`}
-        >
-          <Navigation className="w-3.5 h-3.5" />
-          <span>[F3] 规划航线</span>
-        </button>
+        {selectedUnit.category === 'tanker' && (
+          <div className="bg-sky-950/30 border border-sky-500/30 text-[11px] text-sky-200">
+            可转移燃油：{Math.round(selectedUnit.aarFuelRemainingSec)} 秒 · 等待队列 {selectedUnit.aarQueue.length} 架
+          </div>
+        )}
+        {selectedUnit.domain === 'air' && selectedUnit.category !== 'tanker' && availableTankers.length > 0 && (
+          <div className="bg-sky-950/30 border border-sky-500/30 flex items-center gap-2 text-[11px]">
+            <select aria-label="选择加油机" value={selectedTanker?.id ?? ''} onChange={(event) => setSelectedTankerId(event.target.value)}
+              className="min-w-0 flex-1 h-7 bg-slate-900 border border-slate-700/80 rounded px-1.5 text-sky-200">
+              {availableTankers.map((tanker) => <option key={tanker.id} value={tanker.id}>{tanker.callsign} · {Math.round(tanker.aarFuelRemainingSec)}秒</option>)}
+            </select>
+            <button disabled={!selectedTanker || !!selectedUnit.airRefuelState || selectedUnit.fuelRemainingSec >= selectedUnit.maxFuelSec}
+              onClick={() => selectedTanker && requestAirRefuel(selectedUnit.id, selectedTanker.id)}
+              className="h-7 px-2 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold disabled:opacity-35 cursor-pointer transition">
+              {selectedUnit.airRefuelState ? selectedUnit.airRefuelState.phase === 'rendezvous' ? '会合中' : '加油中' : '请求加油'}
+            </button>
+          </div>
+        )}
+        {Object.entries(selectedUnit.deployableInventory).some(([, count]) => count > 0) && (
+          <div className="bg-violet-950/30 border border-violet-500/30 space-y-1.5 text-[11px]">
+            <div className="text-violet-300 font-bold">携带式无人/诱饵平台</div>
+            {Object.entries(selectedUnit.deployableInventory).map(([pid, count]) => (
+              <div key={pid} className="flex items-center justify-between gap-2">
+                <span className="truncate">{catalog.platforms[pid]?.name ?? pid} · {count}</span>
+                <button disabled={count <= 0} onClick={() => deployCarriedPlatform(selectedUnit.id, pid)}
+                  className="px-2 py-0.5 rounded bg-violet-500 hover:bg-violet-400 text-white disabled:opacity-35 cursor-pointer transition">释放</button>
+              </div>
+            ))}
+          </div>
+        )}
 
-        <button
-          onClick={() =>
-            interactionMode === 'manual_engage'
-              ? setInteractionMode('select')
-              : startManualEngage(undefined, selectedUnit.doctrine.salvoSize)
-          }
-          className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded text-xs font-bold border cursor-pointer transition ${
-            interactionMode === 'manual_engage'
-              ? 'bg-rose-500 text-white border-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.6)]'
-              : 'bg-rose-950/60 hover:bg-rose-900/70 text-rose-200 border-rose-500/40'
-          }`}
-        >
-          <Crosshair className="w-3.5 h-3.5" />
-          <span>[F1] 手动齐射</span>
-        </button>
-
-        {playMode === 'sandbox' && (
+        <div className="unit-actions grid grid-cols-2 gap-2">
           <button
-            onClick={() => setInteractionMode(interactionMode === 'move_unit' ? 'select' : 'move_unit')}
-            className={`col-span-2 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded text-xs font-bold border cursor-pointer ${
-              interactionMode === 'move_unit' ? 'bg-emerald-500 text-slate-950 border-emerald-300' :
-                'bg-emerald-950/60 text-emerald-200 border-emerald-500/40'
+            onClick={() => setInteractionMode(interactionMode === 'plot_waypoint' ? 'select' : 'plot_waypoint')}
+            className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded text-xs font-bold border cursor-pointer transition ${
+              interactionMode === 'plot_waypoint'
+                ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
+                : 'bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-200 border-cyan-500/40'
             }`}
           >
-            沙盒移动单位
+            <Navigation className="w-3.5 h-3.5" />
+            <span>[F3] 规划航线</span>
           </button>
-        )}
+
+          <button
+            onClick={() =>
+              interactionMode === 'manual_engage'
+                ? setInteractionMode('select')
+                : startManualEngage(undefined, selectedUnit.doctrine.salvoSize)
+            }
+            className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded text-xs font-bold border cursor-pointer transition ${
+              interactionMode === 'manual_engage'
+                ? 'bg-rose-500 text-white border-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.6)]'
+                : 'bg-rose-950/60 hover:bg-rose-900/70 text-rose-200 border-rose-500/40'
+            }`}
+          >
+            <Crosshair className="w-3.5 h-3.5" />
+            <span>[F1] 手动齐射</span>
+          </button>
+
+          {playMode === 'sandbox' && (
+            <button
+              onClick={() => setInteractionMode(interactionMode === 'move_unit' ? 'select' : 'move_unit')}
+              className={`col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-xs font-bold border cursor-pointer transition ${
+                interactionMode === 'move_unit' ? 'bg-emerald-500 text-slate-950 border-emerald-300' :
+                  'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 border-emerald-500/40'
+              }`}
+            >
+              沙盒移动单位
+            </button>
+          )}
+        </div>
+
+        <details open className="group bg-slate-950/70 border border-slate-800/90">
+          <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between py-0.5">
+            <span>运动与航路控制</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-2.5 pt-2.5 border-t border-slate-800/80">
+            <UnitKinematicsPanel
+              unit={selectedUnit}
+              platformSpec={platformSpec}
+              maxSpeedKts={configuration.maxSpeedKts}
+              rcsPenaltyM2={configuration.rcsPenaltyM2}
+              radarHorizons={radarHorizons}
+              groupUnits={groupUnits}
+            />
+          </div>
+        </details>
+
+        <details open className="group bg-slate-950/70 border border-slate-800/90">
+          <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between py-0.5">
+            <span>条令、EMCON 与 WRA</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-2.5 pt-2.5 border-t border-slate-800/80">
+            <UnitDoctrineWraPanel
+              unit={selectedUnit}
+              platformSpec={platformSpec}
+              eligibleMissions={eligibleMissions}
+            />
+          </div>
+        </details>
+
+        <details open className="group bg-slate-950/70 border border-slate-800/90">
+          <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between py-0.5">
+            <span>传感器、弹药与机库出动</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 space-y-3">
+            <UnitWeaponsHangarPanel
+              unit={selectedUnit}
+              sensorIds={configuration.sensorIds}
+              canFire={!!capabilities?.canFire}
+            />
+          </div>
+        </details>
       </div>
-
-      <details open className="bg-slate-950/60 border border-slate-800/80">
-        <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between">
-          <span>运动与航路控制</span>
-          <span className="text-[10px] text-slate-400 font-normal">▾</span>
-        </summary>
-        <div className="mt-2">
-          <UnitKinematicsPanel
-            unit={selectedUnit}
-            platformSpec={platformSpec}
-            maxSpeedKts={configuration.maxSpeedKts}
-            rcsPenaltyM2={configuration.rcsPenaltyM2}
-            radarHorizons={radarHorizons}
-            groupUnits={groupUnits}
-          />
-        </div>
-      </details>
-
-      <details open className="bg-slate-950/60 border border-slate-800/80">
-        <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between">
-          <span>条令、EMCON 与 WRA</span>
-          <span className="text-[10px] text-slate-400 font-normal">▾</span>
-        </summary>
-        <div className="mt-2">
-          <UnitDoctrineWraPanel
-            unit={selectedUnit}
-            platformSpec={platformSpec}
-            eligibleMissions={eligibleMissions}
-          />
-        </div>
-      </details>
-
-      <details open className="bg-slate-950/60 border border-slate-800/80">
-        <summary className="text-[11px] font-bold text-cyan-300 cursor-pointer list-none flex items-center justify-between">
-          <span>传感器、弹药与机库出动</span>
-          <span className="text-[10px] text-slate-400 font-normal">▾</span>
-        </summary>
-        <div className="mt-2 space-y-3">
-          <UnitWeaponsHangarPanel
-            unit={selectedUnit}
-            sensorIds={configuration.sensorIds}
-            canFire={!!capabilities?.canFire}
-          />
-        </div>
-      </details>
     </aside>
   );
 });
