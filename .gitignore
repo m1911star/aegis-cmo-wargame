@@ -19,3 +19,9 @@ playwright-report/
 .DS_Store
 Thumbs.db
 .pi/
+
+# Local review & temporary artifacts
+.agent-teams/
+reviews/
+screenshots/
+hit
