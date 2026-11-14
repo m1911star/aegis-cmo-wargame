@@ -198,8 +198,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     activePerspective: 'RED' as const,
     autoPause: {
       onNewContact: false,
-      onMissileDetected: true,
-      onUnitHitOrDestroyed: true,
+      onMissileDetected: false,
+      onUnitHitOrDestroyed: false,
     },
     lastAutoPauseBanner: null,
 

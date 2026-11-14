@@ -149,9 +149,32 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             <ChartColumn /><span>战后复盘</span>
           </button>
           <details className="pause-settings">
-            <summary className="toolbar-button"><ShieldAlert /><span>自动暂停</span></summary>
+            <summary className="toolbar-button" title="默认全部关闭，由你手动控制暂停">
+              <ShieldAlert />
+              <span>
+                自动暂停
+                {autoPause.onNewContact || autoPause.onMissileDetected || autoPause.onUnitHitOrDestroyed
+                  ? ` (${Number(autoPause.onNewContact) + Number(autoPause.onMissileDetected) + Number(autoPause.onUnitHitOrDestroyed)})`
+                  : ' (关)'}
+              </span>
+            </summary>
             <div className="pause-popover tactical-panel">
-              <div className="mb-3 text-slate-400">遇到以下情况时暂停推演</div>
+              <div className="mb-2 flex items-center justify-between gap-2 text-slate-400">
+                <span>自动暂停触发器</span>
+                {(autoPause.onNewContact || autoPause.onMissileDetected || autoPause.onUnitHitOrDestroyed) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (autoPause.onNewContact) toggleAutoPause('onNewContact');
+                      if (autoPause.onMissileDetected) toggleAutoPause('onMissileDetected');
+                      if (autoPause.onUnitHitOrDestroyed) toggleAutoPause('onUnitHitOrDestroyed');
+                    }}
+                    className="text-[10px] text-cyan-300 underline cursor-pointer"
+                  >
+                    全部关闭
+                  </button>
+                )}
+              </div>
               <label><input type="checkbox" checked={autoPause.onNewContact} onChange={() => toggleAutoPause('onNewContact')} />发现新目标</label>
               <label><input type="checkbox" checked={autoPause.onMissileDetected} onChange={() => toggleAutoPause('onMissileDetected')} />收到导弹告警</label>
               <label><input type="checkbox" checked={autoPause.onUnitHitOrDestroyed} onChange={() => toggleAutoPause('onUnitHitOrDestroyed')} />本方受损或损失</label>
