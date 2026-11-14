@@ -1,6 +1,8 @@
 import { booleanPointInPolygon, polygon } from '@turf/turf';
 import type { RuntimeScenarioEvent, RuntimeUnit, TacticalContact } from '../types/wargame';
 
+const CLASSIFICATION_RANK = { unknown: 0, classified: 1, identified: 2 } as const;
+
 export function getEventOccurrences(
   event: RuntimeScenarioEvent,
   units: Record<string, RuntimeUnit>,
@@ -26,10 +28,13 @@ export function getEventOccurrences(
       (!trigger.targetCategory || trigger.targetCategory === unit.category)
     ).map((unit) => unit.id);
   } else if (trigger.type === 'UNIT_DETECTED') {
+    const minimumRank = CLASSIFICATION_RANK[trigger.minimumClassification ?? 'unknown'];
     matches = Object.values(contacts).filter((contact) =>
       contact.observerSide === trigger.observerSide &&
+      CLASSIFICATION_RANK[contact.classification] >= minimumRank &&
       (!trigger.targetUnitId || trigger.targetUnitId === contact.actualUnitId) &&
-      (!trigger.targetCategory || trigger.targetCategory === contact.identifiedCategory)
+      (!trigger.targetCategory || trigger.targetCategory === contact.identifiedCategory) &&
+      (!trigger.targetDomain || trigger.targetDomain === contact.domain)
     ).map((contact) => contact.actualUnitId);
   } else {
     const area = polygon([[...trigger.areaPolygon, trigger.areaPolygon[0]]]);

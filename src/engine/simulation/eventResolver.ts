@@ -2,6 +2,7 @@ import type {
   CombatLogEntry,
   EquipmentCatalog,
   ObjectiveProgress,
+  PendingSortieOrder,
   RuntimeScenarioEvent,
   RuntimeUnit,
   ScenarioObjective,
@@ -10,8 +11,8 @@ import type {
   TacticalMission,
   VictoryConditionRule,
 } from '../../types/wargame';
-import { launchCarrierSortie } from '../carrierOperations';
-import { evaluateObjectives } from '../objectives';
+import { evaluateCarrierSortieAvailability, launchCarrierSortie } from '../carrierOperations';
+import { evaluateObjectives, resolveWithdrawalAreas } from '../objectives';
 import { getEventOccurrences } from '../scenarioEvents';
 import { createRuntimeUnitFromPlacement } from './unitFactory';
 
@@ -19,6 +20,7 @@ const THREAT_RANK = { low: 0, medium: 1, high: 2, critical: 3 } as const;
 
 export type EventResolutionContext = {
   events: RuntimeScenarioEvent[];
+  pendingSortieOrders: PendingSortieOrder[];
   units: Record<string, RuntimeUnit>;
   contacts: Record<string, TacticalContact>;
   missions: TacticalMission[];
@@ -36,6 +38,7 @@ export type EventResolutionContext = {
 /** Apply triggered scenario actions, then evaluate objectives for the new world. */
 export function resolveEventsAndObjectives({
   events,
+  pendingSortieOrders,
   units,
   contacts,
   missions,
@@ -121,29 +124,62 @@ export function resolveEventsAndObjectives({
             unit.doctrine = { ...unit.doctrine, ...action.doctrinePatch };
           }
         } else if (action.type === 'LAUNCH_SORTIE') {
-          const launched = launchCarrierSortie(
+          const availability = evaluateCarrierSortieAvailability(
             units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId
           );
-          if (launched) {
-            if (action.assignedMissionId && missions.some((mission) =>
-              mission.id === action.assignedMissionId && mission.side === launched.side)) {
-              launched.assignedMissionId = action.assignedMissionId;
-              launched.navigationMode = 'mission';
-              launched.missionState = 'ingress';
+          const delayed = (action.launchDelaySec ?? 0) > 0;
+          if (delayed || availability.status !== 'ready') {
+            const orderId = `sortie_order_${event.id}_${event.fireCount}_${actionIndex}`;
+            const order: PendingSortieOrder = {
+              orderId,
+              eventId: event.id,
+              carrierUnitId: action.carrierUnitId,
+              hangarSlotId: action.hangarSlotId,
+              loadoutId: action.loadoutId,
+              assignedMissionId: action.assignedMissionId,
+              earliestLaunchTime: nextSimTime + (action.launchDelaySec ?? 0) * 1000,
+              attempts: 0,
+              status: availability.status === 'permanent' ? 'failed' : 'pending',
+              failureReason: availability.status === 'permanent' ? availability.reason : undefined,
+            };
+            if (!pendingSortieOrders.some((candidate) => candidate.orderId === orderId)) {
+              pendingSortieOrders.push(order);
+              logs.push({
+                id: `log_ev_sortie_order_${nextSimTime}_${orderId}`,
+                simTime: nextSimTime,
+                side: units[action.carrierUnitId]?.side ?? 'SYSTEM',
+                category: 'EVENT',
+                severity: order.status === 'failed' ? 'critical' : 'warning',
+                title: order.status === 'failed' ? '[事件出动明确失败]' : '[事件出动进入待执行队列]',
+                message: `${event.name}: ${availability.reason}${delayed ? `；最早 ${action.launchDelaySec} 秒后执行` : ''}。`,
+                unitId: action.carrierUnitId,
+              });
             }
-            score.sortiesLaunched = (score.sortiesLaunched ?? 0) + 1;
-            logs.push({
-              id: `log_ev_sortie_${nextSimTime}_${launched.id}`,
-              simTime: nextSimTime,
-              side: launched.side,
-              category: 'EVENT',
-              severity: 'warning',
-              title: `[事件驱动出动] ${launched.callsign} 弹射升空`,
-              message: `${event.name} 触发 ${launched.name}，挂载 ${catalog.loadouts[launched.activeLoadoutId ?? '']?.name ?? launched.activeLoadoutId ?? '默认'}。`,
-              position: [...launched.position],
-              unitId: launched.id,
-              aarType: 'sortie',
-            });
+          } else {
+            const launched = launchCarrierSortie(
+              units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId
+            );
+            if (launched) {
+              if (action.assignedMissionId && missions.some((mission) =>
+                mission.id === action.assignedMissionId && mission.side === launched.side)) {
+                launched.assignedMissionId = action.assignedMissionId;
+                launched.navigationMode = 'mission';
+                launched.missionState = 'ingress';
+              }
+              score.sortiesLaunched = (score.sortiesLaunched ?? 0) + 1;
+              logs.push({
+                id: `log_ev_sortie_${nextSimTime}_${launched.id}`,
+                simTime: nextSimTime,
+                side: launched.side,
+                category: 'EVENT',
+                severity: 'warning',
+                title: `[事件驱动出动] ${launched.callsign} 弹射升空`,
+                message: `${event.name} 触发 ${launched.name}，挂载 ${catalog.loadouts[launched.activeLoadoutId ?? '']?.name ?? launched.activeLoadoutId ?? '默认'}。`,
+                position: [...launched.position],
+                unitId: launched.id,
+                aarType: 'sortie',
+              });
+            }
           }
         } else if (action.type === 'ASSIGN_MISSION') {
           for (const unit of Object.values(units)) {
@@ -217,6 +253,7 @@ export function resolveEventsAndObjectives({
     }
   }
 
+  resolveWithdrawalAreas(objectives, units, nextSimTime, logs);
   return evaluateObjectives(
     objectives,
     objectiveProgress,

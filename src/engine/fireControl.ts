@@ -51,6 +51,10 @@ export function trackSupport(
   });
 }
 
+export function weaponLaunchRangeKm(weapon: WeaponSpec): number {
+  return weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm ?? 0 : weapon.maxRangeKm;
+}
+
 export interface FireControlSolution {
   status: 'executable' | 'risky' | 'blocked';
   hardBlockReasons: string[];
@@ -70,6 +74,12 @@ export function evaluateFireControl(
   const profile = guidanceProfile(weapon);
   const supportSourceIds = trackSupport(attacker, contact, weapon, units, catalog, simTime);
   if (!isActiveUnit(attacker) || !getUnitCapabilities(attacker).canFire) hardBlockReasons.push('平台已失去发射能力');
+  if (attacker.domain === 'air' && weapon.category === 'torpedo' && weapon.launchMedium !== 'air_drop') {
+    hardBlockReasons.push('航空平台不能投放重型直射鱼雷');
+  }
+  if (attacker.domain !== 'air' && weapon.launchMedium === 'air_drop') {
+    hardBlockReasons.push('空投轻型鱼雷需要航空平台');
+  }
   if (mount.currentAmmo <= 0) hardBlockReasons.push('弹药耗尽');
   if (mount.cooldownRemainingSec > 0) hardBlockReasons.push(`挂架冷却中（${mount.cooldownRemainingSec.toFixed(1)} 秒）`);
   if (!contact || contact.observerSide !== attacker.side || contact.targetSide === attacker.side || contact.targetSide === 'NEUTRAL') {
@@ -81,7 +91,7 @@ export function evaluateFireControl(
     distanceKm = getDistanceKm(attacker.position, contact.estimatedPosition);
     trackAgeSec = Math.max(0, (simTime - contact.lastDetectedTime) / 1000);
     if (!weapon.targetDomains.includes(contact.domain)) hardBlockReasons.push('武器与目标域不匹配');
-    if (distanceKm > weapon.maxRangeKm || distanceKm < weapon.minRangeKm) hardBlockReasons.push('已知瞄准点不在武器射程内');
+    if (distanceKm > weaponLaunchRangeKm(weapon) || distanceKm < weapon.minRangeKm) hardBlockReasons.push('已知瞄准点不在武器射程内');
     if (trackAgeSec > profile.maxTrackAgeSec) riskWarnings.push(`情报已陈旧（${trackAgeSec.toFixed(1)} 秒未更新）`);
     if (contact.uncertaintyRadiusKm > profile.maxUncertaintyKm) riskWarnings.push(`定位误差 ±${contact.uncertaintyRadiusKm.toFixed(1)} km，存在搜索失败风险`);
     if (contact.classification === 'unknown') riskWarnings.push('目标尚未分类');

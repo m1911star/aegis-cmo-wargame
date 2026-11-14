@@ -51,7 +51,31 @@ export function compileScenario(
   for (const objective of scenario.objectives ?? []) {
     if (new Set(objective.unitIds).size !== objective.unitIds.length) invalid(`objective.${objective.id}`, 'duplicate target');
     for (const target of objective.unitIds) {
-      if (!units.has(target)) invalid(`objective.${objective.id}`, `unknown unit ${target}`);
+      const placement = units.get(target);
+      if (!placement) invalid(`objective.${objective.id}`, `unknown unit ${target}`);
+      if (objective.type === 'withdraw' && placement.side !== objective.side) {
+        invalid(`objective.${objective.id}`, 'withdraw targets must belong to the objective side');
+      }
+      const domain = catalog.platforms[placement.platformId]?.domain;
+      if (objective.type === 'withdraw' && objective.withdrawUnitDomains && domain &&
+          !objective.withdrawUnitDomains.includes(domain)) {
+        invalid(`objective.${objective.id}`, `withdraw target ${target} has a disallowed domain`);
+      }
+    }
+    if (objective.withdrawAreaPolygon && objective.type !== 'withdraw') {
+      invalid(`objective.${objective.id}`, 'withdrawAreaPolygon only applies to withdraw goals');
+    }
+    if (objective.withdrawUnitDomains && objective.type !== 'withdraw') {
+      invalid(`objective.${objective.id}`, 'withdrawUnitDomains only applies to withdraw goals');
+    }
+    if (objective.withdrawUnitDomains && new Set(objective.withdrawUnitDomains).size !== objective.withdrawUnitDomains.length) {
+      invalid(`objective.${objective.id}`, 'duplicate withdraw domain');
+    }
+    if (objective.withdrawAreaPolygon) {
+      const feature = turf.polygon([[...objective.withdrawAreaPolygon, objective.withdrawAreaPolygon[0]]]);
+      if (turf.area(feature) <= 1 || turf.kinks(feature).features.length > 0) {
+        invalid(`objective.${objective.id}`, 'withdraw area must be non-degenerate and non-self-intersecting');
+      }
     }
     if (objective.criticalFailure && objective.type !== 'preserve') invalid(`objective.${objective.id}`, 'immediate failure requires an explicit preservation objective');
     if (objective.preserveCapability && objective.type !== 'preserve') invalid(`objective.${objective.id}`, 'preserveCapability only applies to preservation goals');

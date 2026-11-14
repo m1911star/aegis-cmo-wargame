@@ -4,6 +4,7 @@ import type {
   CombatLogEntry,
   MissionDefinition,
   ObjectiveProgress,
+  PendingSortieOrder,
   RuntimeScenarioEvent,
   RuntimeUnit,
   ScenarioEnvironment,
@@ -34,6 +35,7 @@ export interface SimulationWorldState {
   explosions: TacticalExplosionEffect[];
   missions: MissionDefinition[];
   events?: RuntimeScenarioEvent[];
+  pendingSortieOrders?: PendingSortieOrder[];
   environment?: ScenarioEnvironment;
   victoryConditions?: VictoryConditionRule;
   score: ScoreLedger;

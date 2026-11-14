@@ -1,3 +1,4 @@
+import * as turf from '@turf/turf';
 import type {
   AutoPauseSettings,
   CombatLogEntry,
@@ -10,7 +11,7 @@ import type {
   WeaponInFlight,
 } from '../../types/wargame';
 import { advanceGuidance, seekerCanObserve } from '../guidance';
-import { getDistanceKm } from '../geometry';
+import { getBearingDeg, getDistanceKm } from '../geometry';
 import { creditDamage } from '../objectives';
 import { evaluateTargetEcmSuppression, observeMissile } from '../sensors';
 import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
@@ -71,6 +72,50 @@ export function advanceWeaponPhysics({
       delete weaponsInFlight[missile.id];
       continue;
     }
+    if (missile.deliveryPhase === 'air_drop') {
+      missile.aimPosition ??= turf.destination(
+        missile.position, missile.distanceRemainingKm, missile.heading, { units: 'kilometers' }
+      ).geometry.coordinates as [number, number];
+      const distanceToEntryKm = getDistanceKm(missile.position, missile.aimPosition);
+      const stepKm = Math.min(
+        distanceToEntryKm,
+        (weapon.airDropSpeedKts ?? missile.speedKts) * 1.852 * dtSec / 3600
+      );
+      if (distanceToEntryKm <= stepKm + 1e-9) {
+        missile.position = [...missile.aimPosition];
+        missile.altitudeM = weapon.waterEntryAltitudeM!;
+        missile.speedKts = weapon.waterEntrySpeedKts!;
+        missile.maxRangeKm = weapon.maxRangeKm;
+        missile.traveledKm = 0;
+        missile.distanceRemainingKm = weapon.maxRangeKm;
+        missile.deliveryPhase = 'water_search';
+        missile.seekerState = 'terminal_searching';
+        missile.searchElapsedSec = 0;
+        missile.trail.push([...missile.position]);
+        logs.push({
+          id: `water_entry_${nextSimTime}_${missile.id}`,
+          simTime: nextSimTime,
+          side: missile.side,
+          category: 'EVENT',
+          severity: 'info',
+          title: `${missile.name} 入水`,
+          message: `空投段结束，切换为 ${missile.speedKts}kt 声自导搜索。`,
+          position: [...missile.position],
+          weaponId: weapon.id,
+        });
+      } else {
+        missile.heading = getBearingDeg(missile.position, missile.aimPosition);
+        missile.position = turf.destination(missile.position, stepKm, missile.heading, { units: 'kilometers' })
+          .geometry.coordinates as [number, number];
+        missile.altitudeM = Math.max(10, missile.altitudeM - 250 * dtSec);
+        missile.traveledKm += stepKm;
+        missile.distanceRemainingKm = getDistanceKm(missile.position, missile.aimPosition);
+        missile.trail.push([...missile.position]);
+        if (missile.trail.length > 18) missile.trail.shift();
+      }
+      continue;
+    }
+
     let target: RuntimeUnit | WeaponInFlight | undefined = missile.targetType === 'missile'
       ? weaponsInFlight[missile.targetId]
       : missile.targetType === 'unit' ? units[missile.targetId] : undefined;

@@ -8,7 +8,7 @@ import type {
   TacticalMission,
   WeaponInFlight,
 } from '../../types/wargame';
-import { evaluateFireControl } from '../fireControl';
+import { evaluateFireControl, weaponLaunchRangeKm } from '../fireControl';
 import { getBearingDeg, getDistanceKm, calculateRadarHorizonKm } from '../geometry';
 import { launchGuidance } from '../guidance';
 import { effectiveDoctrine } from '../operations';
@@ -75,17 +75,7 @@ export function runAutoDefense({
           missile.altitudeM >= -5
       );
 
-      for (const incoming of incomingEnemyMissiles) {
-        const samMount = samMounts[0];
-        const samSpec = catalog.weapons[samMount.weaponId];
-        if (
-          !samSpec ||
-          samMount.currentAmmo <= 0 ||
-          samMount.cooldownRemainingSec > 0
-        ) {
-          break;
-        }
-
+      for (const incoming of incomingEnemyMissiles.sort((a, b) => a.id.localeCompare(b.id))) {
         const missileContact = observeMissile(
           shooter.side,
           incoming,
@@ -95,36 +85,62 @@ export function runAutoDefense({
           shooter
         );
         if (!missileContact) continue;
-        const solution = evaluateFireControl(
-          fireUnit,
-          missileContact,
-          samMount,
-          samSpec,
-          catalog,
-          units,
-          nextSimTime,
-          'defense'
+
+        if (!doctrine.automaticTargetDomains.includes(missileContact.domain) ||
+            THREAT_RANK[missileContact.threatLevel] < THREAT_RANK[doctrine.minimumAutomaticThreat]) continue;
+        const existingInterceptors = Object.values(weaponsInFlight).filter(
+          (weapon) => weapon.side === shooter.side && weapon.targetType === 'missile' &&
+            weapon.targetId === incoming.id && !weapon.isIntercepted
         );
+        const desiredInterceptors = Math.max(1, doctrine.salvoSize);
+        const neededInterceptors = Math.max(0, desiredInterceptors - existingInterceptors.length);
+        if (neededInterceptors === 0) continue;
+
+        const candidates = samMounts.flatMap((mount) => {
+          const weapon = catalog.weapons[mount.weaponId];
+          const availableAmmo = mount.currentAmmo - doctrine.minimumWeaponReserve;
+          if (!weapon || mount.cooldownRemainingSec > 0 || availableAmmo <= 0) return [];
+          const solution = evaluateFireControl(
+            fireUnit,
+            missileContact,
+            mount,
+            weapon,
+            catalog,
+            units,
+            nextSimTime,
+            'defense'
+          );
+          if (solution.status !== 'executable' || solution.distanceKm === undefined ||
+              solution.distanceKm > weapon.maxRangeKm * doctrine.automaticFireRangeFraction) return [];
+          return [{
+            mount,
+            weapon,
+            solution,
+            availableAmmo,
+            rangeMarginKm: weapon.maxRangeKm - solution.distanceKm,
+            inventoryRatio: mount.currentAmmo / Math.max(1, mount.maxAmmo),
+          }];
+        }).sort((a, b) =>
+          a.rangeMarginKm - b.rangeMarginKm ||
+          b.inventoryRatio - a.inventoryRatio ||
+          a.weapon.id.localeCompare(b.weapon.id) ||
+          a.mount.mountId.localeCompare(b.mount.mountId)
+        );
+        const selected = candidates[0];
+        if (!selected) continue;
+
+        const { mount: samMount, weapon: samSpec, solution } = selected;
         const distanceToIncomingKm = solution.distanceKm!;
-        const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some(
-          (id) => id !== shooter.id
-        );
+        const interceptCount = Math.min(neededInterceptors, selected.availableAmmo);
+        const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some((id) => id !== shooter.id);
         const ownHorizonKm = calculateRadarHorizonKm(
           shooter.altitudeM,
           catalog.platforms[shooter.platformId].radarAntennaHeightM,
           incoming.altitudeM
         );
-        if (solution.status !== 'executable') continue;
-
-        const existingInterceptors = Object.values(weaponsInFlight).filter(
-          (weapon) =>
-            weapon.side === shooter.side && weapon.targetId === incoming.id
-        );
-        if (existingInterceptors.length > 0) continue;
-
-        const interceptCount = Math.min(2, samMount.currentAmmo);
         for (let index = 0; index < interceptCount; index++) {
-          const interceptorId = `msl_int_${nextSimTime}_${shooter.id}_${incoming.id}_${index}`;
+          const interceptorIndex = existingInterceptors.length + index;
+          const interceptorId = `msl_int_${nextSimTime}_${shooter.id}_${incoming.id}_${interceptorIndex}`;
           weaponsInFlight[interceptorId] = {
             id: interceptorId,
             weaponId: samSpec.id,
@@ -145,8 +161,7 @@ export function runAutoDefense({
             traveledKm: 0,
             basePk: samSpec.basePk,
             warheadDamage: samSpec.warheadDamage,
-            requiresDatalinkBeyondHorizon:
-              samSpec.requiresDatalinkBeyondHorizon,
+            requiresDatalinkBeyondHorizon: samSpec.requiresDatalinkBeyondHorizon,
             datalinkSupported: true,
             ...launchGuidance(missileContact),
           };
@@ -154,14 +169,8 @@ export function runAutoDefense({
           if (shooter.side === 'RED') score.redMissilesFired += 1;
           else score.blueMissilesFired += 1;
         }
-        samMount.cooldownRemainingSec =
-          samMount.reloadTimeSec * getUnitCapabilities(shooter).reloadFactor;
-        recordWeaponLaunch(
-          shooter,
-          samMount,
-          interceptCount,
-          nextSimTime
-        );
+        samMount.cooldownRemainingSec = samMount.reloadTimeSec * getUnitCapabilities(shooter).reloadFactor;
+        recordWeaponLaunch(shooter, samMount, interceptCount, nextSimTime);
 
         logs.push({
           id: `log_int_launch_${nextSimTime}_${shooter.id}_${incoming.id}`,
@@ -170,13 +179,9 @@ export function runAutoDefense({
           category: 'LAUNCH',
           severity: 'info',
           title: `${shooter.callsign} 发射防空拦截弹 (${samSpec.codeName} x${interceptCount})`,
-          message: `${shooter.name} 升空拦截来袭 ${incoming.name}（距本舰 ${distanceToIncomingKm.toFixed(
-            1
-          )} km${
-            hasFriendlyAwacsCec && distanceToIncomingKm > ownHorizonKm
-              ? '，由预警机CEC超视距引导'
-              : ''
-          }）。`,
+          message: `${shooter.name} 从 ${candidates.length} 个可执行防空解中选择最小射程裕度 ${selected.rangeMarginKm.toFixed(1)} km 的 ${samSpec.codeName}，拦截距本舰 ${distanceToIncomingKm.toFixed(1)} km 来袭武器${
+            hasFriendlyAwacsCec && distanceToIncomingKm > ownHorizonKm ? '（预警机CEC超视距引导）' : ''
+          }。`,
           position: [...shooter.position],
           unitId: shooter.id,
           weaponId: samSpec.id,
@@ -233,7 +238,7 @@ export function runAutoDefense({
           'automatic'
         );
         if (solution.status !== 'executable' ||
-            solution.distanceKm! > weapon.maxRangeKm * doctrine.automaticFireRangeFraction ||
+            solution.distanceKm! > weaponLaunchRangeKm(weapon) * doctrine.automaticFireRangeFraction ||
             mount.currentAmmo <= doctrine.minimumWeaponReserve) return false;
         return !(weapon.canInterceptMissile && mount.currentAmmo <= mount.maxAmmo * 0.4);
       });
@@ -268,20 +273,21 @@ export function runAutoDefense({
           position: [...shooter.position],
           launchPosition: [...shooter.position],
           trail: [[...shooter.position]],
-          altitudeM: weapon.cruiseAltitudeM,
+          altitudeM: weapon.launchMedium === 'air_drop' ? shooter.altitudeM : weapon.cruiseAltitudeM,
           heading: getBearingDeg(
             shooter.position,
             contact.estimatedPosition
           ),
-          speedKts: weapon.speedKts,
+          speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
           distanceRemainingKm: distanceKm,
-          maxRangeKm: weapon.maxRangeKm,
+          maxRangeKm: weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm! : weapon.maxRangeKm,
           traveledKm: 0,
           basePk: weapon.basePk,
           warheadDamage: weapon.warheadDamage,
           requiresDatalinkBeyondHorizon:
             weapon.requiresDatalinkBeyondHorizon,
           datalinkSupported: true,
+          deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
           ...launchGuidance(contact),
         };
         matchingMount.currentAmmo -= 1;

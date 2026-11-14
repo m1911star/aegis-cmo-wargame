@@ -32,6 +32,7 @@ import type {
   TacticalMission,
   MissionType,
   OrbatGroup,
+  PendingSortieOrder,
   ScenarioEventRule,
   ScenarioObjective,
   TimeScale,
@@ -147,6 +148,7 @@ export interface WargameStoreState {
   explosions: TacticalExplosionEffect[];
   missions: TacticalMission[];
   events: RuntimeScenarioEvent[];
+  pendingSortieOrders: PendingSortieOrder[];
   environment: ScenarioEnvironment;
   referencePoints: ReferencePoint[];
   logs: CombatLogEntry[];
@@ -334,6 +336,7 @@ function createInitialStateFromScenario(
     explosions: [],
     missions: deriveMissionAssignments(scenario.missions, initialUnits),
     environment: scenario.environment,
+    pendingSortieOrders: [],
     events: (scenario.events || []).map((ev) => ({
       ...ev,
       hasFired: false,
@@ -376,6 +379,7 @@ function createInitialStateFromScenario(
     explosions: warmup.nextState.explosions,
     missions: warmup.nextState.missions,
     events: warmup.nextState.events || [],
+    pendingSortieOrders: warmup.nextState.pendingSortieOrders ?? [],
     environment: warmup.nextState.environment!,
     aar: warmup.nextState.aar ?? createAarLedger(),
     referencePoints: scenario.referencePoints.map((rp) => ({
@@ -456,6 +460,7 @@ export const useWargameStore = create<WargameStoreState>()(
     explosions: initialBoot.explosions,
     missions: initialBoot.missions,
     events: initialBoot.events,
+    pendingSortieOrders: initialBoot.pendingSortieOrders,
     environment: initialBoot.environment,
     referencePoints: initialBoot.referencePoints,
     logs: initialBoot.logs,
@@ -508,6 +513,7 @@ export const useWargameStore = create<WargameStoreState>()(
           explosions: boot.explosions,
           missions: boot.missions,
           events: boot.events,
+          pendingSortieOrders: boot.pendingSortieOrders,
           environment: boot.environment,
           referencePoints: boot.referencePoints,
           logs: boot.logs,
@@ -552,6 +558,7 @@ export const useWargameStore = create<WargameStoreState>()(
           explosions: s.explosions,
           missions: s.missions,
           events: s.events,
+          pendingSortieOrders: s.pendingSortieOrders,
           environment: s.environment,
           victoryConditions: s.currentScenario.victoryConditions,
           score: s.score,
@@ -576,6 +583,7 @@ export const useWargameStore = create<WargameStoreState>()(
         explosions: result.nextState.explosions,
         missions: result.nextState.missions,
         events: result.nextState.events || prev.events,
+        pendingSortieOrders: result.nextState.pendingSortieOrders ?? prev.pendingSortieOrders,
         environment: result.nextState.environment ?? prev.environment,
         score: result.nextState.score,
         timeScale: result.shouldAutoPause ? 0 : prev.timeScale,
@@ -1238,11 +1246,16 @@ export const useWargameStore = create<WargameStoreState>()(
           targetId: areaAttack ? contact.id : contact.actualUnitId,
           targetType: areaAttack ? 'area' : 'unit',
           position: [...attacker.position], launchPosition: [...attacker.position], trail: [[...attacker.position]],
-          altitudeM: weapon.cruiseAltitudeM, heading: getBearingDeg(attacker.position, contact.estimatedPosition),
-          speedKts: weapon.speedKts, distanceRemainingKm: solution.distanceKm!, maxRangeKm: weapon.maxRangeKm,
+          altitudeM: weapon.launchMedium === 'air_drop' ? attacker.altitudeM : weapon.cruiseAltitudeM,
+          heading: getBearingDeg(attacker.position, contact.estimatedPosition),
+          speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
+          distanceRemainingKm: solution.distanceKm!,
+          maxRangeKm: weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm! : weapon.maxRangeKm,
           traveledKm: 0, basePk: weapon.basePk, warheadDamage: weapon.warheadDamage,
           requiresDatalinkBeyondHorizon: weapon.requiresDatalinkBeyondHorizon,
-          datalinkSupported: solution.supportSourceIds.length > 0, ...launchGuidance(contact) };
+          datalinkSupported: solution.supportSourceIds.length > 0,
+          deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
+          ...launchGuidance(contact) };
       }
       const updatedAttacker = { ...attacker, status: 'engaged' as const, mounts: attacker.mounts.map((m) =>
         m.mountId === mount.mountId ? { ...m, currentAmmo: m.currentAmmo - salvo,

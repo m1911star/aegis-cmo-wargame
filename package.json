@@ -13,7 +13,8 @@
     "test:integration": "bun test tests/integration",
     "test:coverage": "bun test tests/unit tests/integration --coverage --coverage-reporter=text --coverage-reporter=lcov && bun run scripts/checkEngineCoverage.ts",
     "test:e2e": "playwright test",
-    "validate:db": "bun run scripts/validateDb.ts"
+    "validate:db": "bun run scripts/validateDb.ts",
+    "smoke:scenarios": "bun run scripts/smokeScenarios.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",

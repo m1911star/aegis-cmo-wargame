@@ -1,0 +1,317 @@
+{
+  "contract": {
+    "fixedStepSec": 0.25,
+    "commandMode": "no-command",
+    "recordingVersion": 2,
+    "scenarios": 4
+  },
+  "summaries": [
+    {
+      "scenarioId": "op_east_sea_thunder_2027",
+      "title": "作战想定 01 // 《东海惊雷：海空一体夺控与防空反导》",
+      "seed": 4242,
+      "tick": 14400,
+      "elapsedSec": 3600,
+      "configuredDurationSec": 3600,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "defeat",
+        "BLUE": "costly_victory"
+      },
+      "losses": {
+        "red": 5,
+        "blue": 8
+      },
+      "missilesFired": {
+        "red": 180,
+        "blue": 166
+      },
+      "interceptions": {
+        "red": 42,
+        "blue": 32
+      },
+      "score": {
+        "red": 1350,
+        "blue": 1145
+      },
+      "sortiesLaunched": 2,
+      "events": [
+        {
+          "id": "ev_kadena_scramble_60s",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_east_asw_helo_launch_30s",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_blue_mald_screen_90s",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_red_sead_on_classified_land_contact",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_b1b_maritime_salvo_180s",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_ishigaki_sam_neutralized",
+          "fireCount": 0,
+          "lastFiredElapsedSec": null
+        }
+      ],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "east_red_disable_ishigaki": "failed",
+        "east_red_locate_aegis": "achieved",
+        "east_red_preserve_kj500": "achieved",
+        "east_blue_hold_ishigaki": "achieved",
+        "east_blue_disable_h6n": "failed",
+        "east_blue_preserve_e2d": "achieved",
+        "east_red_disable_taigei": "failed",
+        "east_blue_disable_039c": "failed",
+        "east_red_preserve_y9g": "achieved",
+        "east_blue_preserve_mq4c": "achieved"
+      },
+      "aarEvents": 268,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "op_deep_sea_carrier_hunt_2028",
+      "title": "作战想定 02 // 《深海猎杀：福建舰与美核航母打击群大洋决战》",
+      "seed": 5252,
+      "tick": 7385,
+      "elapsedSec": 1846.25,
+      "configuredDurationSec": 5400,
+      "terminalReason": "critical_objective",
+      "outcomes": {
+        "RED": "costly_victory",
+        "BLUE": "defeat"
+      },
+      "losses": {
+        "red": 1,
+        "blue": 4
+      },
+      "missilesFired": {
+        "red": 100,
+        "blue": 120
+      },
+      "interceptions": {
+        "red": 15,
+        "blue": 34
+      },
+      "score": {
+        "red": 1190,
+        "blue": 150
+      },
+      "sortiesLaunched": 0,
+      "events": [
+        {
+          "id": "ev_red_classified_blue_cvn",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_blue_classified_red_cv18",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_carrier_detected_salvo_order",
+          "fireCount": 0,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_blue_identified_red_cv18",
+          "fireCount": 0,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "ev_red_csg_blink_emcon",
+          "fireCount": 61,
+          "lastFiredElapsedSec": null
+        }
+      ],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "deep_red_disable_cvn": "achieved",
+        "deep_red_preserve_fujian": "pending",
+        "deep_red_locate_cvn": "achieved",
+        "deep_blue_disable_fujian": "pending",
+        "deep_blue_preserve_cvn": "failed",
+        "deep_blue_disable_wolfpack": "pending"
+      },
+      "aarEvents": 168,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "op_bashi_channel_blockade_2029",
+      "title": "作战想定 03 // 《巴士海峡封锁：两栖穿越与浅深海猎杀》",
+      "seed": 7373,
+      "tick": 12000,
+      "elapsedSec": 3000,
+      "configuredDurationSec": 3000,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "costly_victory",
+        "BLUE": "costly_victory"
+      },
+      "losses": {
+        "red": 4,
+        "blue": 9
+      },
+      "missilesFired": {
+        "red": 124,
+        "blue": 142
+      },
+      "interceptions": {
+        "red": 24,
+        "blue": 30
+      },
+      "score": {
+        "red": 1790,
+        "blue": 1275
+      },
+      "sortiesLaunched": 5,
+      "events": [
+        {
+          "id": "bashi_ev_shore_denial_release",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_asw_wave_20",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_f35b_strike_60",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_asw_wave_300",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_asw_wave_900",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_f35b_cap_1200",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_red_sead_identified",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_blue_sead_identified",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_red_exit_notice",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        },
+        {
+          "id": "bashi_ev_blue_exit_notice",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        }
+      ],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": [
+          {
+            "eventId": "bashi_ev_asw_wave_900",
+            "reason": "母舰已失能，无法执行出动"
+          },
+          {
+            "eventId": "bashi_ev_asw_wave_900",
+            "reason": "母舰已失能，无法执行出动"
+          },
+          {
+            "eventId": "bashi_ev_f35b_cap_1200",
+            "reason": "母舰已失能，无法执行出动"
+          }
+        ]
+      },
+      "objectives": {
+        "bashi_red_preserve_075": "achieved",
+        "bashi_red_withdraw_075": "achieved",
+        "bashi_red_disable_america": "failed",
+        "bashi_red_disable_pac3": "failed",
+        "bashi_red_preserve_y9g": "failed",
+        "bashi_blue_preserve_america": "achieved",
+        "bashi_blue_withdraw_america": "achieved",
+        "bashi_blue_disable_075": "failed",
+        "bashi_blue_disable_coastal": "failed",
+        "bashi_blue_preserve_mq4c": "failed"
+      },
+      "aarEvents": 218,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "limited_information_exercise",
+      "title": "有限信息演练 // 15 分钟指挥练习",
+      "seed": 6262,
+      "tick": 3600,
+      "elapsedSec": 900,
+      "configuredDurationSec": 900,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "defeat",
+        "BLUE": "victory"
+      },
+      "losses": {
+        "red": 0,
+        "blue": 0
+      },
+      "missilesFired": {
+        "red": 0,
+        "blue": 0
+      },
+      "interceptions": {
+        "red": 0,
+        "blue": 0
+      },
+      "score": {
+        "red": 40,
+        "blue": 120
+      },
+      "sortiesLaunched": 0,
+      "events": [],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "red_primary": "failed",
+        "red_preserve": "achieved",
+        "blue_primary": "achieved",
+        "blue_observe": "achieved"
+      },
+      "aarEvents": 0,
+      "finiteState": true
+    }
+  ]
+}

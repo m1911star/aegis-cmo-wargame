@@ -4,8 +4,8 @@ import type { ScenarioDefinition } from '../types/wargame';
 import { useWargameStore, type WargameStoreState } from './useWargameStore';
 
 export const BATTLE_RECORDING_VERSION = 2 as const;
-export const RULESET_VERSION = '2026.11-ruleset-15';
-export const SCENARIO_SCHEMA_VERSION = 8;
+export const RULESET_VERSION = '2026.12-ruleset-21';
+export const SCENARIO_SCHEMA_VERSION = 12;
 
 export interface BattleRecording {
   version: typeof BATTLE_RECORDING_VERSION;

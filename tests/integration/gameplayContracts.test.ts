@@ -4,6 +4,7 @@ import { summarizeAar } from '../../src/engine/aar';
 import { createRuntimeUnitFromPlacement, initializeWorldContacts, stepSimulationWorld, advanceSimulation, type SimulationWorldState } from '../../src/engine/simulationEngine';
 import { advanceAirRefueling } from '../../src/engine/simulation/airRefueling';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
+import { advanceWeaponPhysics } from '../../src/engine/simulation/weaponPhysics';
 import { runEvasionAndSoftKill } from '../../src/engine/simulation/evasion';
 import { createRandomStream } from '../../src/engine/determinism';
 import { evaluateFireControl, trackSupport } from '../../src/engine/fireControl';
@@ -12,11 +13,11 @@ import { getBearingDeg, getDistanceKm } from '../../src/engine/geometry';
 import { recoverySolution, updateUnitOperations } from '../../src/engine/operations';
 import { getUnitCapabilities } from '../../src/engine/unitCapabilities';
 import { evaluateObjectives, creditDamage } from '../../src/engine/objectives';
-import { computeContactsOnly, observeMissile } from '../../src/engine/sensors';
+import { calculateSonarDetectionRangeKm, computeContactsOnly, observeMissile } from '../../src/engine/sensors';
 import { visibleLogs } from '../../src/engine/commandPolicy';
 import { compileScenario } from '../../src/scenarios/compileScenario';
 import { INFORMATION_EXERCISE } from '../../src/scenarios/informationExercise';
-import { BUILTIN_SCENARIOS, SCENARIO_DEEP_SEA_CARRIER_HUNT as deep, SCENARIO_EAST_SEA_THUNDER as east, exportCurrentStateAsScenarioJson, instantiateScenarioUnits } from '../../src/scenarios/builtinScenarios';
+import { BUILTIN_SCENARIOS, SCENARIO_BASHI_CHANNEL_BLOCKADE as bashi, SCENARIO_DEEP_SEA_CARRIER_HUNT as deep, SCENARIO_EAST_SEA_THUNDER as east, exportCurrentStateAsScenarioJson, instantiateScenarioUnits } from '../../src/scenarios/builtinScenarios';
 import { useWargameStore as store } from '../../src/store/useWargameStore';
 import { BATTLE_RECORDING_VERSION, RULESET_VERSION, SCENARIO_SCHEMA_VERSION, captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../src/store/battleRecording';
 import type { InitialUnitPlacement, RuntimeUnit, ScenarioDefinition, ScenarioObjective, TacticalContact, TacticalMission, UnitDoctrine, WeaponInFlight, WeaponSpec } from '../../src/types/wargame';
@@ -323,6 +324,237 @@ describe('One fire-control solution, bounded observations', () => {
     });
   });
 
+  test('layered defense evaluates every mount and chooses the smallest executable range margin', () => {
+    const attempt = (distanceKm: number, reserve = 0, existingCount = 0,
+      doctrinePatch: Partial<UnitDoctrine> = {}) => {
+      const local = structuredClone(catalog);
+      const base = local.weapons.hhq9b_sam;
+      local.weapons.test_long_sam = { ...base, id: 'test_long_sam', name: 'Long SAM', codeName: 'LONG', minRangeKm: 8, maxRangeKm: 260 };
+      local.weapons.test_mid_sam = { ...base, id: 'test_mid_sam', name: 'Mid SAM', codeName: 'MID', minRangeKm: 4, maxRangeKm: 100 };
+      local.weapons.test_short_sam = { ...base, id: 'test_short_sam', name: 'Short SAM', codeName: 'SHORT', minRangeKm: 1, maxRangeKm: 30 };
+      const defender = unit('layered_defender', { platformId: 'type055_destroyer', doctrine: {
+        roe: 'tight', emconRadar: true, minimumWeaponReserve: reserve, salvoSize: 2,
+        automaticFireRangeFraction: 1, automaticTargetDomains: ['air'], minimumAutomaticThreat: 'critical',
+        ...doctrinePatch,
+      } });
+      defender.mounts = [
+        { mountId: 'long', weaponId: 'test_long_sam', weaponName: 'LONG', maxAmmo: 12, currentAmmo: 12, reloadTimeSec: 4, cooldownRemainingSec: 0 },
+        { mountId: 'short', weaponId: 'test_short_sam', weaponName: 'SHORT', maxAmmo: 4, currentAmmo: 4, reloadTimeSec: 2, cooldownRemainingSec: 0 },
+        { mountId: 'mid', weaponId: 'test_mid_sam', weaponName: 'MID', maxAmmo: 8, currentAmmo: 8, reloadTimeSec: 3, cooldownRemainingSec: 0 },
+      ];
+      const attacker = unit('layered_attacker', { side: 'BLUE', position: [distanceKm / 111.195, 0] });
+      const incoming = missile(attacker, defender);
+      incoming.id = 'layered_incoming';
+      incoming.altitudeM = 10000;
+      const weaponsInFlight: Record<string, WeaponInFlight> = { [incoming.id]: incoming };
+      for (let index = 0; index < existingCount; index++) {
+        const existing = missile(defender, attacker, local.weapons.test_long_sam);
+        existing.id = `existing_${index}`;
+        existing.targetType = 'missile';
+        existing.targetId = incoming.id;
+        weaponsInFlight[existing.id] = existing;
+      }
+      const before = Object.keys(weaponsInFlight).length;
+      runAutoDefense({ units: { [defender.id]: defender, [attacker.id]: attacker }, missions: [], contacts: {}, weaponsInFlight,
+        catalog: local, nextSimTime: 1000, score: score(), logs: [], autoPauseSettings: pausesOff,
+        triggerPause: () => undefined });
+      const launched = Object.values(weaponsInFlight).filter((weapon) => weapon.targetType === 'missile' &&
+        weapon.targetId === incoming.id && weapon.id.startsWith('msl_int_'));
+      return { defender, launched, added: Object.keys(weaponsInFlight).length - before };
+    };
+
+    expect(attempt(20).launched.map((weapon) => weapon.weaponId)).toEqual(['test_short_sam', 'test_short_sam']);
+    expect(attempt(70).launched.map((weapon) => weapon.weaponId)).toEqual(['test_mid_sam', 'test_mid_sam']);
+    expect(attempt(150).launched.map((weapon) => weapon.weaponId)).toEqual(['test_long_sam', 'test_long_sam']);
+    expect(attempt(20, 5).launched.map((weapon) => weapon.weaponId)).toEqual(['test_mid_sam', 'test_mid_sam']);
+    expect(attempt(20, 0, 1).added).toBe(1);
+    expect(attempt(20, 0, 2).added).toBe(0);
+    expect(attempt(20, 0, 0, { salvoSize: 1 }).added).toBe(1);
+    expect(attempt(20, 0, 1, { salvoSize: 3 }).added).toBe(2);
+    expect(attempt(70, 0, 0, { automaticFireRangeFraction: 0.5 }).launched
+      .map((weapon) => weapon.weaponId)).toEqual(['test_long_sam', 'test_long_sam']);
+    expect(attempt(20, 0, 0, { automaticTargetDomains: ['surface'] }).added).toBe(0);
+  });
+
+  test('054B and Constellation frigates detect, intercept and conduct limited surface attacks', () => {
+    const red = unit('red_ffg', { platformId: 'type054b_frigate', position: [0, 0],
+      doctrine: { roe: 'tight', emconRadar: true } });
+    const blue = unit('blue_ffg', { side: 'BLUE', platformId: 'constellation_ffg', position: [0.15, 0],
+      doctrine: { roe: 'tight', emconRadar: true } });
+    const contacts = computeContactsOnly({ [red.id]: red, [blue.id]: blue }, catalog, {}, 0).contacts;
+    expect(contacts.RED_CONTACT_blue_ffg).toBeDefined();
+    expect(contacts.BLUE_CONTACT_red_ffg).toBeDefined();
+
+    const verifyDefense = (defender: RuntimeUnit, attacker: RuntimeUnit, expectedWeaponId: string, distanceKm = 40) => {
+      defender.doctrine.automaticFireRangeFraction = 1;
+      attacker.position = [distanceKm / 111.195, 0];
+      const incoming = missile(attacker, defender);
+      incoming.id = `incoming_${defender.id}`;
+      incoming.altitudeM = 1000;
+      const weaponsInFlight: Record<string, WeaponInFlight> = { [incoming.id]: incoming };
+      runAutoDefense({ units: { [defender.id]: defender, [attacker.id]: attacker }, missions: [], contacts: {},
+        weaponsInFlight, catalog, nextSimTime: 0, score: score(), logs: [], autoPauseSettings: pausesOff,
+        triggerPause: () => undefined });
+      expect(Object.values(weaponsInFlight).filter((weapon) => weapon.targetType === 'missile')
+        .map((weapon) => weapon.weaponId)).toEqual([expectedWeaponId, expectedWeaponId]);
+    };
+    verifyDefense(red, blue, 'hq16fe_sam');
+    const freshBlue = unit('fresh_blue_ffg', { side: 'BLUE', platformId: 'constellation_ffg', position: [0, 0],
+      doctrine: { roe: 'tight', emconRadar: true } });
+    const redAttacker = unit('red_attacker', { platformId: 'type054b_frigate', position: [0.2, 0] });
+    verifyDefense(freshBlue, redAttacker, 'essm_blk2');
+    const nearRed = unit('near_red_ffg', { platformId: 'type054b_frigate', position: [0, 0],
+      doctrine: { roe: 'tight', emconRadar: true } });
+    const nearBlue = unit('near_blue_attacker', { side: 'BLUE', position: [0.05, 0] });
+    verifyDefense(nearRed, nearBlue, 'hq10_point_defense', 5);
+    const nearBlueFfg = unit('near_blue_ffg', { side: 'BLUE', platformId: 'constellation_ffg', position: [0, 0],
+      doctrine: { roe: 'tight', emconRadar: true } });
+    const nearRedAttacker = unit('near_red_attacker', { position: [0.05, 0] });
+    verifyDefense(nearBlueFfg, nearRedAttacker, 'ram_blk2', 5);
+    expect(catalog.weapons.hq10_point_defense.maxRangeKm).toBeLessThan(catalog.weapons.hq16fe_sam.maxRangeKm);
+    expect(catalog.weapons.ram_blk2.maxRangeKm).toBeLessThan(catalog.weapons.essm_blk2.maxRangeKm);
+    expect(nearRed.mounts.find((mount) => mount.weaponId === 'hq10_point_defense')!.maxAmmo)
+      .toBeLessThan(red.mounts.find((mount) => mount.weaponId === 'hq16fe_sam')!.maxAmmo);
+
+    for (const [shooter, target, weaponId] of [
+      [unit('red_attack_ffg', { platformId: 'type054b_frigate', doctrine: { roe: 'free', emconRadar: true } }),
+        unit('blue_surface_target', { side: 'BLUE', platformId: 'constellation_ffg', position: [1, 0] }), 'yj83_ashm'],
+      [unit('blue_attack_ffg', { side: 'BLUE', platformId: 'constellation_ffg', doctrine: { roe: 'free', emconRadar: true } }),
+        unit('red_surface_target', { platformId: 'type054b_frigate', position: [1, 0] }), 'nsm_ashm'],
+    ] as const) {
+      const track = contact(target, shooter, { classification: 'identified' });
+      const mount = shooter.mounts.find((candidate) => candidate.weaponId === weaponId)!;
+      expect(evaluateFireControl(shooter, track, mount, catalog.weapons[weaponId], catalog,
+        { [shooter.id]: shooter, [target.id]: target }, 0).status).not.toBe('blocked');
+    }
+  });
+
+  test('AIP SSKs exploit low-speed shallow-water acoustics and retain torpedo/anti-ship options', () => {
+    const sensor = catalog.sensors.towed_array_sonar;
+    const sskRange = calculateSonarDetectionRangeKm(sensor, 0, -70,
+      catalog.platforms.type039c_ssk.acousticSignatureDb, 5, false);
+    const ssnRange = calculateSonarDetectionRangeKm(sensor, 0, -70,
+      catalog.platforms.type093b_ssn.acousticSignatureDb, 5, false);
+    expect(sskRange).toBeLessThan(ssnRange);
+    const shallowThresholdKm = (sskRange + ssnRange) * 0.5 * 0.72;
+    const environment = { landPolygons: [], acousticZones: [{
+      id: 'shallow_test', name: 'Shallow', kind: 'shallow' as const, sonarRangeFactor: 0.72,
+      areaPolygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]] as [number, number][],
+    }] };
+    const observer = unit('asw_screen', { platformId: 'type054b_frigate', position: [0, 0], speedKts: 0 });
+    const ssk = unit('quiet_ssk', { side: 'BLUE', platformId: 'taigei_ssk',
+      position: [shallowThresholdKm / 111.195, 0], speedKts: 5, altitudeM: -70 });
+    const ssn = unit('louder_ssn', { side: 'BLUE', platformId: 'virginia_ssn',
+      position: [shallowThresholdKm / 111.195, 0], speedKts: 5, altitudeM: -70 });
+    expect(computeContactsOnly({ observer, quiet_ssk: ssk }, catalog, {}, 0, 0, environment).contacts.RED_CONTACT_quiet_ssk)
+      .toBeUndefined();
+    expect(computeContactsOnly({ observer, louder_ssn: ssn }, catalog, {}, 0, 0, environment).contacts.RED_CONTACT_louder_ssn)
+      .toBeDefined();
+
+    const redSsk = unit('red_ssk', { platformId: 'type039c_ssk', doctrine: { roe: 'free' } });
+    const subTarget = unit('sub_target', { side: 'BLUE', platformId: 'taigei_ssk', position: [0.05, 0] });
+    const surfaceTarget = unit('surface_target', { side: 'BLUE', platformId: 'constellation_ffg', position: [1, 0] });
+    const torpedoContact = contact(subTarget, redSsk);
+    const surfaceContact = contact(surfaceTarget, redSsk);
+    for (const [weaponId, track] of [['yu6_torpedo', torpedoContact], ['yj83_ashm', surfaceContact]] as const) {
+      const mount = redSsk.mounts.find((candidate) => candidate.weaponId === weaponId)!;
+      expect(evaluateFireControl(redSsk, track, mount, catalog.weapons[weaponId], catalog,
+        { [redSsk.id]: redSsk, [subTarget.id]: subTarget, [surfaceTarget.id]: surfaceTarget }, 0).status)
+        .not.toBe('blocked');
+    }
+    expect(catalog.platforms.taigei_ssk.mounts.map((mount) => mount.weaponId)).toEqual(['mk48_adcap', 'nsm_ashm']);
+  });
+
+  test('ASW helicopters use dipping sonar contacts to authorize lightweight torpedo drops', () => {
+    for (const [platformId, loadoutId, targetPlatformId, weaponId] of [
+      ['z20f_asw', 'loadout_z20f_asw_prosecute', 'taigei_ssk', 'yu11_lwt'],
+      ['mh60r_seahawk', 'loadout_mh60r_asw_prosecute', 'type039c_ssk', 'mk54_lwt'],
+    ] as const) {
+      const side = platformId === 'z20f_asw' ? 'RED' as const : 'BLUE' as const;
+      const targetSide = side === 'RED' ? 'BLUE' as const : 'RED' as const;
+      const helicopter = unit(`${platformId}_unit`, { side, platformId, loadoutId, position: [0, 0], altitudeM: 300,
+        doctrine: { roe: 'free', emconSonar: true } });
+      const target = unit(`${targetPlatformId}_target`, { side: targetSide, platformId: targetPlatformId,
+        position: [0.1, 0], altitudeM: -80, speedKts: 5 });
+      const contacts = computeContactsOnly({ [helicopter.id]: helicopter, [target.id]: target }, catalog, {}, 0).contacts;
+      const track = contacts[`${side}_CONTACT_${target.id}`];
+      expect(track).toBeDefined();
+      expect(track.domain).toBe('subsurface');
+      const mount = helicopter.mounts.find((candidate) => candidate.weaponId === weaponId)!;
+      expect(evaluateFireControl(helicopter, track, mount, catalog.weapons[weaponId], catalog,
+        { [helicopter.id]: helicopter, [target.id]: target }, 0).status).not.toBe('blocked');
+    }
+  });
+
+  test('AIM-174B obeys automatic range WRA and finite Super Hornet inventory', () => {
+    const fighter = unit('super_hornet', { side: 'BLUE', platformId: 'fa18ef_super_hornet',
+      loadoutId: 'loadout_fa18ef_aim174_barcap', position: [0, 0],
+      doctrine: { roe: 'free', emconRadar: true, salvoSize: 1, minimumAutomaticThreat: 'high' } });
+    const awacs = unit('high_value_air', { platformId: 'kj500_awacs', position: [300 / 111.195, 0] });
+    const track = contact(awacs, fighter, { threatLevel: 'high', classification: 'identified', lastDetectedTime: 0 });
+    const units = { [fighter.id]: fighter, [awacs.id]: awacs };
+    const blockedByWra: Record<string, WeaponInFlight> = {};
+    runAutoDefense({ units, missions: [], contacts: { [track.id]: track }, weaponsInFlight: blockedByWra,
+      catalog, nextSimTime: 0, score: score(), logs: [], autoPauseSettings: pausesOff,
+      triggerPause: () => undefined });
+    expect(blockedByWra).toEqual({});
+
+    fighter.doctrine.automaticFireRangeFraction = 1;
+    const launched: Record<string, WeaponInFlight> = {};
+    runAutoDefense({ units, missions: [], contacts: { [track.id]: track }, weaponsInFlight: launched,
+      catalog, nextSimTime: 1000, score: score(), logs: [], autoPauseSettings: pausesOff,
+      triggerPause: () => undefined });
+    expect(Object.values(launched).map((weapon) => weapon.weaponId)).toEqual(['aim174b_ulraam']);
+    expect(fighter.mounts.find((mount) => mount.weaponId === 'aim174b_ulraam')?.currentAmmo).toBe(1);
+  });
+
+  test('air-dropped lightweight torpedoes transition into water search and heavy torpedoes stay non-air-launchable', () => {
+    const local = structuredClone(catalog);
+    local.platforms.type093b_ssn.ciwsDefenseProb = 0;
+    const aircraft = unit('asw_aircraft', { side: 'BLUE', platformId: 'p8a_poseidon', position: [0, 0], speedKts: 0,
+      doctrine: { roe: 'free', emconRadar: true, salvoSize: 1 } });
+    const submarine = unit('asw_submarine', { platformId: 'type093b_ssn', position: [0.05, 0], speedKts: 0 });
+    const track = contact(submarine, aircraft, { id: 'BLUE_CONTACT_asw_submarine', lastDetectedTime: 0 });
+    const weaponsInFlight: Record<string, WeaponInFlight> = {};
+    const s = score();
+    runAutoDefense({ units: { [aircraft.id]: aircraft, [submarine.id]: submarine }, missions: [],
+      contacts: { [track.id]: track }, weaponsInFlight, catalog: local, nextSimTime: 0,
+      score: s, logs: [], autoPauseSettings: pausesOff, triggerPause: () => undefined });
+    const dropped = Object.values(weaponsInFlight)[0];
+    expect(dropped).toMatchObject({ weaponId: 'mk54_lwt', deliveryPhase: 'air_drop',
+      altitudeM: aircraft.altitudeM, speedKts: local.weapons.mk54_lwt.airDropSpeedKts });
+    expect(aircraft.mounts.find((mount) => mount.weaponId === 'mk54_lwt')?.currentAmmo).toBe(5);
+
+    const logs: import('../../src/types/wargame').CombatLogEntry[] = [];
+    advanceWeaponPhysics({ units: { [aircraft.id]: aircraft, [submarine.id]: submarine },
+      contacts: { [track.id]: track }, weaponsInFlight, previousExplosions: [], catalog: local,
+      nextSimTime: 50000, dtSec: 50, score: s, creditedDamage: {}, rng: () => 0.9,
+      logs, autoPauseSettings: pausesOff, triggerPause: () => undefined });
+    expect(dropped).toMatchObject({ deliveryPhase: 'water_search', altitudeM: -50, speedKts: 47, maxRangeKm: 20 });
+    expect(logs.some((log) => log.id.startsWith('water_entry_'))).toBe(true);
+
+    dropped.position = [submarine.position[0] - 0.0001, submarine.position[1]];
+    dropped.aimPosition = [...submarine.position];
+    dropped.heading = getBearingDeg(dropped.position, submarine.position);
+    dropped.seekerState = 'terminal_searching';
+    const rolls = [0.9, 0.1, 0.5];
+    advanceWeaponPhysics({ units: { [aircraft.id]: aircraft, [submarine.id]: submarine },
+      contacts: { [track.id]: track }, weaponsInFlight, previousExplosions: [], catalog: local,
+      nextSimTime: 51000, dtSec: 1, score: s, creditedDamage: {}, rng: () => rolls.shift() ?? 0.5,
+      logs, autoPauseSettings: pausesOff, triggerPause: () => undefined });
+    expect(weaponsInFlight[dropped.id]).toBeUndefined();
+    expect(submarine.hp).toBeLessThan(submarine.maxHp);
+
+    const heavyMount = { mountId: 'illegal_heavy', weaponId: 'mk48_adcap', weaponName: 'Mk48',
+      maxAmmo: 1, currentAmmo: 1, reloadTimeSec: 1, cooldownRemainingSec: 0 };
+    expect(evaluateFireControl(aircraft, track, heavyMount, local.weapons.mk48_adcap, local,
+      { [aircraft.id]: aircraft, [submarine.id]: submarine }, 0).status).toBe('blocked');
+    const ship = unit('lwt_ship', { side: 'BLUE', platformId: 'type055_destroyer' });
+    const lwtMount = { ...heavyMount, mountId: 'illegal_lwt', weaponId: 'mk54_lwt', weaponName: 'Mk54' };
+    expect(evaluateFireControl(ship, track, lwtMount, local.weapons.mk54_lwt, local,
+      { [ship.id]: ship, [submarine.id]: submarine }, 0).status).toBe('blocked');
+  });
+
   test('autoEvade reacts only to an observed closing track, consumes finite inventory once and restores the route', () => {
     const defender = unit('defender', { platformId: 'type055_destroyer', position: [0, 0] });
     const attacker = unit('attacker', { side: 'BLUE', position: [0.2, 0] });
@@ -539,6 +771,62 @@ describe('Resources, tasks and outcome accounting', () => {
     const rule = { durationSec: 1, tacticalVictoryThreshold: 1, decisiveVictoryThreshold: 2 };
     expect(evaluateObjectives([objective], {}, { target }, {}, score(), 1000, 0, rule).progress.p).toBe('achieved');
     expect(evaluateObjectives([{ ...objective, preserveCapability: true }], {}, { target }, {}, score(), 1000, 0, rule).progress.p).toBe('failed');
+  });
+
+  test('surface withdrawal areas remove only authorized targets and do not end before all units arrive', () => {
+    const first = unit('withdraw_first', { position: [0, 0], speedKts: 0 });
+    const second = unit('withdraw_second', { position: [1, 0], speedKts: 0 });
+    const objective: ScenarioObjective = {
+      id: 'surface_withdraw', side: 'RED', title: 'Surface withdrawal', type: 'withdraw',
+      unitIds: [first.id, second.id], required: true, points: 100,
+      withdrawAreaPolygon: [[-0.1, -0.1], [0.1, -0.1], [0.1, 0.1], [-0.1, 0.1]],
+      withdrawUnitDomains: ['surface'],
+    };
+    const victory = { durationSec: 1, tacticalVictoryThreshold: 10, decisiveVictoryThreshold: 100 };
+    let state = stepSimulationWorld({ ...world([first, second]), objectives: [objective], victoryConditions: victory },
+      catalog, 0.25, pausesOff, 'RED').nextState;
+    expect(state.units.withdraw_first.status).toBe('recovered');
+    expect(state.units.withdraw_first.completedWithdrawalObjectiveIds).toContain(objective.id);
+    expect(state.units.withdraw_second.status).toBe('operational');
+    expect(state.objectiveProgress?.surface_withdraw).toBe('pending');
+    expect(state.battleResult).toBeUndefined();
+
+    state.units.withdraw_second.position = [0, 0];
+    state = stepSimulationWorld(state, catalog, 0.25, pausesOff, 'RED').nextState;
+    expect(state.objectiveProgress?.surface_withdraw).toBe('achieved');
+    expect(state.battleResult).toBeUndefined();
+    state = stepSimulationWorld(state, catalog, 0.5, pausesOff, 'RED').nextState;
+    expect(state.battleResult?.outcomes.RED).toBe('victory');
+
+    const recoveredElsewhere = unit('air_recovered', { platformId: 'j20_mighty_dragon' });
+    recoveredElsewhere.status = 'recovered';
+    const airObjective: ScenarioObjective = { ...objective, id: 'air_area', unitIds: [recoveredElsewhere.id],
+      withdrawUnitDomains: ['air'] };
+    expect(evaluateObjectives([airObjective], {}, { [recoveredElsewhere.id]: recoveredElsewhere }, {},
+      score(), 500, 0, victory).progress.air_area).toBe('pending');
+  });
+
+  test('amphibious high-value ships can be mission-killed, preserved and withdrawn through a corridor', () => {
+    const lhd = unit('red_lhd', { platformId: 'type075_lhd', position: [0, 0], speedKts: 0 });
+    const withdraw: ScenarioObjective = {
+      id: 'lhd_withdraw', side: 'RED', title: 'Withdraw LHD', type: 'withdraw', unitIds: [lhd.id],
+      required: true, points: 150, withdrawAreaPolygon: [[-0.1, -0.1], [0.1, -0.1], [0.1, 0.1], [-0.1, 0.1]],
+      withdrawUnitDomains: ['surface'],
+    };
+    const withdrawn = stepSimulationWorld({ ...world([lhd]), objectives: [withdraw],
+      victoryConditions: { durationSec: 10, tacticalVictoryThreshold: 10, decisiveVictoryThreshold: 100 } },
+      catalog, 0.25, pausesOff, 'RED').nextState;
+    expect(withdrawn.units.red_lhd.status).toBe('recovered');
+    expect(withdrawn.objectiveProgress?.lhd_withdraw).toBe('achieved');
+
+    const america = unit('blue_lha', { side: 'BLUE', platformId: 'america_lha' });
+    america.hp = america.maxHp * 0.2;
+    expect(getUnitCapabilities(america).state).toBe('mission_killed');
+    const preserve: ScenarioObjective = { id: 'preserve_lha', side: 'BLUE', title: 'Preserve LHA',
+      type: 'preserve', unitIds: [america.id], required: true, points: 100, preserveCapability: true };
+    const result = evaluateObjectives([preserve], {}, { [america.id]: america }, {}, score(), 1000, 0,
+      { durationSec: 1, tacticalVictoryThreshold: 10, decisiveVictoryThreshold: 100 });
+    expect(result.progress.preserve_lha).toBe('failed');
   });
 
   test('main scenario objectives cover timeout, critical failure and costly victory outcomes', () => {
@@ -936,6 +1224,7 @@ describe('Deterministic replay and scenario contracts', () => {
       catalogVersion: store.getState().catalog.version,
       scenarioSchemaVersion: SCENARIO_SCHEMA_VERSION,
     });
+    expect(canonicalBattleState()).not.toHaveProperty('pendingSortieOrders');
   });
 
   test('legacy and mismatched recording headers are rejected before replacing the battle', () => {
@@ -1031,10 +1320,268 @@ describe('Deterministic replay and scenario contracts', () => {
     for (const batch of [1, 5, 15, 60]) expect(replayBattleRecording(recording, batch)).toEqual(expected);
   });
 
+  test('Bashi Channel executes transit, ASW aviation, shore denial and observed-contact SEAD chains', () => {
+    store.getState().loadScenario(bashi, false, 7373);
+    store.setState({ autoPause: pausesOff });
+    const redStart = store.getState().units.bashi_red_075.position[0];
+    const blueStart = store.getState().units.bashi_blue_america.position[0];
+    store.getState().stepSingleTick(2);
+    let state = store.getState();
+    expect(state.events.filter((event) => ['bashi_ev_red_sead_identified', 'bashi_ev_blue_sead_identified'].includes(event.id))
+      .every((event) => event.fireCount === 1)).toBe(true);
+    expect(state.missions.filter((mission) => mission.type === 'sead').every((mission) => mission.isActive)).toBe(true);
+    expect(Object.values(state.weaponsInFlight).filter((weapon) => weapon.weaponId === 'ld10_arm')).toHaveLength(2);
+    expect(Object.values(state.weaponsInFlight).filter((weapon) => weapon.weaponId === 'agm88g_aargm')).toHaveLength(2);
+    expect(Object.values(state.weaponsInFlight).some((weapon) =>
+      weapon.shooterId === 'bashi_red_coastal_asm' && weapon.targetType === 'unit')).toBe(true);
+
+    store.getState().stepSingleTick(98);
+    state = store.getState();
+    expect(state.score.sortiesLaunched).toBe(3);
+    const sorties = Object.values(state.units).filter((unit) => unit.hostCarrierId);
+    expect(sorties.map((unit) => unit.platformId).sort()).toEqual(['f35b_lightning', 'mh60r_seahawk', 'z20f_asw'].sort());
+    expect(sorties.find((unit) => unit.platformId === 'z20f_asw')?.mounts.some((mount) => mount.weaponId === 'yu11_lwt')).toBe(true);
+    expect(sorties.find((unit) => unit.platformId === 'mh60r_seahawk')?.mounts.some((mount) => mount.weaponId === 'mk54_lwt')).toBe(true);
+    expect(state.units.bashi_red_075.position[0]).toBeGreaterThan(redStart);
+    expect(state.units.bashi_blue_america.position[0]).toBeLessThan(blueStart);
+    expect(bashi.environment?.acousticZones.map((zone) => zone.kind).sort()).toEqual(['deep', 'shallow']);
+    expect(state.units.bashi_red_039c.assignedMissionId).toBe('bashi_mission_red_asw');
+    expect(state.units.bashi_blue_virginia.assignedMissionId).toBe('bashi_mission_blue_asw');
+  });
+
+  test('Bashi Channel ASW waves consume reserves then reuse a recovered Turnaround batch', () => {
+    store.getState().loadScenario(bashi, false, 7373);
+    store.setState((state) => ({
+      autoPause: pausesOff,
+      objectives: [],
+      victoryConditions: undefined,
+      events: state.events.filter((event) => event.id.includes('asw_wave')),
+      units: Object.fromEntries(Object.entries(state.units).map(([id, runtimeUnit]) => [id,
+        ['bashi_red_075', 'bashi_blue_america'].includes(id)
+          ? { ...runtimeUnit, doctrine: { ...runtimeUnit.doctrine, roe: 'hold' as const, emconRadar: false } }
+          : { ...runtimeUnit, status: 'recovered' as const },
+      ])),
+    }));
+    store.getState().stepSingleTick(20);
+    let state = store.getState();
+    expect(state.score.sortiesLaunched).toBe(2);
+    const firstBlue = Object.values(state.units).find((unit) =>
+      unit.hostCarrierId === 'bashi_blue_america' && unit.platformId === 'mh60r_seahawk')!;
+    const america = state.units.bashi_blue_america;
+    const initialSupply = america.hangar.find((slot) => slot.slotId === 'hangar_mh60r_asw')!.turnaroundSupplies;
+    store.setState((current) => ({ units: { ...current.units, [firstBlue.id]: {
+      ...firstBlue, position: [...current.units.bashi_blue_america.position], status: 'returning',
+      speedKts: 0, targetSpeedKts: 0,
+    } } }));
+    store.getState().stepSingleTick(0.25);
+    expect(store.getState().units.bashi_blue_america.hangar.find((slot) => slot.slotId === 'hangar_mh60r_asw')!
+      .turnaroundQueue.map((entry) => entry.sortieId)).toContain(firstBlue.id);
+    store.getState().stepSingleTick(110);
+    let blueSlot = store.getState().units.bashi_blue_america.hangar.find((slot) => slot.slotId === 'hangar_mh60r_asw')!;
+    expect(blueSlot.turnaroundQueue).toEqual([]);
+    expect(blueSlot.turnaroundSupplies).toBe(initialSupply - 1);
+
+    store.getState().stepSingleTick(770);
+    state = store.getState();
+    expect(state.events.every((event) => event.fireCount === 1)).toBe(true);
+    expect(state.score.sortiesLaunched).toBe(6);
+    blueSlot = state.units.bashi_blue_america.hangar.find((slot) => slot.slotId === 'hangar_mh60r_asw')!;
+    expect(blueSlot.nextSortieNumber).toBe(4);
+    expect(blueSlot.activeSortieIds).toHaveLength(2);
+    expect(blueSlot.readyAirframes).toBe(0);
+    expect(state.pendingSortieOrders).toEqual([]);
+  });
+
+  test('Bashi Channel preserve and withdrawal complete together while mission kills end critically', () => {
+    store.getState().loadScenario(bashi, false, 7373);
+    store.setState((state) => ({
+      autoPause: pausesOff,
+      events: [],
+      units: Object.fromEntries(Object.entries(state.units).map(([id, runtimeUnit]) => [id, {
+        ...runtimeUnit,
+        position: id === 'bashi_red_075' ? [122.60, 20.72] as [number, number]
+          : id === 'bashi_blue_america' ? [122.30, 20.28] as [number, number] : runtimeUnit.position,
+        doctrine: { ...runtimeUnit.doctrine, roe: 'hold' as const },
+      }])),
+    }));
+    store.getState().stepSingleTick(0.25);
+    let state = store.getState();
+    expect(state.units.bashi_red_075.status).toBe('recovered');
+    expect(state.units.bashi_blue_america.status).toBe('recovered');
+    expect(state.objectiveProgress.bashi_red_withdraw_075).toBe('achieved');
+    expect(state.objectiveProgress.bashi_blue_withdraw_america).toBe('achieved');
+    expect(state.objectiveProgress.bashi_red_preserve_075).not.toBe('failed');
+    expect(state.objectiveProgress.bashi_blue_preserve_america).not.toBe('failed');
+
+    for (const [failedId, failedSide] of [['bashi_red_075', 'RED'], ['bashi_blue_america', 'BLUE']] as const) {
+      store.getState().loadScenario(bashi, false, 7373);
+      store.setState((current) => ({ autoPause: pausesOff, events: [], units: {
+        ...current.units, [failedId]: { ...current.units[failedId], hp: 1, status: 'engaged' as const },
+      } }));
+      store.getState().stepSingleTick(0.25);
+      state = store.getState();
+      expect(state.battleResult?.reason).toBe('critical_objective');
+      expect(state.battleResult?.outcomes[failedSide]).toBe('defeat');
+      expect(state.battleResult?.outcomes[failedSide === 'RED' ? 'BLUE' : 'RED']).toBe('victory');
+    }
+  });
+
+  test('Bashi Channel exposes independently completable red and blue command paths', () => {
+    const runPath = (side: 'RED' | 'BLUE') => {
+      store.getState().loadScenario(bashi, false, 7373);
+      if (side === 'BLUE') store.getState().setPlayerSide('BLUE');
+      store.setState({ autoPause: pausesOff });
+      const coreId = side === 'RED' ? 'bashi_red_075' : 'bashi_blue_america';
+      const exit: [number, number] = side === 'RED' ? [122.25, 20.72] : [122.75, 20.28];
+      const issueDefensiveOrders = () => {
+        for (const runtimeUnit of Object.values(store.getState().units)) {
+          if (runtimeUnit.side === side && runtimeUnit.status !== 'destroyed' && runtimeUnit.status !== 'recovered' &&
+              runtimeUnit.doctrine.roe !== 'tight') store.getState().updateUnitDoctrine(runtimeUnit.id, { roe: 'tight' });
+        }
+      };
+      issueDefensiveOrders();
+      store.getState().appendUnitWaypoint(coreId, exit, true, 22, 0);
+      store.getState().updateUnitKinematics(coreId, 22, 0);
+      store.getState().stepSingleTick(0.25);
+      issueDefensiveOrders();
+      while (!store.getState().battleResult &&
+          (store.getState().simTime - store.getState().startTime) / 1000 < bashi.victoryConditions!.durationSec) {
+        store.getState().stepSingleTick(30);
+        issueDefensiveOrders();
+      }
+      const ended = store.getState();
+      const withdrawId = side === 'RED' ? 'bashi_red_withdraw_075' : 'bashi_blue_withdraw_america';
+      const preserveId = side === 'RED' ? 'bashi_red_preserve_075' : 'bashi_blue_preserve_america';
+      expect(ended.units[coreId].status).toBe('recovered');
+      expect(ended.objectiveProgress[withdrawId]).toBe('achieved');
+      expect(ended.objectiveProgress[preserveId]).toBe('achieved');
+      expect(ended.battleResult?.outcomes[side]).not.toBe('defeat');
+      expect(ended.commandHistory.length).toBeGreaterThan(2);
+      const scoreAfter = side === 'RED' ? ended.score.redScore : ended.score.blueScore;
+      store.getState().stepSingleTick(10);
+      expect(side === 'RED' ? store.getState().score.redScore : store.getState().score.blueScore).toBe(scoreAfter);
+    };
+    runPath('RED');
+    runPath('BLUE');
+  }, 40_000);
+
+  test('Bashi Channel seed 7373 reaches a finite reproducible no-command terminal', () => {
+    store.getState().loadScenario(bashi, false, 7373);
+    store.setState({ autoPause: pausesOff });
+    store.getState().stepSingleTick(bashi.victoryConditions!.durationSec + 1);
+    const state = store.getState();
+    expect({
+      tick: state.tick,
+      reason: state.battleResult?.reason,
+      outcomes: state.battleResult?.outcomes,
+      losses: [state.score.redLosses, state.score.blueLosses],
+      fired: [state.score.redMissilesFired, state.score.blueMissilesFired],
+      sorties: state.score.sortiesLaunched,
+      aar: state.aar.events.length,
+    }).toEqual({
+      tick: 12000,
+      reason: 'time_limit',
+      outcomes: { RED: 'costly_victory', BLUE: 'costly_victory' },
+      losses: [4, 9],
+      fired: [124, 142],
+      sorties: 5,
+      aar: 218,
+    });
+    expect(state.pendingSortieOrders.filter((order) => order.status === 'pending')).toEqual([]);
+    expect(state.pendingSortieOrders.filter((order) => order.status === 'failed')
+      .every((order) => !!order.failureReason)).toBe(true);
+    expect(state.events.every((event) => event.fireCount === 1)).toBe(true);
+    expect(state.objectiveProgress.bashi_red_withdraw_075).toBe('achieved');
+    expect(state.objectiveProgress.bashi_blue_withdraw_america).toBe('achieved');
+    expect(Object.values(state.units).every((unit) =>
+      Number.isFinite(unit.position[0]) && Number.isFinite(unit.position[1]) && Number.isFinite(unit.hp))).toBe(true);
+    const frozen = canonicalBattleState();
+    store.getState().stepSingleTick(60);
+    expect(canonicalBattleState()).toEqual(frozen);
+  }, 20_000);
+
+  test('Bashi Channel red and blue support aircraft transfer finite tanker fuel', () => {
+    store.getState().loadScenario(bashi, false, 7373);
+    store.setState((state) => {
+      const tanker = state.units.bashi_red_y20u;
+      const receiver = state.units.bashi_red_j10c;
+      return { autoPause: pausesOff, units: { ...state.units, bashi_red_j10c: {
+        ...receiver, position: [...tanker.position], altitudeM: tanker.altitudeM,
+        targetAltitudeM: tanker.altitudeM, speedKts: tanker.speedKts, targetSpeedKts: tanker.speedKts,
+        fuelRemainingSec: receiver.maxFuelSec - 300,
+      } } };
+    });
+    const redFuelBefore = store.getState().units.bashi_red_j10c.fuelRemainingSec;
+    const redTransferBefore = store.getState().units.bashi_red_y20u.aarFuelRemainingSec!;
+    store.getState().requestAirRefuel('bashi_red_j10c', 'bashi_red_y20u');
+    store.getState().stepSingleTick(3);
+    expect(store.getState().units.bashi_red_j10c.fuelRemainingSec).toBeGreaterThan(redFuelBefore);
+    expect(store.getState().units.bashi_red_y20u.aarFuelRemainingSec).toBeLessThan(redTransferBefore);
+
+    store.getState().loadScenario(bashi, false, 7373);
+    store.getState().setPlayerSide('BLUE');
+    store.setState((state) => {
+      const tanker = state.units.bashi_blue_kc135;
+      const receiver = state.units.bashi_blue_ea18g;
+      return { autoPause: pausesOff, units: { ...state.units, bashi_blue_ea18g: {
+        ...receiver, position: [...tanker.position], altitudeM: tanker.altitudeM,
+        targetAltitudeM: tanker.altitudeM, speedKts: tanker.speedKts, targetSpeedKts: tanker.speedKts,
+        fuelRemainingSec: receiver.maxFuelSec - 300,
+      } } };
+    });
+    const blueFuelBefore = store.getState().units.bashi_blue_ea18g.fuelRemainingSec;
+    const blueTransferBefore = store.getState().units.bashi_blue_kc135.aarFuelRemainingSec!;
+    store.getState().requestAirRefuel('bashi_blue_ea18g', 'bashi_blue_kc135');
+    store.getState().stepSingleTick(3);
+    expect(store.getState().units.bashi_blue_ea18g.fuelRemainingSec).toBeGreaterThan(blueFuelBefore);
+    expect(store.getState().units.bashi_blue_kc135.aarFuelRemainingSec).toBeLessThan(blueTransferBefore);
+  });
+
+  test('upgraded East Sea scenario executes ASW, decoy, SEAD and saturation chains by 200 seconds', () => {
+    store.getState().loadScenario(east, false, 5150);
+    store.setState({ autoPause: pausesOff });
+    const initialPlatforms = new Set(Object.values(store.getState().units).map((unit) => unit.platformId));
+    for (const platformId of ['type054b_frigate', 'type039c_ssk', 'y9g_jammer', 'j10c_multirole',
+      'constellation_ffg', 'taigei_ssk', 'mq4c_triton']) expect(initialPlatforms).toContain(platformId);
+    store.getState().stepSingleTick(200);
+    const state = store.getState();
+    expect(state.events.filter((event) => ['ev_east_asw_helo_launch_30s', 'ev_blue_mald_screen_90s',
+      'ev_red_sead_on_classified_land_contact', 'ev_b1b_maritime_salvo_180s'].includes(event.id))
+      .every((event) => (event.fireCount ?? 0) === 1)).toBe(true);
+    expect(Object.values(state.units).some((unit) => unit.platformId === 'b1b_lancer')).toBe(true);
+    expect(Object.values(state.units).some((unit) => unit.platformId === 'adm160_mald')).toBe(true);
+    expect(Object.values(state.units).filter((unit) => ['z20f_asw', 'mh60r_seahawk'].includes(unit.platformId))).toHaveLength(2);
+    expect(state.missions.find((mission) => mission.id === 'mission_red_sead')?.isActive).toBe(true);
+    expect(state.units.red_j10c_reinforce.assignedMissionId).toBe('mission_red_sead');
+    expect(state.pendingSortieOrders).toEqual([]);
+  });
+
   test('event-driven OPFOR reactions replay identically across speed batches', () => {
     store.getState().loadScenario(deep, false, 808);
     store.setState({ autoPause: pausesOff });
     store.getState().stepSingleTick(60);
+    const expected = canonicalBattleState();
+    const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
+    for (const batch of [1, 5, 15, 60]) expect(replayBattleRecording(recording, batch)).toEqual(expected);
+  });
+
+  test('queued and delayed event sorties replay at the same Tick across batches', () => {
+    const scenario = fixture([
+      placement('replay_carrier', { platformId: 'cv18_fujian_carrier', parentGroupId: 'red_surface_tg', position: [0, 0], speedKts: 0 }),
+    ]);
+    scenario.events = [{
+      id: 'queued_sortie', name: 'Queued sortie', description: 'Replay queue',
+      trigger: { type: 'TIME_ELAPSED', elapsedSec: 0 },
+      actions: [{ type: 'LAUNCH_SORTIE', carrierUnitId: 'replay_carrier', hangarSlotId: 'hangar_j35_vf1',
+        loadoutId: 'loadout_j35_carrier_cap', launchDelaySec: 1 }],
+    }];
+    store.getState().loadScenario(scenario, false, 8181);
+    store.setState({ autoPause: pausesOff });
+    store.getState().stepSingleTick(2);
+    expect(store.getState().score.sortiesLaunched).toBe(1);
+    expect(store.getState().pendingSortieOrders).toEqual([]);
+    const launched = Object.values(store.getState().units).find((unit) => unit.hostCarrierId === 'replay_carrier');
+    expect(launched?.id).toBe('sortie_replay_carrier_hangar_j35_vf1_1');
     const expected = canonicalBattleState();
     const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
     for (const batch of [1, 5, 15, 60]) expect(replayBattleRecording(recording, batch)).toEqual(expected);

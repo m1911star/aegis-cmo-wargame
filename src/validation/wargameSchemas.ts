@@ -44,6 +44,9 @@ const weapon = object({
   maxRangeKm: positive, minRangeKm: number(0), speedKts: positive, cruiseAltitudeM: number(),
   basePk: number(0, 1), warheadDamage: number(0), salvoDefault: number(1, Number.MAX_SAFE_INTEGER, true),
   requiresDatalinkBeyondHorizon: optional(boolean),
+  launchMedium: optional(oneOf(['direct', 'air_drop'])),
+  airDropRangeKm: optional(positive), airDropSpeedKts: optional(positive),
+  waterEntrySpeedKts: optional(positive), waterEntryAltitudeM: optional(number(-1000, -0.1)),
   guidanceProfile: optional(object({
     activationRangeKm: optional(positive), seekerRangeKm: optional(positive),
     seekerFovDeg: optional(number(Number.MIN_VALUE, 360)), searchDurationSec: optional(positive),
@@ -96,7 +99,8 @@ const placement = object({
 const trigger = taggedUnion({
   TIME_ELAPSED: object({ elapsedSec: number(0) }),
   UNIT_DESTROYED: object({ unitId: optional(id), targetSide: optional(side), targetCategory: optional(category) }),
-  UNIT_DETECTED: object({ observerSide: side, targetUnitId: optional(id), targetCategory: optional(category) }),
+  UNIT_DETECTED: object({ observerSide: side, targetUnitId: optional(id), targetCategory: optional(category),
+    targetDomain: optional(domain), minimumClassification: optional(oneOf(['unknown', 'classified', 'identified'])) }),
   UNIT_ENTERS_AREA: object({ side, unitCategory: optional(category), areaPolygon: array(coordinate, 3) }),
 });
 const action = taggedUnion({
@@ -105,6 +109,7 @@ const action = taggedUnion({
   UPDATE_SIDE_DOCTRINE: object({ side, groupId: optional(id), doctrinePatch: doctrine }),
   LAUNCH_SORTIE: object({
     carrierUnitId: id, hangarSlotId: id, loadoutId: optional(id), assignedMissionId: optional(id),
+    launchDelaySec: optional(number(0)),
   }),
   ASSIGN_MISSION: object({ side, unitId: optional(id), groupId: optional(id), missionId: optional(id) }),
   TOGGLE_SIDE_EMCON: object({ side, groupId: optional(id), sensor: oneOf(['radar', 'sonar', 'jamming']) }),
@@ -151,6 +156,7 @@ const scenario = object({
     id, side: oneOf(['RED', 'BLUE']), title: text,
     type: oneOf(['destroy', 'disable', 'preserve', 'observe', 'withdraw']),
     unitIds: array(id, 1), required: boolean, points: number(0), criticalFailure: optional(boolean), preserveCapability: optional(boolean),
+  withdrawAreaPolygon: optional(array(coordinate, 3)), withdrawUnitDomains: optional(array(domain, 1)),
   }))),
 });
 

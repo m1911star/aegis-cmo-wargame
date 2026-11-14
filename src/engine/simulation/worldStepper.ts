@@ -1,4 +1,5 @@
 import { createAarLedger, recordAarTick } from '../aar';
+import { processPendingSortieOrders } from '../carrierOperations';
 import { createRandomStream, DEFAULT_SEED, FIXED_DT_SEC } from '../determinism';
 import { deriveMissionAssignments } from '../missions';
 import { computeContactsOnly } from '../sensors';
@@ -66,6 +67,7 @@ export function stepSimulationWorld(
       coordinatedAttack: unit.coordinatedAttack ? { ...unit.coordinatedAttack } : undefined,
       aarQueue: [...unit.aarQueue],
       deployableInventory: { ...unit.deployableInventory },
+      completedWithdrawalObjectiveIds: [...unit.completedWithdrawalObjectiveIds],
       airRefuelState: unit.airRefuelState ? {
         ...unit.airRefuelState,
         resumeWaypoints: unit.airRefuelState.resumeWaypoints.map((waypoint) => ({
@@ -106,6 +108,7 @@ export function stepSimulationWorld(
     ...event,
     matchedUnitIds: [...(event.matchedUnitIds ?? [])],
   }));
+  let pendingSortieOrders = (world.pendingSortieOrders ?? []).map((order) => ({ ...order }));
   const score: ScoreLedger = {
     ...world.score,
     firedEventIds: [...(world.score.firedEventIds || [])],
@@ -148,6 +151,9 @@ export function stepSimulationWorld(
     logs,
   });
 
+  pendingSortieOrders = processPendingSortieOrders(
+    pendingSortieOrders, units, missions, catalog, nextSimTime, score, logs
+  );
   advanceAirRefueling(units, catalog, nextSimTime, dtSec, logs);
 
   for (const log of logs) {
@@ -215,6 +221,7 @@ export function stepSimulationWorld(
 
   const objectiveEvaluation = resolveEventsAndObjectives({
     events,
+    pendingSortieOrders,
     units,
     contacts,
     missions,
@@ -254,6 +261,7 @@ export function stepSimulationWorld(
       explosions,
       missions: deriveMissionAssignments(missions, units),
       events,
+      pendingSortieOrders,
       environment: world.environment,
       victoryConditions: world.victoryConditions,
       score,

@@ -104,6 +104,7 @@ export function createRuntimeUnitFromPlacement(
     aarQueue: [],
     deployableInventory: Object.fromEntries((spec.deployables ?? []).map((deployable) =>
       [deployable.platformId, deployable.count])),
+    completedWithdrawalObjectiveIds: [],
     countermeasures: {
       chaff: spec.domain === 'air' ? 4 : spec.domain === 'surface' ? 6 : spec.domain === 'land' ? 2 : 0,
       flares: spec.domain === 'air' ? 4 : 0,

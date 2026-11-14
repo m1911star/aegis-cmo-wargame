@@ -97,6 +97,11 @@ export interface WeaponSpec {
    */
   requiresDatalinkBeyondHorizon?: boolean;
   guidanceProfile?: Partial<GuidanceProfile>;
+  launchMedium?: 'direct' | 'air_drop';
+  airDropRangeKm?: number;
+  airDropSpeedKts?: number;
+  waterEntrySpeedKts?: number;
+  waterEntryAltitudeM?: number;
   description: string;
 }
 
@@ -328,6 +333,7 @@ export interface RuntimeUnit {
   airRefuelState?: AirRefuelState;
   deployableInventory: Record<string, number>;
   deployedByUnitId?: string;
+  completedWithdrawalObjectiveIds: string[];
 
   doctrine: UnitDoctrine;
   mounts: RuntimeWeaponMount[];
@@ -408,6 +414,7 @@ export interface WeaponInFlight {
   lastTrackTime?: number;
   seekerState?: 'midcourse_datalink' | 'midcourse_blind' | 'terminal_searching' | 'terminal_locked' | 'lost';
   searchElapsedSec?: number;
+  deliveryPhase?: 'air_drop' | 'water_search';
 }
 
 export interface TacticalExplosionEffect {
@@ -508,7 +515,9 @@ export type ScenarioEventTrigger =
       type: 'UNIT_DETECTED';
       observerSide: SideId;
       targetUnitId?: string;
-      targetCategory?: UnitCategory; // 如红方首次侦知蓝方 carrier 或 ssn
+      targetCategory?: UnitCategory; // 仅在 identifiedCategory 已知时匹配
+      targetDomain?: Domain;
+      minimumClassification?: ContactClassification;
     }
   | {
       type: 'UNIT_ENTERS_AREA';
@@ -539,6 +548,7 @@ export type ScenarioEventAction =
       hangarSlotId: string;
       loadoutId?: string;
       assignedMissionId?: string;
+      launchDelaySec?: number;
     }
   | {
       type: 'ASSIGN_MISSION';
@@ -585,6 +595,19 @@ export interface ScenarioEventRule {
   actions: ScenarioEventAction[];
 }
 
+export interface PendingSortieOrder {
+  orderId: string;
+  eventId: string;
+  carrierUnitId: string;
+  hangarSlotId: string;
+  loadoutId?: string;
+  assignedMissionId?: string;
+  earliestLaunchTime: number;
+  attempts: number;
+  status: 'pending' | 'failed';
+  failureReason?: string;
+}
+
 export interface RuntimeScenarioEvent extends ScenarioEventRule {
   hasFired?: boolean;
   fireCount?: number;
@@ -614,6 +637,8 @@ export interface ScenarioObjective {
   points: number;
   criticalFailure?: boolean;
   preserveCapability?: boolean;
+  withdrawAreaPolygon?: [number, number][];
+  withdrawUnitDomains?: Domain[];
 }
 
 export type ObjectiveProgress = Record<string, 'pending' | 'achieved' | 'failed'>;

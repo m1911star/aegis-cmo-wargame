@@ -23,7 +23,7 @@ export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = {
 };
 
 export const MASTER_EQUIPMENT_CATALOG: EquipmentCatalog = {
-  version: '2026.11-TANKER-DECOY-1',
+  version: '2026.12-CONTENT-EXPANSION-1',
   sensors: MODULAR_SENSORS,
   weapons: MODULAR_WEAPONS,
   loadouts: MODULAR_LOADOUTS,
@@ -89,6 +89,16 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
   }
   for (const [id, weapon] of Object.entries(catalog.weapons)) {
     if (weapon.minRangeKm > weapon.maxRangeKm) errors.push(`weapons.${id}: minRangeKm exceeds maxRangeKm`);
+    if (weapon.launchMedium === 'air_drop') {
+      if (weapon.category !== 'torpedo' || weapon.guidance !== 'acoustic_homing' ||
+          !weapon.targetDomains.includes('subsurface') || !weapon.airDropRangeKm || !weapon.airDropSpeedKts ||
+          !weapon.waterEntrySpeedKts || weapon.waterEntryAltitudeM === undefined || weapon.waterEntryAltitudeM >= 0) {
+        errors.push(`weapons.${id}: invalid air-drop torpedo delivery profile`);
+      }
+    } else if (weapon.airDropRangeKm !== undefined || weapon.airDropSpeedKts !== undefined ||
+               weapon.waterEntrySpeedKts !== undefined || weapon.waterEntryAltitudeM !== undefined) {
+      errors.push(`weapons.${id}: water-entry fields require launchMedium air_drop`);
+    }
   }
 
   // 1. 校验 Loadouts 引用的武器与平台

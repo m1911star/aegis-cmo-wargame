@@ -1,5 +1,6 @@
+import * as turf from '@turf/turf';
 import type { BattleResult, CombatLogEntry, ObjectiveProgress, RuntimeUnit, ScenarioObjective, ScoreLedger, TacticalContact, VictoryConditionRule } from '../types/wargame';
-import { getUnitCapabilities } from './unitCapabilities';
+import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 
 export function creditDamage(
   score: ScoreLedger, victim: RuntimeUnit, ledger: Record<string, number>, fraction: number,
@@ -17,6 +18,45 @@ export function creditDamage(
   if (victim.side === 'RED') score.blueScore += reward;
   else score.redScore += reward;
   return reward;
+}
+
+export function resolveWithdrawalAreas(
+  objectives: ScenarioObjective[],
+  units: Record<string, RuntimeUnit>,
+  simTime: number,
+  logs: CombatLogEntry[]
+): void {
+  for (const objective of objectives) {
+    if (objective.type !== 'withdraw' || !objective.withdrawAreaPolygon) continue;
+    const area = turf.polygon([[...objective.withdrawAreaPolygon, objective.withdrawAreaPolygon[0]]]);
+    for (const unitId of objective.unitIds) {
+      const unit = units[unitId];
+      if (!unit || !isActiveUnit(unit) || unit.side !== objective.side ||
+          objective.withdrawUnitDomains && !objective.withdrawUnitDomains.includes(unit.domain) ||
+          unit.completedWithdrawalObjectiveIds.includes(objective.id) ||
+          !turf.booleanPointInPolygon(unit.position, area)) continue;
+      unit.completedWithdrawalObjectiveIds.push(objective.id);
+      unit.status = 'recovered';
+      unit.speedKts = unit.targetSpeedKts = 0;
+      unit.waypoints = [];
+      unit.missionTargetId = undefined;
+      unit.missionState = 'recovering';
+      unit.airRefuelState = undefined;
+      unit.evasionState = undefined;
+      logs.push({
+        id: `withdraw_${objective.id}_${unit.id}_${simTime}`,
+        simTime,
+        side: unit.side,
+        category: 'EVENT',
+        severity: 'info',
+        title: `${unit.callsign} 已撤出战区`,
+        message: `进入目标 [${objective.title}] 的版本化撤离区，不计战损。`,
+        position: [...unit.position],
+        unitId: unit.id,
+        aarType: 'recovery',
+      });
+    }
+  }
 }
 
 export function evaluateObjectives(
@@ -37,7 +77,9 @@ export function evaluateObjectives(
     const achieved = objective.type === 'destroy' ? targets.every(destroyed)
       : objective.type === 'disable' ? allPresent && targets.every((unit) => getUnitCapabilities(unit).state === 'mission_killed')
       : objective.type === 'preserve' ? timedOut && allPresent && targets.every((unit) => !preservationLost(unit))
-      : objective.type === 'withdraw' ? allPresent && targets.every((unit) => unit.status === 'recovered')
+      : objective.type === 'withdraw' ? allPresent && targets.every((unit) => objective.withdrawAreaPolygon
+        ? unit.completedWithdrawalObjectiveIds.includes(objective.id)
+        : unit.status === 'recovered')
       : objective.unitIds.every((id) => Object.values(contacts).some((contact) => contact.observerSide === objective.side && contact.actualUnitId === id));
     const failed = !achieved && (timedOut || (objective.type === 'preserve' && targets.some(preservationLost)));
     progress[objective.id] = achieved ? 'achieved' : failed ? 'failed' : 'pending';
@@ -55,6 +97,9 @@ export function evaluateObjectives(
   if (timedOut || critical.length) {
     const outcome = (side: 'RED' | 'BLUE'): BattleResult['outcomes']['RED'] => {
       if (critical.some((o) => o.side === side)) return 'defeat';
+      if (critical.some((o) => o.side !== side)) {
+        return (side === 'RED' ? score.redLosses : score.blueLosses) > 0 ? 'costly_victory' : 'victory';
+      }
       const required = objectives.filter((o) => o.side === side && o.required);
       if (required.length) {
         if (!required.every((o) => progress[o.id] === 'achieved')) return 'defeat';

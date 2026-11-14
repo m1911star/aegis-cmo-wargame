@@ -68,11 +68,12 @@ bun run preview
 
 | 想定 | 重点 |
 |---|---|
-| **东海惊雷** | 海空一体夺控、防空反导、CEC 支援与动态增援 |
-| **深海猎杀** | 双航母打击群、反潜搜索和远程饱和打击 |
+| **东海惊雷** | 浅海AIP/护卫舰反潜幕、运-9G电子支援、诱饵、SEAD与B-1B饱和波次 |
+| **深海猎杀** | 双航母隐身制空、多用途重锤、电子伴随、侦察分类、加油前出与可靠分波次出动 |
+| **巴士海峡封锁** | 50分钟双两栖核心preserve+withdraw、浅深海ASW、岸基拒止/SEAD和Turnaround护航轮换 |
 | **有限信息演练** | 15 分钟短局，练习观察、风险射击、资源撤离与任务结算 |
 
-想定入口位于 `src/scenarios/`。装备、传感器、武器和挂载数据位于 `src/db/`。
+想定入口位于 `src/scenarios/`。装备、传感器、武器和挂载数据位于 `src/db/`。当前主目录版本 `2026.12-CONTENT-EXPANSION-1` 包含 **38 平台、27 武器、24 传感器、27 挂载**；名称与参数均为可测试游戏抽象。
 
 ## 系统架构
 
@@ -121,7 +122,7 @@ MapLibre GeoJSON + React HUD
 Sensor → Weapon → Loadout → Platform
 ```
 
-`src/db/unitConfiguration.ts` 负责将平台与挂载合成为运行配置，包括武器替换、附加传感器、速度、续航和 RCS 修正。非法引用、不兼容挂载、重复 ID 和越界数值会在进入战场前被拒绝。
+`src/db/unitConfiguration.ts` 负责将平台与挂载合成为运行配置，包括武器替换、附加传感器、速度、续航和 RCS 修正。非法引用、不兼容挂载、重复 ID 和越界数值会在进入战场前被拒绝。当前扩充包括J-15T、F/A-18E/F、运-9G、B-1B、F-35B、054B、星座级、039C、大鲸级、075/America及红蓝有机反潜直升机；自动防空会从全部可执行挂架中按射程裕度、WRA、库存和在途量分层选弹。
 
 新增内容有两种方式：
 
@@ -163,7 +164,8 @@ tests/
 | `bun run test:coverage` | 生成覆盖率并执行 engine ≥80% 门禁 |
 | `bun run test:e2e` | 运行 Playwright Chromium 关键流程 |
 | `bun run build` | TypeScript 检查与 Vite 生产构建 |
-| `bun run validate:db` | 验证装备数据库完整性 |
+| `bun run validate:db` | 验证装备数据库与全部想定首Tick完整性 |
+| `bun run smoke:scenarios` | 以固定种子无命令运行4个想定并更新可复核JSON摘要 |
 
 首次运行 E2E 前安装浏览器：
 
@@ -172,11 +174,12 @@ bunx playwright install chromium
 bun run test:e2e
 ```
 
-当前基线：
+当前内容扩充基线：
 
-- Bun unit / integration：**133 pass，0 fail**
+- Bun unit / integration：**164 pass，0 fail**
 - Playwright E2E：**13 pass，0 fail**
-- Engine 聚合行覆盖率：**95.10%（2991/3145）**
+- Engine 聚合行覆盖率：**98.35%（3342/3398）**，门禁要求 ≥80%
+- 四想定固定种子摘要：[`docs/SCENARIO_SMOKE_RESULTS.json`](docs/SCENARIO_SMOKE_RESULTS.json)
 
 ## API 文档
 

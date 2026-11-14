@@ -3,6 +3,7 @@ import { MASTER_EQUIPMENT_CATALOG as catalog, resolveEquipmentCatalog, validateC
 import { resolveUnitConfiguration } from '../../src/db/unitConfiguration';
 import { compileScenario } from '../../src/scenarios/compileScenario';
 import {
+  BUILTIN_SCENARIOS,
   SCENARIO_EAST_SEA_THUNDER as east,
   SCENARIO_DEEP_SEA_CARRIER_HUNT as deep,
   instantiateScenarioUnits,
@@ -11,13 +12,15 @@ import {
 } from '../../src/scenarios/builtinScenarios';
 import { createRuntimeUnitFromPlacement, stepSimulationWorld, type SimulationWorldState } from '../../src/engine/simulationEngine';
 import { resolveEventsAndObjectives } from '../../src/engine/simulation/eventResolver';
+import { processPendingSortieOrders } from '../../src/engine/carrierOperations';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
 import { deriveMissionAssignments } from '../../src/engine/missions';
 import { getEventOccurrences } from '../../src/engine/scenarioEvents';
+import { computeContactsOnly, evaluateTargetEcmSuppression } from '../../src/engine/sensors';
 import { useWargameStore as store } from '../../src/store/useWargameStore';
 import type {
   EquipmentCatalog, InitialUnitPlacement, RuntimeScenarioEvent, RuntimeUnit,
-  ScenarioDefinition, ScenarioEventRule, TacticalContact, WeaponInFlight,
+  ScenarioDefinition, ScenarioEventRule, ScenarioObjective, TacticalContact, TacticalMission, WeaponInFlight,
 } from '../../src/types/wargame';
 
 function placement(id: string, platformId = 'j20_mighty_dragon', extra: Partial<InitialUnitPlacement> = {}): InitialUnitPlacement {
@@ -118,6 +121,23 @@ describe('Scenario input boundary', () => {
     expect(() => compileScenario(scenario([], { environment: invalidEnvironment }))).toThrow('non-self-intersecting');
   });
 
+  test('validates withdraw areas, target ownership and allowed domains before the first tick', () => {
+    const ship = placement('withdraw_ship', 'type055_destroyer');
+    const baseObjective = {
+      id: 'withdraw', side: 'RED' as const, title: 'Withdraw', type: 'withdraw' as const,
+      unitIds: [ship.id], required: true, points: 100,
+      withdrawAreaPolygon: [[-1, -1], [1, -1], [1, 1], [-1, 1]] as [number, number][],
+      withdrawUnitDomains: ['surface' as const],
+    };
+    expect(() => compileScenario(scenario([ship], { objectives: [baseObjective] }))).not.toThrow();
+    const wrongSide = structuredClone(baseObjective) as ScenarioObjective; wrongSide.side = 'BLUE';
+    expect(() => compileScenario(scenario([ship], { objectives: [wrongSide] }))).toThrow('objective side');
+    const wrongDomain = structuredClone(baseObjective) as ScenarioObjective; wrongDomain.withdrawUnitDomains = ['subsurface'];
+    expect(() => compileScenario(scenario([ship], { objectives: [wrongDomain] }))).toThrow('disallowed domain');
+    const wrongType = { ...structuredClone(baseObjective), type: 'destroy' as const };
+    expect(() => compileScenario(scenario([ship], { objectives: [wrongType] }))).toThrow('only applies');
+  });
+
   test('validates reinforcement and event references before the first tick', () => {
     const badSpawn = timedEvent({ actions: [{ type: 'SPAWN_REINFORCEMENTS', units: [placement('late', 'missing')] }] });
     const badMission = timedEvent({ actions: [{ type: 'ACTIVATE_MISSION', missionId: 'missing', isActive: true }] });
@@ -190,6 +210,107 @@ describe('Scenario input boundary', () => {
     expect(validateCatalogIntegrity(inherited).valid).toBe(false);
   });
 
+  test('content expansion counts, required IDs and scenario consumption remain explicit', () => {
+    expect(Object.keys(catalog.platforms)).toHaveLength(38);
+    expect(Object.keys(catalog.weapons)).toHaveLength(27);
+    expect(Object.keys(catalog.sensors)).toHaveLength(24);
+    expect(Object.keys(catalog.loadouts)).toHaveLength(27);
+    const addedPlatforms = ['j15t_flanker', 'fa18ef_super_hornet', 'y9g_jammer', 'b1b_lancer',
+      'j10c_multirole', 'mq4c_triton', 'f35b_lightning', 'type054b_frigate', 'constellation_ffg',
+      'type039c_ssk', 'taigei_ssk', 'type075_lhd', 'america_lha', 'z20f_asw', 'mh60r_seahawk'];
+    const requiredWeapons = ['hq16fe_sam', 'essm_blk2', 'aim174b_ulraam', 'yu11_lwt', 'mk54_lwt',
+      'hq10_point_defense', 'ram_blk2'];
+    const requiredSensors = ['y9g_esm_array', 'y9g_oecm_suite', 'spy6v3_ffg_radar', 'type382b_mfr',
+      'z20f_dipping_sonar', 'aqs22_dipping_sonar'];
+    const requiredLoadouts = ['loadout_j15t_heavy_cap', 'loadout_fa18ef_aim174_barcap',
+      'loadout_y9g_esm_support', 'loadout_b1b_mass_lrasm', 'loadout_f35b_stovl_strike',
+      'loadout_z20f_asw_prosecute', 'loadout_mh60r_asw_prosecute'];
+    for (const id of addedPlatforms) expect(catalog.platforms[id]).toBeDefined();
+    for (const id of requiredWeapons) expect(catalog.weapons[id]).toBeDefined();
+    for (const id of requiredSensors) expect(catalog.sensors[id]).toBeDefined();
+    for (const id of requiredLoadouts) expect(catalog.loadouts[id]).toBeDefined();
+
+    const consumed = new Set<string>();
+    for (const builtIn of BUILTIN_SCENARIOS) {
+      compileScenario(builtIn);
+      for (const placed of builtIn.units) {
+        consumed.add(placed.platformId);
+        for (const slot of catalog.platforms[placed.platformId]?.hangarSlots ?? []) consumed.add(slot.platformId);
+      }
+      for (const event of builtIn.events ?? []) for (const action of event.actions) {
+        if (action.type === 'SPAWN_REINFORCEMENTS') for (const placed of action.units) consumed.add(placed.platformId);
+      }
+    }
+    expect(BUILTIN_SCENARIOS.map((builtIn) => builtIn.id)).toContain('op_bashi_channel_blockade_2029');
+    for (const id of addedPlatforms) expect(consumed).toContain(id);
+  });
+
+  test('every loadout resolves compatible kinematics, endurance, RCS and finite ammunition', () => {
+    for (const loadout of Object.values(catalog.loadouts)) {
+      const platformId = loadout.compatiblePlatformIds[0];
+      const runtime = unit(placement(`loadout_${loadout.id}`, platformId, { loadoutId: loadout.id }));
+      const resolved = resolveUnitConfiguration(catalog, platformId, loadout.id);
+      expect(runtime.activeLoadoutId).toBe(loadout.id);
+      expect(resolved.maxSpeedKts).toBe(Math.max(0, resolved.platform.maxSpeedKts - (loadout.speedPenaltyKts ?? 0)));
+      expect(runtime.maxFuelSec).toBe(resolved.maxFuelSec);
+      expect(resolved.maxFuelSec).toBe(Math.round(resolved.platform.maxFuelSec * (loadout.combatRadiusMultiplier ?? 1)));
+      expect(resolved.rcsPenaltyM2).toBe(loadout.rcsPenaltyM2 ?? 0);
+      expect(runtime.mounts.map((mount) => [mount.weaponId, mount.maxAmmo, mount.currentAmmo]))
+        .toEqual(resolved.mounts.map((mount) => [mount.weaponId, mount.maxAmmo, mount.maxAmmo]));
+    }
+  });
+
+  test('every expansion weapon produces a legal observed-contact launch or drop', () => {
+    const launchCases = [
+      ['pl10_wvr', 'j10c_multirole', 'loadout_j10c_multirole_cap'],
+      ['yj83_ashm', 'type054b_frigate', undefined],
+      ['aim9x_wvr', 'fa18ef_super_hornet', 'loadout_fa18ef_fleet_cap'],
+      ['aim174b_ulraam', 'fa18ef_super_hornet', 'loadout_fa18ef_aim174_barcap'],
+      ['yu11_lwt', 'z20f_asw', 'loadout_z20f_asw_prosecute'],
+      ['mk54_lwt', 'mh60r_seahawk', 'loadout_mh60r_asw_prosecute'],
+      ['hq16fe_sam', 'type054b_frigate', undefined],
+      ['essm_blk2', 'constellation_ffg', undefined],
+      ['nsm_ashm', 'constellation_ffg', undefined],
+      ['hq10_point_defense', 'type054b_frigate', undefined],
+      ['ram_blk2', 'constellation_ffg', undefined],
+    ] as const;
+    for (const [weaponId, platformId, loadoutId] of launchCases) {
+      const weapon = catalog.weapons[weaponId];
+      const targetDomain = weapon.targetDomains.includes('subsurface') ? 'subsurface'
+        : weapon.targetDomains.includes('surface') ? 'surface' : 'air';
+      const targetPlatformId = targetDomain === 'subsurface' ? 'virginia_ssn'
+        : targetDomain === 'surface' ? 'arleigh_burke_flt3' : 'j20_mighty_dragon';
+      const maxRange = weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm! : weapon.maxRangeKm;
+      const distanceKm = Math.max(weapon.minRangeKm + 1, Math.min(maxRange * 0.5, maxRange - 1));
+      const shooter = unit(placement(`shooter_${weaponId}`, platformId, {
+        loadoutId, position: [0, 0], altitudeM: catalog.platforms[platformId].defaultAltitudeM,
+        doctrine: { roe: 'free', emconRadar: true, emconSonar: true, emconJamming: false,
+          automaticFireRangeFraction: 1, automaticTargetDomains: [targetDomain], minimumAutomaticThreat: 'low',
+          minimumWeaponReserve: 0, engageOpportunityTargets: true, salvoSize: 1 },
+      }));
+      shooter.mounts = shooter.mounts.filter((mount) => mount.weaponId === weaponId);
+      const target = unit(placement(`target_${weaponId}`, targetPlatformId, {
+        side: 'BLUE', parentGroupId: 'blue_desron15', position: [distanceKm / 111, 0],
+        altitudeM: catalog.platforms[targetPlatformId].defaultAltitudeM,
+      }));
+      const contact: TacticalContact = {
+        id: `RED_CONTACT_${target.id}`, actualUnitId: target.id, observerSide: 'RED', targetSide: 'BLUE',
+        domain: targetDomain, classification: 'identified', identifiedCategory: target.category,
+        displayName: target.name, sidc: target.sidc, estimatedPosition: [...target.position], truePosition: [...target.position],
+        uncertaintyRadiusKm: 0.1, heading: target.heading, speedKts: target.speedKts, altitudeM: target.altitudeM,
+        firstDetectedTime: 0, lastDetectedTime: 1000, detectedBySources: [shooter.callsign],
+        sourceUnitIds: [shooter.id], fireControlSourceIds: [shooter.id], threatLevel: 'critical', emitterObserved: true,
+      };
+      const weaponsInFlight: Record<string, WeaponInFlight> = {};
+      runAutoDefense({ units: { [shooter.id]: shooter, [target.id]: target }, missions: [],
+        contacts: { [contact.id]: contact }, weaponsInFlight, catalog, nextSimTime: 1000, score: world().score,
+        logs: [], previousDetectedMissileIds: [], autoPauseSettings: {
+          onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false,
+        }, triggerPause: () => undefined });
+      expect(Object.values(weaponsInFlight).some((launched) => launched.weaponId === weaponId)).toBe(true);
+    }
+  });
+
   test('load failure leaves the existing store untouched', () => {
     const before = store.getState();
     expect(() => store.getState().loadScenario({ id: 'bad', title: 'bad', units: [] } as unknown as ScenarioDefinition)).toThrow();
@@ -224,6 +345,52 @@ describe('Resolved equipment configuration', () => {
     expect(tick(state, 1, c).contacts.RED_CONTACT_target).toBeUndefined();
     c.loadouts.loadout_j20_stealth_cap.additionalSensorIds = ['eots_irst'];
     expect(tick(state, 1, c).contacts.RED_CONTACT_target).toBeDefined();
+  });
+
+  test('Y-9G provides unique long-baseline ESM/OECM support without offensive mounts', () => {
+    const resolved = resolveUnitConfiguration(catalog, 'y9g_jammer', 'loadout_y9g_esm_support');
+    expect(resolved.mounts).toEqual([]);
+    expect(resolved.sensorIds).toContain('y9g_esm_array');
+    expect(resolved.sensorIds).toContain('y9g_oecm_suite');
+    expect(resolved.maxFuelSec).toBeGreaterThan(catalog.platforms.y9g_jammer.maxFuelSec);
+
+    const support = unit(placement('y9g', 'y9g_jammer', { position: [0, 0], altitudeM: 7600,
+      doctrine: { roe: 'hold', emconRadar: false, emconJamming: true } }));
+    const emitter = unit(placement('emitter', 'arleigh_burke_flt3', { side: 'BLUE', position: [4, 0],
+      doctrine: { roe: 'hold', emconRadar: true } }));
+    const detected = computeContactsOnly({ y9g: support, emitter }, catalog, {}, 0).contacts.RED_CONTACT_emitter;
+    expect(detected).toBeDefined();
+    expect(detected.bearingObservations?.some((observation) => observation.sourceUnitId === support.id)).toBe(true);
+
+    const escorted = unit(placement('escorted', 'j15t_flanker', { position: [0.2, 0] }));
+    expect(evaluateTargetEcmSuppression(escorted, [support, escorted], catalog)).toBeGreaterThan(0.5);
+    const mission = { id: 'ew_support', name: 'EW Support', side: 'RED' as const, type: 'aew_support' as const,
+      isActive: true, areaPolygon: [[0, 0], [0.2, 0], [0.2, 0.2]] as [number, number][], assignedUnitIds: [support.id],
+      prosecuteOutsideAreaKm: 0, description: '' };
+    support.assignedMissionId = mission.id; support.navigationMode = 'mission'; support.waypoints = [];
+    const next = tick({ ...world([support]), missions: [mission] });
+    expect(next.units.y9g.waypoints.length).toBeGreaterThan(0);
+  });
+
+  test('B-1B, J-10C and MQ-4C form distinct strike, mass-CAP and ISR roles', () => {
+    const b1Mass = resolveUnitConfiguration(catalog, 'b1b_lancer', 'loadout_b1b_mass_lrasm');
+    const b1Mixed = resolveUnitConfiguration(catalog, 'b1b_lancer', 'loadout_b1b_maritime_mixed');
+    expect(b1Mass.mounts).toEqual([{ mountId: 'internal_lrasm', weaponId: 'agm158c_lrasm', maxAmmo: 12, reloadTimeSec: 14 }]);
+    expect(b1Mixed.mounts.map((mount) => mount.weaponId)).toEqual(['agm158c_lrasm', 'bgm109_tlahm']);
+    expect(b1Mass.maxFuelSec).toBeLessThan(catalog.platforms.b1b_lancer.maxFuelSec);
+    expect(catalog.platforms.b1b_lancer.canReceiveAar).not.toBe(false);
+
+    const j10Cap = resolveUnitConfiguration(catalog, 'j10c_multirole', 'loadout_j10c_multirole_cap');
+    const j10Sead = resolveUnitConfiguration(catalog, 'j10c_multirole', 'loadout_j10c_sead');
+    expect(j10Cap.mounts.map((mount) => mount.weaponId)).toEqual(['pl15_aam', 'pl10_wvr']);
+    expect(j10Sead.mounts.map((mount) => mount.weaponId)).toEqual(['ld10_arm', 'pl10_wvr']);
+
+    const mq4c = unit(placement('mq4c', 'mq4c_triton', { position: [0, 0], altitudeM: 15000,
+      doctrine: { roe: 'hold', emconRadar: true } }));
+    const surface = unit(placement('surface', 'type055_destroyer', { side: 'BLUE', parentGroupId: 'blue_desron15', position: [2.4, 0] }));
+    expect(mq4c.mounts).toEqual([]);
+    expect(resolveUnitConfiguration(catalog, mq4c.platformId, mq4c.activeLoadoutId).sensorIds).toContain('apy10_maritime_radar');
+    expect(computeContactsOnly({ mq4c, surface }, catalog, {}, 0).contacts.RED_CONTACT_surface).toBeDefined();
   });
 
   test('creation, switching, waypoint orders and speed commands use the same limits', () => {
@@ -297,6 +464,150 @@ describe('Resolved equipment configuration', () => {
     store.getState().stepSingleTick(6);
     store.getState().executeManualEngage('shooter', 'target', 'pl15_aam', 2, true);
     expect(store.getState().score.redMissilesFired).toBe(4);
+  });
+
+  test('J-15T loadouts apply distinct kinematics/RCS and launch from the Fujian finite hangar', () => {
+    const cap = resolveUnitConfiguration(catalog, 'j15t_flanker', 'loadout_j15t_heavy_cap');
+    const strike = resolveUnitConfiguration(catalog, 'j15t_flanker', 'loadout_j15t_maritime_strike');
+    const sead = resolveUnitConfiguration(catalog, 'j15t_flanker', 'loadout_j15t_sead');
+    expect(cap.mounts.map((mount) => mount.weaponId)).toEqual(['pl15_aam', 'pl10_wvr']);
+    expect(strike.mounts.map((mount) => mount.weaponId)).toEqual(['yj83_ashm', 'pl15_aam', 'pl10_wvr']);
+    expect(sead.mounts.map((mount) => mount.weaponId)).toEqual(['ld10_arm', 'yj83_ashm', 'pl15_aam']);
+    expect(strike.maxSpeedKts).toBeLessThan(cap.maxSpeedKts);
+    expect(strike.rcsPenaltyM2).toBeGreaterThan(cap.rcsPenaltyM2);
+    expect(cap.maxFuelSec).toBeGreaterThan(catalog.platforms.j15t_flanker.maxFuelSec);
+
+    store.getState().loadScenario(deep);
+    const before = store.getState().units.red_cv18_fujian.hangar.find((slot) => slot.slotId === 'hangar_j15t_multirole')!;
+    store.getState().launchCarrierAircraft('red_cv18_fujian', before.slotId, 'loadout_j15t_maritime_strike');
+    const launched = Object.values(store.getState().units).find((candidate) =>
+      candidate.hostCarrierId === 'red_cv18_fujian' && candidate.platformId === 'j15t_flanker')!;
+    expect(launched.activeLoadoutId).toBe('loadout_j15t_maritime_strike');
+    expect(launched.mounts.map((mount) => mount.weaponId)).toEqual(['yj83_ashm', 'pl15_aam', 'pl10_wvr']);
+    expect(store.getState().units.red_cv18_fujian.hangar.find((slot) => slot.slotId === before.slotId)?.readyAirframes)
+      .toBe(before.readyAirframes - 1);
+  });
+
+  test('F/A-18E/F loadouts and finite CVN hangar support CAP, LRASM and AIM-174B roles', () => {
+    const cap = resolveUnitConfiguration(catalog, 'fa18ef_super_hornet', 'loadout_fa18ef_fleet_cap');
+    const strike = resolveUnitConfiguration(catalog, 'fa18ef_super_hornet', 'loadout_fa18ef_lrasm_strike');
+    const barcap = resolveUnitConfiguration(catalog, 'fa18ef_super_hornet', 'loadout_fa18ef_aim174_barcap');
+    expect(cap.mounts.map((mount) => mount.weaponId)).toEqual(['aim120d_aam', 'aim9x_wvr']);
+    expect(strike.mounts.map((mount) => mount.weaponId)).toEqual(['agm158c_lrasm', 'aim120d_aam', 'aim9x_wvr']);
+    expect(barcap.mounts.map((mount) => mount.weaponId)).toEqual(['aim174b_ulraam', 'aim120d_aam', 'aim9x_wvr']);
+    expect(barcap.maxSpeedKts).toBeLessThan(cap.maxSpeedKts);
+    expect(barcap.maxFuelSec).toBeLessThan(catalog.platforms.fa18ef_super_hornet.maxFuelSec);
+    expect(barcap.rcsPenaltyM2).toBeGreaterThan(strike.rcsPenaltyM2);
+
+    store.getState().loadScenario(deep);
+    store.getState().setPlayerSide('BLUE');
+    const slot = store.getState().units.blue_cvn78_carrier.hangar.find((candidate) => candidate.slotId === 'hangar_vfa_fa18ef')!;
+    store.getState().launchCarrierAircraft('blue_cvn78_carrier', slot.slotId, 'loadout_fa18ef_aim174_barcap');
+    const launched = Object.values(store.getState().units).find((candidate) =>
+      candidate.hostCarrierId === 'blue_cvn78_carrier' && candidate.platformId === 'fa18ef_super_hornet')!;
+    expect(launched.mounts.find((mount) => mount.weaponId === 'aim174b_ulraam')?.currentAmmo).toBe(2);
+    expect(store.getState().units.blue_cvn78_carrier.hangar.find((candidate) => candidate.slotId === slot.slotId)?.readyAirframes)
+      .toBe(slot.readyAirframes - 1);
+  });
+
+  test('F-35B is limited to the America LHA STOVL hangar and finite inventory', () => {
+    const cap = resolveUnitConfiguration(catalog, 'f35b_lightning', 'loadout_f35b_stovl_cap');
+    const strike = resolveUnitConfiguration(catalog, 'f35b_lightning', 'loadout_f35b_stovl_strike');
+    expect(cap.mounts.map((mount) => mount.weaponId)).toEqual(['aim120d_aam', 'aim9x_wvr']);
+    expect(strike.mounts.map((mount) => mount.weaponId)).toEqual(['agm158c_lrasm', 'aim120d_aam', 'aim9x_wvr']);
+    expect(strike.maxFuelSec).toBeLessThan(cap.maxFuelSec);
+    expect(strike.rcsPenaltyM2).toBeGreaterThan(cap.rcsPenaltyM2);
+
+    const input = scenario([placement('lha', 'america_lha', { side: 'BLUE', parentGroupId: 'blue_csg_air' })]);
+    store.getState().loadScenario(input);
+    store.getState().setPlayerSide('BLUE');
+    store.getState().launchCarrierAircraft('lha', 'hangar_f35b_stovl', 'loadout_f35b_stovl_strike');
+    const launched = Object.values(store.getState().units).find((candidate) => candidate.hostCarrierId === 'lha')!;
+    expect(launched).toMatchObject({ platformId: 'f35b_lightning', activeLoadoutId: 'loadout_f35b_stovl_strike' });
+    expect(store.getState().units.lha.hangar[0].readyAirframes).toBe(0);
+
+    store.getState().loadScenario(deep);
+    store.getState().setPlayerSide('BLUE');
+    const before = store.getState();
+    store.getState().launchCarrierAircraft('blue_cvn78_carrier', 'hangar_f35b_stovl', 'loadout_f35b_stovl_cap');
+    expect(store.getState()).toBe(before);
+  });
+
+  test('Deep Sea carrier air wings expose stealth CAP, multirole heavy and electronic escort slots with turnaround', () => {
+    store.getState().loadScenario(deep);
+    const redCarrier = store.getState().units.red_cv18_fujian;
+    expect(redCarrier.hangar.map((slot) => slot.platformId)).toEqual(['j35_naval_stealth', 'j15t_flanker', 'j16d_roaring_wolf']);
+    store.getState().launchCarrierAircraft(redCarrier.id, 'hangar_j35_vf1', 'loadout_j35_carrier_cap');
+    store.getState().launchCarrierAircraft(redCarrier.id, 'hangar_j15t_multirole', 'loadout_j15t_maritime_strike');
+    store.getState().launchCarrierAircraft(redCarrier.id, 'hangar_j15d_ew', 'loadout_j16d_sead_escort');
+    store.getState().setPlayerSide('BLUE');
+    const blueCarrier = store.getState().units.blue_cvn78_carrier;
+    expect(blueCarrier.hangar.map((slot) => slot.platformId)).toEqual(['f35c_lightning', 'fa18ef_super_hornet', 'ea18g_growler']);
+    store.getState().launchCarrierAircraft(blueCarrier.id, 'hangar_vfa_f35c', 'loadout_f35c_stealth_cap');
+    store.getState().launchCarrierAircraft(blueCarrier.id, 'hangar_vfa_fa18ef', 'loadout_fa18ef_lrasm_strike');
+    store.getState().launchCarrierAircraft(blueCarrier.id, 'hangar_vaq_growler', 'loadout_ea18g_growler_sead');
+    const launchedPlatforms = new Set(Object.values(store.getState().units).filter((unit) => unit.hostCarrierId)
+      .map((unit) => unit.platformId));
+    for (const platformId of ['j35_naval_stealth', 'j15t_flanker', 'j16d_roaring_wolf',
+      'f35c_lightning', 'fa18ef_super_hornet', 'ea18g_growler']) expect(launchedPlatforms).toContain(platformId);
+
+    const j15 = Object.values(store.getState().units).find((unit) => unit.platformId === 'j15t_flanker')!;
+    const carrierNow = store.getState().units.red_cv18_fujian;
+    store.setState((state) => ({ units: { ...state.units, [j15.id]: {
+      ...j15, position: [...carrierNow.position], status: 'returning', speedKts: 0, targetSpeedKts: 0,
+    } } }));
+    store.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
+    store.getState().stepSingleTick(0.25);
+    const queued = store.getState().units.red_cv18_fujian.hangar.find((slot) => slot.slotId === 'hangar_j15t_multirole')!;
+    expect(queued.turnaroundQueue.map((entry) => entry.sortieId)).toContain(j15.id);
+    const supplyBefore = queued.turnaroundSupplies;
+    store.getState().stepSingleTick(queued.turnaroundSec);
+    const ready = store.getState().units.red_cv18_fujian.hangar.find((slot) => slot.slotId === queued.slotId)!;
+    expect(ready.turnaroundQueue).toEqual([]);
+    expect(ready.turnaroundSupplies).toBe(supplyBefore - 1);
+  });
+
+  test('Type 075 and America LHA expose finite compatible air wings and layered self-defense', () => {
+    const type075 = unit(placement('type075', 'type075_lhd'));
+    const america = unit(placement('america', 'america_lha', { side: 'BLUE', parentGroupId: 'blue_csg_air' }));
+    expect(type075.mounts.map((mount) => mount.weaponId)).toEqual(['hq16fe_sam', 'hq10_point_defense', 'yj83_ashm']);
+    expect(america.mounts.map((mount) => mount.weaponId)).toEqual(['essm_blk2', 'ram_blk2', 'nsm_ashm']);
+    expect(type075.hangar.map((slot) => slot.platformId)).toEqual(['z20f_asw']);
+    expect(america.hangar.map((slot) => slot.platformId)).toEqual(['f35b_lightning', 'mh60r_seahawk']);
+    expect(catalog.platforms.type075_lhd.cruiseSpeedKts).toBeLessThan(catalog.platforms.type054b_frigate.cruiseSpeedKts);
+    expect(catalog.platforms.america_lha.cruiseSpeedKts).toBeLessThan(catalog.platforms.constellation_ffg.cruiseSpeedKts);
+
+    store.getState().loadScenario(scenario([placement('type075', 'type075_lhd')]));
+    store.getState().launchCarrierAircraft('type075', 'hangar_z20f_asw', 'loadout_z20f_asw_search');
+    expect(Object.values(store.getState().units).some((candidate) =>
+      candidate.hostCarrierId === 'type075' && candidate.platformId === 'z20f_asw')).toBe(true);
+  });
+
+  test('Z-20F and MH-60R launch from matching ships with search/prosecute ASW loadouts', () => {
+    for (const [platformId, searchId, prosecuteId, weaponId, sensorId] of [
+      ['z20f_asw', 'loadout_z20f_asw_search', 'loadout_z20f_asw_prosecute', 'yu11_lwt', 'z20f_dipping_sonar'],
+      ['mh60r_seahawk', 'loadout_mh60r_asw_search', 'loadout_mh60r_asw_prosecute', 'mk54_lwt', 'aqs22_dipping_sonar'],
+    ] as const) {
+      const search = resolveUnitConfiguration(catalog, platformId, searchId);
+      const prosecute = resolveUnitConfiguration(catalog, platformId, prosecuteId);
+      expect(search.mounts).toEqual([]);
+      expect(search.sensorIds).toContain(sensorId);
+      expect(prosecute.mounts.map((mount) => mount.weaponId)).toEqual([weaponId]);
+      expect(search.maxFuelSec).toBeGreaterThan(prosecute.maxFuelSec);
+    }
+
+    store.getState().loadScenario(scenario([placement('red_ffg', 'type054b_frigate')]));
+    store.getState().launchCarrierAircraft('red_ffg', 'hangar_z20f_ffg', 'loadout_z20f_asw_prosecute');
+    expect(Object.values(store.getState().units).some((candidate) =>
+      candidate.hostCarrierId === 'red_ffg' && candidate.platformId === 'z20f_asw' &&
+      candidate.mounts.some((mount) => mount.weaponId === 'yu11_lwt'))).toBe(true);
+
+    store.getState().loadScenario(scenario([placement('blue_ffg', 'constellation_ffg', { side: 'BLUE', parentGroupId: 'blue_csg_air' })]));
+    store.getState().setPlayerSide('BLUE');
+    store.getState().launchCarrierAircraft('blue_ffg', 'hangar_mh60r_ffg', 'loadout_mh60r_asw_prosecute');
+    expect(Object.values(store.getState().units).some((candidate) =>
+      candidate.hostCarrierId === 'blue_ffg' && candidate.platformId === 'mh60r_seahawk' &&
+      candidate.mounts.some((mount) => mount.weaponId === 'mk54_lwt'))).toBe(true);
   });
 
   test('hangar launches enforce compatibility, availability, timers and finite reserves', () => {
@@ -511,7 +822,7 @@ describe('Mission ownership and event lifecycle', () => {
     const s = world().score;
     const logs: never[] = [];
     resolveEventsAndObjectives({
-      events: [event], units, contacts, missions: [mission], catalog, nextSimTime: 1000, startTime: 0,
+      events: [event], pendingSortieOrders: [], units, contacts, missions: [mission], catalog, nextSimTime: 1000, startTime: 0,
       score: s, rng: () => 0.5, logs, objectives: [], objectiveProgress: {},
     });
     const sortie = units.sortie_carrier_hangar_j35_vf1_1;
@@ -537,6 +848,107 @@ describe('Mission ownership and event lifecycle', () => {
       triggerPause: () => undefined });
     expect(new Set(Object.values(weaponsInFlight).map((weapon) => weapon.shooterId)).size).toBeGreaterThanOrEqual(2);
     expect([carrier, ship, sortie].filter((unit) => unit.coordinatedAttack).length).toBeLessThan(3);
+  });
+
+  test('Deep Sea classification gates tanker activation before reliable full-wing sortie waves', () => {
+    const units = instantiateScenarioUnits(deep);
+    const initialRedReady = units.red_cv18_fujian.hangar.map((slot) => slot.readyAirframes);
+    const initialBlueReady = units.blue_cvn78_carrier.hangar.map((slot) => slot.readyAirframes);
+    const events = structuredClone(deep.events) as RuntimeScenarioEvent[];
+    const missions: TacticalMission[] = structuredClone(deep.missions).map((mission) => ({
+      ...mission, assignedUnitIds: Object.values(units).filter((runtimeUnit) => runtimeUnit.assignedMissionId === mission.id)
+        .map((runtimeUnit) => runtimeUnit.id),
+    }));
+    const pending: NonNullable<SimulationWorldState['pendingSortieOrders']> = [];
+    const score = world().score;
+    const logs: never[] = [];
+    const makeContact = (observerSide: 'RED' | 'BLUE', target: RuntimeUnit, classification: TacticalContact['classification']): TacticalContact => ({
+      id: `${observerSide}_CONTACT_${target.id}`, actualUnitId: target.id, observerSide,
+      targetSide: target.side, domain: target.domain, classification, displayName: 'observed carrier', sidc: target.sidc,
+      estimatedPosition: [...target.position], truePosition: [...target.position], uncertaintyRadiusKm: 1,
+      heading: target.heading, speedKts: target.speedKts, altitudeM: target.altitudeM,
+      firstDetectedTime: 1000, lastDetectedTime: 1000, detectedBySources: ['ISR'], sourceUnitIds: [],
+      fireControlSourceIds: [], threatLevel: 'critical',
+      ...(classification === 'identified' ? { identifiedCategory: 'carrier' as const } : {}),
+    });
+    let contacts: Record<string, TacticalContact> = {
+      RED_CONTACT_blue_cvn78_carrier: makeContact('RED', units.blue_cvn78_carrier, 'classified'),
+      BLUE_CONTACT_red_cv18_fujian: makeContact('BLUE', units.red_cv18_fujian, 'classified'),
+    };
+    const resolveAt = (nextSimTime: number) => resolveEventsAndObjectives({ events, pendingSortieOrders: pending,
+      units, contacts, missions, catalog, nextSimTime, startTime: 0, score, rng: () => 0.5,
+      logs, objectives: [], objectiveProgress: {} });
+    resolveAt(1000);
+    expect(missions.find((mission) => mission.id === 'mission_red_deep_tanker')?.isActive).toBe(true);
+    expect(missions.find((mission) => mission.id === 'mission_blue_deep_tanker')?.isActive).toBe(true);
+    expect(score.sortiesLaunched).toBe(0);
+    expect(pending).toEqual([]);
+
+    contacts = {
+      RED_CONTACT_blue_cvn78_carrier: makeContact('RED', units.blue_cvn78_carrier, 'identified'),
+      BLUE_CONTACT_red_cv18_fujian: makeContact('BLUE', units.red_cv18_fujian, 'identified'),
+    };
+    resolveAt(2000);
+    expect(missions.find((mission) => mission.id === 'mission_blue_deep_strike')?.isActive).toBe(true);
+    expect(score.sortiesLaunched).toBe(2);
+    expect(pending.map((order) => order.earliestLaunchTime)).toEqual([12000, 22000, 12000, 22000]);
+    const processAt = (nextSimTime: number) => {
+      const remaining = processPendingSortieOrders(pending, units, missions, catalog, nextSimTime, score, logs);
+      pending.splice(0, pending.length, ...remaining);
+    };
+    processAt(12000);
+    expect(score.sortiesLaunched).toBe(4);
+    processAt(22000);
+    expect(score.sortiesLaunched).toBe(6);
+    expect(pending).toEqual([]);
+    const launchedPlatforms = new Set(Object.values(units).filter((runtimeUnit) => runtimeUnit.hostCarrierId)
+      .map((runtimeUnit) => runtimeUnit.platformId));
+    for (const platformId of ['j35_naval_stealth', 'j15t_flanker', 'j16d_roaring_wolf',
+      'f35c_lightning', 'fa18ef_super_hornet', 'ea18g_growler']) expect(launchedPlatforms).toContain(platformId);
+    expect(units.red_cv18_fujian.hangar.map((slot) => slot.readyAirframes)).toEqual(initialRedReady.map((ready) => ready - 1));
+    expect(units.blue_cvn78_carrier.hangar.map((slot) => slot.readyAirframes)).toEqual(initialBlueReady.map((ready) => ready - 1));
+  });
+
+  test('temporarily blocked event sorties queue, retry deterministically and consume real ready inventory', () => {
+    const carrier = unit(placement('queue_carrier', 'cv18_fujian_carrier'));
+    carrier.hangar[0].cooldownRemainingSec = 1;
+    const event = timedEvent({ trigger: { type: 'TIME_ELAPSED', elapsedSec: 0 }, actions: [{
+      type: 'LAUNCH_SORTIE', carrierUnitId: carrier.id, hangarSlotId: 'hangar_j35_vf1',
+      loadoutId: 'loadout_j35_carrier_cap',
+    }] });
+    let state = tick(world([carrier], [event]), 0.25);
+    expect(state.pendingSortieOrders).toHaveLength(1);
+    expect(state.pendingSortieOrders![0]).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(Object.values(state.units).filter((candidate) => candidate.hostCarrierId === carrier.id)).toHaveLength(0);
+    state = tick(state, 1);
+    expect(state.pendingSortieOrders).toEqual([]);
+    const launched = Object.values(state.units).find((candidate) => candidate.hostCarrierId === carrier.id);
+    expect(launched).toBeDefined();
+    expect(state.units.queue_carrier.hangar[0].activeSortieIds).toContain(launched!.id);
+    expect(state.score.sortiesLaunched).toBe(1);
+  });
+
+  test('delayed sortie orders wait until their exact window and disabled carriers fail explicitly', () => {
+    const carrier = unit(placement('delayed_carrier', 'cv18_fujian_carrier'));
+    const delayed = timedEvent({ trigger: { type: 'TIME_ELAPSED', elapsedSec: 0 }, actions: [{
+      type: 'LAUNCH_SORTIE', carrierUnitId: carrier.id, hangarSlotId: 'hangar_j35_vf1', launchDelaySec: 2,
+    }] });
+    let state = tick(world([carrier], [delayed]), 0.25);
+    expect(state.pendingSortieOrders?.[0].earliestLaunchTime).toBe(2250);
+    state = tick(state, 1);
+    expect(state.pendingSortieOrders).toHaveLength(1);
+    state = tick(state, 1);
+    expect(state.pendingSortieOrders).toEqual([]);
+    expect(state.score.sortiesLaunched).toBe(1);
+
+    const disabled = unit(placement('disabled_carrier', 'cv18_fujian_carrier'));
+    disabled.hp = 0; disabled.status = 'destroyed';
+    const failed = timedEvent({ trigger: { type: 'TIME_ELAPSED', elapsedSec: 0 }, actions: [{
+      type: 'LAUNCH_SORTIE', carrierUnitId: disabled.id, hangarSlotId: 'hangar_j35_vf1',
+    }] });
+    const failedState = tick(world([disabled], [failed]), 0.25);
+    expect(failedState.pendingSortieOrders?.[0]).toMatchObject({ status: 'failed' });
+    expect(failedState.pendingSortieOrders?.[0].failureReason).toContain('失能');
   });
 
   test('runtime event progress cannot leak into a newly loaded scenario', () => {
@@ -575,7 +987,7 @@ describe('Mission ownership and event lifecycle', () => {
     target.position = [0, 0];
     expect(getEventOccurrences(area, { a: target }, {}, 4)).toBe(1);
     const detected: RuntimeScenarioEvent = timedEvent({ repeatable: true, trigger: { type: 'UNIT_DETECTED', observerSide: 'BLUE' } });
-    const contact = { actualUnitId: 'a', observerSide: 'BLUE' } as TacticalContact;
+    const contact = { actualUnitId: 'a', observerSide: 'BLUE', classification: 'classified', domain: 'surface' } as TacticalContact;
     expect(getEventOccurrences(detected, { a: target }, { a: contact }, 1)).toBe(1);
     expect(getEventOccurrences(detected, { a: target }, { a: contact }, 2)).toBe(0);
     getEventOccurrences(detected, { a: target }, {}, 3);
@@ -585,8 +997,17 @@ describe('Mission ownership and event lifecycle', () => {
     } });
     contact.classification = 'classified';
     expect(getEventOccurrences(classifiedOnly, { a: target }, { a: contact }, 5)).toBe(0);
+    const classifiedTrigger: RuntimeScenarioEvent = timedEvent({ trigger: {
+      type: 'UNIT_DETECTED', observerSide: 'BLUE', targetDomain: 'surface', minimumClassification: 'classified',
+    } });
+    const identifiedTrigger: RuntimeScenarioEvent = timedEvent({ trigger: {
+      type: 'UNIT_DETECTED', observerSide: 'BLUE', targetDomain: 'surface', minimumClassification: 'identified',
+    } });
+    expect(getEventOccurrences(classifiedTrigger, { a: target }, { a: contact }, 5)).toBe(1);
+    expect(getEventOccurrences(identifiedTrigger, { a: target }, { a: contact }, 5)).toBe(0);
     contact.classification = 'identified'; contact.identifiedCategory = target.category;
     expect(getEventOccurrences(classifiedOnly, { a: target }, { a: contact }, 6)).toBe(1);
+    expect(getEventOccurrences(identifiedTrigger, { a: target }, { a: contact }, 6)).toBe(1);
   });
 
   test('repeat reinforcements have unique IDs and update mission rosters without resetting survivors', () => {

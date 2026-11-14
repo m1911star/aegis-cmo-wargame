@@ -10,6 +10,7 @@ import type {
   WeaponInFlight,
 } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { weaponLaunchRangeKm } from '../engine/fireControl';
 import { calculateRadarHorizonKm } from '../engine/geometry';
 import { observeMissile } from '../engine/sensors';
 import { getUnitCapabilities, isActiveUnit } from '../engine/unitCapabilities';
@@ -100,12 +101,13 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
     }
     if (mapLayers.showWeaponRings || isSelected) {
       const mount = [...unit.mounts].filter((candidate) => candidate.currentAmmo > 0)
-        .sort((a, b) => (catalog.weapons[b.weaponId]?.maxRangeKm ?? 0) - (catalog.weapons[a.weaponId]?.maxRangeKm ?? 0))[0];
+        .sort((a, b) => (catalog.weapons[b.weaponId] ? weaponLaunchRangeKm(catalog.weapons[b.weaponId]) : 0) -
+          (catalog.weapons[a.weaponId] ? weaponLaunchRangeKm(catalog.weapons[a.weaponId]) : 0))[0];
       const weapon = mount ? catalog.weapons[mount.weaponId] : undefined;
       if (weapon && (isSelected || unit.category === 'sam_battery' || unit.category === 'destroyer')) {
-        envelopeFeatures.push(turf.circle(unit.position, weapon.maxRangeKm, {
+        envelopeFeatures.push(turf.circle(unit.position, weaponLaunchRangeKm(weapon), {
           steps: 64, units: 'kilometers', properties: { ringKind: 'weapon', side: unit.side, isSelected,
-            label: `${weapon.codeName} 射程 (${weapon.maxRangeKm}km)` },
+            label: `${weapon.codeName} 发射包线 (${weaponLaunchRangeKm(weapon)}km)` },
         }));
       }
     }

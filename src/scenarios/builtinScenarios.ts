@@ -14,6 +14,8 @@ import { resolveEquipmentCatalog } from '../catalog/equipmentCatalog';
 import { createRuntimeUnitFromPlacement } from '../engine/simulationEngine';
 import { compileScenario } from './compileScenario';
 import { INFORMATION_EXERCISE } from './informationExercise';
+import { SCENARIO_BASHI_CHANNEL_BLOCKADE } from './bashiChannelBlockade';
+export { SCENARIO_BASHI_CHANNEL_BLOCKADE } from './bashiChannelBlockade';
 
 // ============================================================================
 // AEGIS-CMO // 内置战役想定剧本库 v2.0
@@ -78,6 +80,14 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
       id: 'east_blue_preserve_e2d', side: 'BLUE', title: '保全E-2D预警指挥能力',
       type: 'preserve', preserveCapability: true, unitIds: ['blue_e2d_tigertail'], required: false, points: 60,
     },
+    { id: 'east_red_disable_taigei', side: 'RED', title: '清除蓝方浅海AIP伏击艇', type: 'disable',
+      unitIds: ['blue_taigei_ambush'], required: false, points: 80 },
+    { id: 'east_blue_disable_039c', side: 'BLUE', title: '清除红方039C浅海伏击艇', type: 'disable',
+      unitIds: ['red_039c_ambush'], required: false, points: 80 },
+    { id: 'east_red_preserve_y9g', side: 'RED', title: '保全运-9G电子支援能力', type: 'preserve',
+      preserveCapability: true, unitIds: ['red_y9g_support'], required: false, points: 50 },
+    { id: 'east_blue_preserve_mq4c', side: 'BLUE', title: '保全MQ-4C海上监视链', type: 'preserve',
+      preserveCapability: true, unitIds: ['blue_mq4c_isr'], required: false, points: 50 },
   ],
   environment: {
     landPolygons: [
@@ -223,6 +233,20 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
       doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 1 },
     },
     {
+      id: 'red_y9g_support', name: '运-9G “远望-03”电子支援机', callsign: 'FAR-EYE-03',
+      side: 'RED', platformId: 'y9g_jammer', loadoutId: 'loadout_y9g_esm_support', parentGroupId: 'red_air_cmd',
+      position: [121.8, 27.3], altitudeM: 7600, heading: 100, speedKts: 285,
+      waypoints: [[122.4, 27.2], [122.2, 26.7]], assignedMissionId: 'mission_red_ew_support',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: true, salvoSize: 1 },
+    },
+    {
+      id: 'red_j10c_reinforce', name: '歼-10C “东海-11”多用途编队', callsign: 'EASTSEA-11',
+      side: 'RED', platformId: 'j10c_multirole', loadoutId: 'loadout_j10c_sead', parentGroupId: 'red_air_cmd',
+      position: [122.35, 27.15], altitudeM: 10200, heading: 105, speedKts: 590,
+      waypoints: [[123.4, 26.8]], assignedMissionId: 'mission_red_sead',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 2 },
+    },
+    {
       id: 'red_h6n_strike',
       name: '轰-6N “雷神-08”导弹轰炸机群',
       callsign: 'THUNDER-08',
@@ -245,6 +269,20 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
         emconJamming: false,
         salvoSize: 2,
       },
+    },
+    {
+      id: 'red_054b_screen', name: '054B型“东海-护卫”反潜外屏', callsign: 'PLANS-FFG01',
+      side: 'RED', platformId: 'type054b_frigate', parentGroupId: 'red_surface_tg',
+      position: [122.75, 25.55], altitudeM: 0, heading: 95, speedKts: 19,
+      waypoints: [[123.45, 25.6], [124.0, 25.7]], assignedMissionId: 'mission_red_shallow_asw',
+      doctrine: { roe: 'free', emconRadar: true, emconSonar: true, emconJamming: false, salvoSize: 2 },
+    },
+    {
+      id: 'red_039c_ambush', name: '039C型AIP“浅海-01”伏击艇', callsign: 'SSK-039C-1',
+      side: 'RED', platformId: 'type039c_ssk', parentGroupId: 'red_surface_tg',
+      position: [123.55, 25.35], spawnJitterKm: 10, altitudeM: -65, heading: 85, speedKts: 5,
+      waypoints: [[124.2, 25.5]], assignedMissionId: 'mission_red_shallow_asuw',
+      doctrine: { roe: 'free', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 2 },
     },
     {
       id: 'red_055_nanchang',
@@ -438,6 +476,13 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
       doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 1 },
     },
     {
+      id: 'blue_mq4c_isr', name: 'MQ-4C “TRITON-07”海上监视无人机', callsign: 'TRITON-07',
+      side: 'BLUE', platformId: 'mq4c_triton', loadoutId: 'loadout_mq4c_maritime_isr', parentGroupId: 'blue_csg_air',
+      position: [126.6, 27.0], altitudeM: 15000, heading: 260, speedKts: 310,
+      waypoints: [[125.6, 26.7], [125.4, 25.9]], assignedMissionId: 'mission_blue_isr',
+      doctrine: { roe: 'hold', emconRadar: true, emconSonar: false, emconJamming: false, salvoSize: 1 },
+    },
+    {
       id: 'blue_p8a_trident',
       name: 'P-8A “VP-16 War Eagles”反潜巡逻机',
       callsign: 'TRIDENT-04',
@@ -459,6 +504,20 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
         emconJamming: false,
         salvoSize: 2,
       },
+    },
+    {
+      id: 'blue_constellation_screen', name: 'USS Constellation 反潜防空外屏', callsign: 'USS-FFG62',
+      side: 'BLUE', platformId: 'constellation_ffg', parentGroupId: 'blue_desron15',
+      position: [125.15, 25.45], altitudeM: 0, heading: 275, speedKts: 19,
+      waypoints: [[124.55, 25.5], [124.0, 25.6]], assignedMissionId: 'mission_blue_shallow_asw',
+      doctrine: { roe: 'free', emconRadar: true, emconSonar: true, emconJamming: false, salvoSize: 2 },
+    },
+    {
+      id: 'blue_taigei_ambush', name: '大鲸级“SEIRYU”浅海伏击艇', callsign: 'JMSDF-SSK01',
+      side: 'BLUE', platformId: 'taigei_ssk', parentGroupId: 'blue_desron15',
+      position: [124.75, 25.4], spawnJitterKm: 10, altitudeM: -75, heading: 270, speedKts: 5,
+      waypoints: [[124.0, 25.55]], assignedMissionId: 'mission_blue_shallow_asuw',
+      doctrine: { roe: 'free', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 2 },
     },
     {
       id: 'blue_ddg125_lucas',
@@ -597,6 +656,27 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
       prosecuteOutsideAreaKm: 160,
       description: 'F-35C双机编队前出建立防空屏障，保卫后方E-2D预警机与驱逐舰编队。',
     },
+    { id: 'mission_red_ew_support', name: '红方防区外电子支援航线', side: 'RED', type: 'aew_support', isActive: true,
+      areaPolygon: [[122.0, 27.4], [122.6, 27.1], [122.0, 26.7]], prosecuteOutsideAreaKm: 0,
+      description: '运-9G沿西侧安全航线提供ESM交叉定位与OECM掩护。' },
+    { id: 'mission_red_sead', name: '红方岛链防空压制区', side: 'RED', type: 'sead', isActive: false,
+      areaPolygon: [[123.7, 24.1], [124.7, 24.1], [124.7, 24.8], [123.7, 24.8]], prosecuteOutsideAreaKm: 80,
+      description: '确认岛链陆基辐射目标后，歼-10C/歼-16D实施SEAD。' },
+    { id: 'mission_red_shallow_asw', name: '红方东海浅海反潜幕', side: 'RED', type: 'asw_patrol', isActive: true,
+      areaPolygon: [[122.8, 25.1], [124.4, 25.1], [124.4, 26.0], [122.8, 26.0]], prosecuteOutsideAreaKm: 35,
+      description: '054B与直-20F搜索浅海常规潜艇。' },
+    { id: 'mission_red_shallow_asuw', name: '红方AIP浅海伏击区', side: 'RED', type: 'asuw_patrol', isActive: true,
+      areaPolygon: [[123.2, 25.0], [124.5, 25.0], [124.5, 25.8], [123.2, 25.8]], prosecuteOutsideAreaKm: 50,
+      description: '039C低速静音等待蓝方水面编队。' },
+    { id: 'mission_blue_isr', name: '蓝方东海海上ISR航线', side: 'BLUE', type: 'aew_support', isActive: true,
+      areaPolygon: [[126.0, 27.1], [125.2, 26.5], [125.3, 25.7]], prosecuteOutsideAreaKm: 0,
+      description: 'MQ-4C确认红方水面高价值目标并支援B-1B。' },
+    { id: 'mission_blue_shallow_asw', name: '蓝方东海浅海反潜幕', side: 'BLUE', type: 'asw_patrol', isActive: true,
+      areaPolygon: [[123.8, 25.0], [125.4, 25.0], [125.4, 26.0], [123.8, 26.0]], prosecuteOutsideAreaKm: 35,
+      description: '星座级、P-8A与MH-60R搜索039C。' },
+    { id: 'mission_blue_shallow_asuw', name: '蓝方AIP守峡伏击区', side: 'BLUE', type: 'asuw_patrol', isActive: true,
+      areaPolygon: [[123.8, 25.1], [125.0, 25.1], [125.0, 25.8], [123.8, 25.8]], prosecuteOutsideAreaKm: 50,
+      description: '大鲸级低速伏击红方水面外屏。' },
   ],
   referencePoints: [
     { id: 'rp_adiz_north', name: 'RP-1 东海ADIZ北界点', side: 'RED', position: [123.5, 27.2], locked: true },
@@ -643,6 +723,67 @@ export const SCENARIO_EAST_SEA_THUNDER: ScenarioDefinition = {
               assignedMissionId: 'mission_blue_aaw_barrier',
             },
           ],
+        },
+      ],
+    },
+    {
+      id: 'ev_east_asw_helo_launch_30s',
+      name: '红蓝护卫舰反潜直升机起飞',
+      description: '开战30秒后双方护卫舰放飞有限轻型鱼雷反潜直升机，建立浅海航空反潜幕。',
+      trigger: { type: 'TIME_ELAPSED', elapsedSec: 30 },
+      actions: [
+        { type: 'LAUNCH_SORTIE', carrierUnitId: 'red_054b_screen', hangarSlotId: 'hangar_z20f_ffg',
+          loadoutId: 'loadout_z20f_asw_prosecute', assignedMissionId: 'mission_red_shallow_asw' },
+        { type: 'LAUNCH_SORTIE', carrierUnitId: 'blue_constellation_screen', hangarSlotId: 'hangar_mh60r_ffg',
+          loadoutId: 'loadout_mh60r_asw_prosecute', assignedMissionId: 'mission_blue_shallow_asw' },
+      ],
+    },
+    {
+      id: 'ev_blue_mald_screen_90s',
+      name: '蓝方MALD诱饵前导波次',
+      description: '开战90秒后蓝方释放有限诱饵批次，先行消耗红方中近程防空库存。',
+      trigger: { type: 'TIME_ELAPSED', elapsedSec: 90 },
+      actions: [{ type: 'SPAWN_REINFORCEMENTS', units: [{
+        id: 'blue_mald_east_wave', name: 'ADM-160 MALD 东海前导诱饵批次', callsign: 'DECOY-EAST-1',
+        side: 'BLUE', platformId: 'adm160_mald', parentGroupId: 'blue_csg_air', position: [126.3, 26.0],
+        altitudeM: 9000, heading: 270, speedKts: 480, waypoints: [[124.7, 26.0], [123.8, 26.0]],
+        doctrine: { roe: 'hold', emconRadar: false, salvoSize: 1 },
+      }] }],
+    },
+    {
+      id: 'ev_red_sead_on_classified_land_contact',
+      name: '红方确认岛链辐射目标后启动SEAD',
+      description: '红方获得classified级陆地Contact后，激活SEAD任务并改派歼-10C/歼-16D。',
+      trigger: { type: 'UNIT_DETECTED', observerSide: 'RED', targetDomain: 'land', minimumClassification: 'classified' },
+      actions: [
+        { type: 'ACTIVATE_MISSION', missionId: 'mission_red_sead', isActive: true },
+        { type: 'ASSIGN_MISSION', side: 'RED', unitId: 'red_j10c_reinforce', missionId: 'mission_red_sead' },
+        { type: 'ASSIGN_MISSION', side: 'RED', unitId: 'red_j16d_ew', missionId: 'mission_red_sead' },
+        { type: 'BROADCAST_MESSAGE', side: 'RED', severity: 'warning', title: 'SEAD窗口已开启',
+          message: '运-9G/空警数据链已提供陆地方位解，歼-10C与歼-16D转入防空压制。' },
+      ],
+    },
+    {
+      id: 'ev_b1b_maritime_salvo_180s',
+      name: '蓝方远程轰炸机海上突击波次',
+      description: '开战180秒后，B-1B携有限大批量LRASM从东侧进入，以加油机和ISR支援实施一次性饱和攻击。',
+      trigger: { type: 'TIME_ELAPSED', elapsedSec: 180 },
+      actions: [
+        {
+          type: 'BROADCAST_MESSAGE', side: 'SYSTEM', severity: 'critical',
+          title: '远程预警：蓝方B-1B海上突击波次进入战区',
+          message: '该波次携带有限LRASM库存；拦截轰炸机或破坏其目标确认链可削弱饱和攻击。',
+          position: [127.4, 25.9],
+        },
+        {
+          type: 'SPAWN_REINFORCEMENTS',
+          units: [{
+            id: 'blue_b1b_maritime_wave', name: 'B-1B “BONE-31”远程海上突击编队', callsign: 'BONE-31',
+            side: 'BLUE', platformId: 'b1b_lancer', loadoutId: 'loadout_b1b_mass_lrasm',
+            parentGroupId: 'blue_csg_air', position: [127.4, 25.9], altitudeM: 9000,
+            heading: 270, speedKts: 520, waypoints: [[125.4, 26.0], [124.2, 26.0]],
+            recoveryPosition: [128.2, 26.0], doctrine: { roe: 'free', emconRadar: true, salvoSize: 4 },
+          }],
         },
       ],
     },
@@ -867,6 +1008,20 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       doctrine: { roe: 'hold', emconRadar: true, emconSonar: false, salvoSize: 1 },
     },
     {
+      id: 'red_y20u_deep', name: '运油-20U “远海-01”前出加油机', callsign: 'OCEAN-TANKER-1',
+      side: 'RED', platformId: 'y20u_tanker', parentGroupId: 'red_long_range_air',
+      position: [122.0, 22.7], altitudeM: 8200, heading: 105, speedKts: 430,
+      waypoints: [[123.0, 22.5], [123.0, 21.8]], assignedMissionId: 'mission_red_deep_tanker',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 1 },
+    },
+    {
+      id: 'red_y9g_deep', name: '运-9G “远海电侦-02”支援机', callsign: 'OCEAN-ESM-2',
+      side: 'RED', platformId: 'y9g_jammer', loadoutId: 'loadout_y9g_esm_support', parentGroupId: 'red_long_range_air',
+      position: [121.8, 22.0], altitudeM: 7800, heading: 100, speedKts: 285,
+      waypoints: [[122.8, 22.2], [122.8, 21.5]], assignedMissionId: 'mission_red_deep_ew',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: true, salvoSize: 1 },
+    },
+    {
       id: 'red_j20_escort',
       name: '歼-20A “南天门-01”超远程猎杀预警机编队',
       callsign: 'NANTIAN-01',
@@ -955,6 +1110,20 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       doctrine: { roe: 'hold', emconRadar: true, emconSonar: false, salvoSize: 1 },
     },
     {
+      id: 'blue_kc135_deep', name: 'KC-135R “SHELL-61”前出加油机', callsign: 'SHELL-61',
+      side: 'BLUE', platformId: 'kc135_tanker', parentGroupId: 'blue_asw_screen',
+      position: [126.7, 22.4], altitudeM: 8000, heading: 265, speedKts: 420,
+      waypoints: [[125.7, 22.4], [125.7, 21.7]], assignedMissionId: 'mission_blue_deep_tanker',
+      doctrine: { roe: 'hold', emconRadar: false, emconSonar: false, emconJamming: false, salvoSize: 1 },
+    },
+    {
+      id: 'blue_mq4c_deep', name: 'MQ-4C “TRITON-62”航母搜索无人机', callsign: 'TRITON-62',
+      side: 'BLUE', platformId: 'mq4c_triton', loadoutId: 'loadout_mq4c_maritime_isr', parentGroupId: 'blue_asw_screen',
+      position: [126.9, 21.9], altitudeM: 15000, heading: 260, speedKts: 310,
+      waypoints: [[125.8, 22.2], [125.5, 21.3]], assignedMissionId: 'mission_blue_deep_isr',
+      doctrine: { roe: 'hold', emconRadar: true, emconSonar: false, emconJamming: false, salvoSize: 1 },
+    },
+    {
       id: 'blue_f35c_cap',
       name: 'F-35C “Lightning-21”舰载截击编队',
       callsign: 'LIGHTNING-21',
@@ -1013,8 +1182,29 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
         [124.4, 20.8],
       ],
       prosecuteOutsideAreaKm: 200,
-      description: '093B核潜艇狼群在航母必经水道实施静默伏击。',
+      description: '093B核潜艇狼群与确认后的舰载反舰波次共同猎杀蓝方航母。',
     },
+    { id: 'mission_red_deep_cap', name: '福建舰前出舰队防空区', side: 'RED', type: 'aaw_patrol', isActive: true,
+      areaPolygon: [[123.0, 22.7], [124.6, 22.7], [124.6, 21.3], [123.0, 21.3]], prosecuteOutsideAreaKm: 120,
+      description: '歼-35隐身制空与歼-15T重载CAP分层保护福建舰。' },
+    { id: 'mission_blue_deep_cap', name: 'CVN前出舰队防空区', side: 'BLUE', type: 'aaw_patrol', isActive: true,
+      areaPolygon: [[124.4, 22.7], [126.2, 22.7], [126.2, 21.2], [124.4, 21.2]], prosecuteOutsideAreaKm: 120,
+      description: 'F-35C隐身制空与F/A-18E/F重载CAP分层保护CVN。' },
+    { id: 'mission_blue_deep_strike', name: '蓝方菲律宾海反舰猎杀区', side: 'BLUE', type: 'asuw_patrol', isActive: false,
+      areaPolygon: [[121.8, 22.5], [124.5, 22.5], [124.5, 20.8], [121.8, 20.8]], prosecuteOutsideAreaKm: 180,
+      description: '确认福建舰后由F/A-18E/F与F-35C实施LRASM波次。' },
+    { id: 'mission_red_deep_tanker', name: '红方远海加油等待航线', side: 'RED', type: 'tanker_support', isActive: false,
+      areaPolygon: [[122.4, 22.7], [123.2, 22.3], [122.6, 21.7]], prosecuteOutsideAreaKm: 0, stationRadiusKm: 20,
+      description: '运油-20U为舰载/岸基波次提供有限燃油。' },
+    { id: 'mission_blue_deep_tanker', name: '蓝方远海加油等待航线', side: 'BLUE', type: 'tanker_support', isActive: false,
+      areaPolygon: [[126.2, 22.6], [125.4, 22.2], [126.0, 21.6]], prosecuteOutsideAreaKm: 0, stationRadiusKm: 20,
+      description: 'KC-135为舰载打击波次提供有限燃油。' },
+    { id: 'mission_red_deep_ew', name: '红方远海电子支援航线', side: 'RED', type: 'aew_support', isActive: true,
+      areaPolygon: [[122.1, 22.5], [123.0, 22.1], [122.2, 21.5]], prosecuteOutsideAreaKm: 0,
+      description: '运-9G提供ESM方位走廊和OECM掩护。' },
+    { id: 'mission_blue_deep_isr', name: '蓝方航母搜索ISR航线', side: 'BLUE', type: 'aew_support', isActive: true,
+      areaPolygon: [[126.3, 22.6], [125.2, 22.2], [125.4, 21.2]], prosecuteOutsideAreaKm: 0,
+      description: 'MQ-4C在发起满挂载波次前确认红方航母Contact。' },
   ],
   referencePoints: [
     { id: 'rp_bashi_east', name: 'RP-1 巴士海峡东出口', side: 'RED', position: [123.2, 21.5], locked: true },
@@ -1022,13 +1212,41 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
   ],
   events: [
     {
+      id: 'ev_red_classified_blue_cvn',
+      name: '红方获得蓝方航母classified级接触',
+      description: '仅在航母Contact达到classified后激活加油机前出，尚不发起满挂载波次。',
+      trigger: { type: 'UNIT_DETECTED', observerSide: 'RED', targetUnitId: 'blue_cvn78_carrier',
+        targetDomain: 'surface', minimumClassification: 'classified' },
+      actions: [
+        { type: 'ACTIVATE_MISSION', missionId: 'mission_red_deep_tanker', isActive: true },
+        { type: 'ASSIGN_MISSION', side: 'RED', unitId: 'red_y20u_deep', missionId: 'mission_red_deep_tanker' },
+        { type: 'BROADCAST_MESSAGE', side: 'RED', severity: 'warning', title: '疑似航母接触：加油机前出',
+          message: '维持ISR/ESM确认，暂不消耗满挂载舰载打击波次。' },
+      ],
+    },
+    {
+      id: 'ev_blue_classified_red_cv18',
+      name: '蓝方获得福建舰classified级接触',
+      description: '仅在福建舰Contact达到classified后激活加油机前出。',
+      trigger: { type: 'UNIT_DETECTED', observerSide: 'BLUE', targetUnitId: 'red_cv18_fujian',
+        targetDomain: 'surface', minimumClassification: 'classified' },
+      actions: [
+        { type: 'ACTIVATE_MISSION', missionId: 'mission_blue_deep_tanker', isActive: true },
+        { type: 'ASSIGN_MISSION', side: 'BLUE', unitId: 'blue_kc135_deep', missionId: 'mission_blue_deep_tanker' },
+        { type: 'BROADCAST_MESSAGE', side: 'BLUE', severity: 'warning', title: '疑似航母接触：加油机前出',
+          message: 'MQ-4C/E-2D继续确认，打击波次保持甲板待命。' },
+      ],
+    },
+    {
       id: 'ev_carrier_detected_salvo_order',
       name: '发现蓝方CVN核航母触发全军总攻指令',
-      description: '一旦红方传感器锁定蓝方CVN-73核动力航母，参谋部立即广播坐标并奖励+100侦察积分。',
+      description: '蓝方CVN Contact达到identified后，红方创建隐身、重载和电子伴随分波次出动订单。',
       trigger: {
         type: 'UNIT_DETECTED',
         observerSide: 'RED',
-        targetCategory: 'carrier',
+        targetUnitId: 'blue_cvn78_carrier',
+        targetDomain: 'surface',
+        minimumClassification: 'identified',
       },
       actions: [
         {
@@ -1053,6 +1271,14 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
           assignedMissionId: 'mission_red_asuw_hunt',
         },
         {
+          type: 'LAUNCH_SORTIE', carrierUnitId: 'red_cv18_fujian', hangarSlotId: 'hangar_j15t_multirole',
+          loadoutId: 'loadout_j15t_maritime_strike', assignedMissionId: 'mission_red_asuw_hunt', launchDelaySec: 10,
+        },
+        {
+          type: 'LAUNCH_SORTIE', carrierUnitId: 'red_cv18_fujian', hangarSlotId: 'hangar_j15d_ew',
+          loadoutId: 'loadout_j16d_sead_escort', assignedMissionId: 'mission_red_asuw_hunt', launchDelaySec: 20,
+        },
+        {
           type: 'ASSIGN_MISSION',
           side: 'RED',
           unitId: 'red_h6n_salvo',
@@ -1065,6 +1291,25 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
           targetDomain: 'surface',
           delaySec: 10,
         },
+      ],
+    },
+    {
+      id: 'ev_blue_identified_red_cv18',
+      name: '蓝方确认福建舰并发起满挂载波次',
+      description: '福建舰Contact达到identified后，激活反舰任务并创建F-35C、F/A-18E/F、EA-18G分波次订单。',
+      trigger: { type: 'UNIT_DETECTED', observerSide: 'BLUE', targetUnitId: 'red_cv18_fujian',
+        targetDomain: 'surface', minimumClassification: 'identified' },
+      actions: [
+        { type: 'ACTIVATE_MISSION', missionId: 'mission_blue_deep_strike', isActive: true },
+        { type: 'LAUNCH_SORTIE', carrierUnitId: 'blue_cvn78_carrier', hangarSlotId: 'hangar_vfa_f35c',
+          loadoutId: 'loadout_f35c_lrasm_strike', assignedMissionId: 'mission_blue_deep_strike' },
+        { type: 'LAUNCH_SORTIE', carrierUnitId: 'blue_cvn78_carrier', hangarSlotId: 'hangar_vfa_fa18ef',
+          loadoutId: 'loadout_fa18ef_lrasm_strike', assignedMissionId: 'mission_blue_deep_strike', launchDelaySec: 10 },
+        { type: 'LAUNCH_SORTIE', carrierUnitId: 'blue_cvn78_carrier', hangarSlotId: 'hangar_vaq_growler',
+          loadoutId: 'loadout_ea18g_growler_sead', assignedMissionId: 'mission_blue_deep_strike', launchDelaySec: 20 },
+        { type: 'COORDINATE_ATTACK', side: 'BLUE', groupId: 'blue_csg_flagship', targetDomain: 'surface', delaySec: 25 },
+        { type: 'BROADCAST_MESSAGE', side: 'BLUE', severity: 'critical', title: '福建舰确认：满挂载波次出动',
+          message: '隐身制空、多用途重锤和电子伴随按10秒间隔进入待执行队列。' },
       ],
     },
     {
@@ -1089,6 +1334,7 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
 export const BUILTIN_SCENARIOS: ScenarioDefinition[] = [
   SCENARIO_EAST_SEA_THUNDER,
   SCENARIO_DEEP_SEA_CARRIER_HUNT,
+  SCENARIO_BASHI_CHANNEL_BLOCKADE,
   INFORMATION_EXERCISE,
 ];
 
