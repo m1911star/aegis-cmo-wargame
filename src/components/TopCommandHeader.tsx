@@ -117,7 +117,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           <button
             onClick={() => (campaignState ? exitCampaign() : startCampaign())}
             className={`toolbar-button ${campaignState ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-cyan-300'}`}
-            title={campaignState ? '退出战役连贯模式' : '开启三阶段西太联合战役'}
+            title={campaignState ? '退出战役连贯模式' : '开启五阶段西太联合战役（继承战损与稀缺弹药）'}
           >
             <span>
               {campaignState

@@ -94,6 +94,18 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
               </ul>
             )}
           </div>
+
+          {campaignState && (
+            <div className="p-3.5 rounded-lg bg-cyan-500/8 border border-cyan-500/25 space-y-1 text-[11px]">
+              <div className="text-cyan-300 font-semibold">
+                战役连贯态势（第 {campaignState.currentStageIndex + 1}/{campaignState.totalStages} 阶段）
+              </div>
+              <div className="text-muted-foreground">
+                此前累计战役积分 {campaignState.carryover.cumulativeScore} · 当前战备系数{' '}
+                {Math.round(campaignState.carryover.readinessMultiplier * 100)}% · 本阶段主力战损、机库架数与稀缺防区外弹药消耗将计入下一阶段后勤账本。
+              </div>
+            </div>
+          )}
         </div>
 
         <ModalFooter>

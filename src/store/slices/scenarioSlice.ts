@@ -15,6 +15,7 @@ import {
 import { INFORMATION_EXERCISE } from '../../scenarios/informationExercise';
 import {
   BUILTIN_CAMPAIGN_WESTPAC,
+  applyCampaignRuntimeCarryover,
   buildCampaignStageScenario,
   computeNextCampaignCarryover,
   createInitialCampaignState,
@@ -313,7 +314,18 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       const prevCampaign = get().campaignState;
       get().loadScenario(current, randomizeSpawns, randomizeSpawns ? undefined : get().seed);
       if (prevCampaign) {
-        set({ campaignState: prevCampaign, playerSide: prevCampaign.playerSide, activePerspective: prevCampaign.playerSide });
+        const carriedUnits = applyCampaignRuntimeCarryover(
+          get().units,
+          prevCampaign.carryover,
+          prevCampaign.playerSide,
+          get().catalog
+        );
+        set({
+          campaignState: prevCampaign,
+          playerSide: prevCampaign.playerSide,
+          activePerspective: prevCampaign.playerSide,
+          units: carriedUnits,
+        });
       }
     },
 
@@ -343,7 +355,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         state.battleResult,
         campaign.playerSide,
         sideScore,
-        ownLosses
+        ownLosses,
+        state.units
       );
       const nextIndex = campaign.currentStageIndex + 1;
       if (nextIndex >= BUILTIN_CAMPAIGN_WESTPAC.stages.length) {
@@ -365,11 +378,18 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         carryover: nextCarryover,
       };
       get().loadScenario(stageScenario, false, DEFAULT_SEED + nextIndex);
+      const carriedUnits = applyCampaignRuntimeCarryover(
+        get().units,
+        nextCarryover,
+        campaign.playerSide,
+        get().catalog
+      );
       set({
         campaignState: nextCampaignState,
         playerSide: campaign.playerSide,
         activePerspective: campaign.playerSide,
-        selectedUnitId: Object.values(get().units).find((u) => u.side === campaign.playerSide)?.id ?? null,
+        units: carriedUnits,
+        selectedUnitId: Object.values(carriedUnits).find((u) => u.side === campaign.playerSide)?.id ?? null,
       });
     },
 

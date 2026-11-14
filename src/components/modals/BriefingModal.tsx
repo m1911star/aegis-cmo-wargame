@@ -1,5 +1,6 @@
 import React from 'react';
 import { BookOpen, Play } from 'lucide-react';
+import { BUILTIN_CAMPAIGN_WESTPAC } from '../../scenarios/campaign';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -7,8 +8,10 @@ import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
 
 export const BriefingModal: React.FC = () => {
   const currentScenario = useWargameStore((s) => s.currentScenario);
+  const catalog = useWargameStore((s) => s.catalog);
   const objectives = useWargameStore((s) => s.objectives);
   const seed = useWargameStore((s) => s.seed);
+  const campaignState = useWargameStore((s) => s.campaignState);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const setTimeScale = useWargameStore((s) => s.setTimeScale);
 
@@ -38,6 +41,62 @@ export const BriefingModal: React.FC = () => {
             <Badge variant="outline" className="font-mono">种子: {seed}</Badge>
           </div>
         </div>
+
+        {campaignState && (
+          <div className="p-3.5 rounded-lg bg-amber-500/8 border border-amber-500/30 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-amber-300 font-semibold">
+                【战役连贯进度与后勤继承账本 · 第 {campaignState.currentStageIndex + 1}/{campaignState.totalStages} 阶段】
+              </span>
+              <span className="text-[11px] font-mono text-cyan-300">
+                战备 {Math.round(campaignState.carryover.readinessMultiplier * 100)}% · 累计 {campaignState.carryover.cumulativeScore} 分
+              </span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 text-[10px]">
+              {BUILTIN_CAMPAIGN_WESTPAC.stages.map((stage) => {
+                const active = stage.stageIndex === campaignState.currentStageIndex;
+                const done = stage.stageIndex < campaignState.currentStageIndex;
+                return (
+                  <div
+                    key={stage.scenarioId}
+                    className={`p-1.5 rounded border truncate ${
+                      active
+                        ? 'bg-amber-500/20 border-amber-400/60 text-amber-200 font-semibold'
+                        : done
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                          : 'bg-muted/30 border-border text-muted-foreground'
+                    }`}
+                    title={stage.title}
+                  >
+                    S{stage.stageIndex + 1} · {stage.title.split('：')[1] ?? stage.title}
+                  </div>
+                );
+              })}
+            </div>
+            {campaignState.carryover.completedStages > 0 && (
+              <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border/60">
+                <div>
+                  机库未补足战损折算：{campaignState.carryover.airframeAttritionDebt} 架次 · 主力平台带伤继承：
+                  {Object.keys(campaignState.carryover.platformDamageDebt).length === 0
+                    ? ' 无'
+                    : ' ' +
+                      Object.entries(campaignState.carryover.platformDamageDebt)
+                        .map(([pid, d]) => `${catalog.platforms[pid]?.name ?? pid}(-${Math.round(d * 100)}%HP)`)
+                        .join('、')}
+                </div>
+                <div>
+                  稀缺防区外弹药未补缺口：
+                  {Object.keys(campaignState.carryover.scarceAmmoDebt).length === 0
+                    ? ' 满额充足'
+                    : ' ' +
+                      Object.entries(campaignState.carryover.scarceAmmoDebt)
+                        .map(([wid, n]) => `${catalog.weapons[wid]?.codeName ?? wid}(-${n})`)
+                        .join('、')}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-1.5">
           <div className="text-amber-300 font-semibold">【战场态势背景】</div>

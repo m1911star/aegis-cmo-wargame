@@ -7,6 +7,12 @@ import {
   stepSimulationWorld,
   type SimulationWorldState,
 } from '../../src/engine/simulationEngine';
+import {
+  BUILTIN_CAMPAIGN_WESTPAC,
+  applyCampaignRuntimeCarryover,
+  computeNextCampaignCarryover,
+  createInitialCampaignState,
+} from '../../src/scenarios/campaign';
 import { SCENARIO_EAST_SEA_THUNDER } from '../../src/scenarios/builtinScenarios';
 import { compileScenario } from '../../src/scenarios/compileScenario';
 import { SCENARIO_INTERACTIVE_TUTORIAL } from '../../src/scenarios/tutorialScenario';
@@ -287,7 +293,8 @@ describe('Multi-stage campaign & interactive tutorial scenario', () => {
     expect(Object.keys(store.getState().contacts).length).toBeGreaterThan(0);
   });
 
-  test('campaign advances across stages with deterministic carryover', () => {
+  test('campaign advances across 5 stages with hull damage, hangar attrition, and scarce munition carryover', () => {
+    expect(BUILTIN_CAMPAIGN_WESTPAC.stages).toHaveLength(5);
     store.getState().startCampaign('RED');
     expect(store.getState().campaignState?.currentStageIndex).toBe(0);
     store.setState({ autoPause: pausesOff });
@@ -301,6 +308,38 @@ describe('Multi-stage campaign & interactive tutorial scenario', () => {
     expect(stage2?.carryover.completedStages).toBe(1);
     expect(store.getState().currentScenario.id).toContain('op_east_sea_thunder_2027__campaign_s2');
     expect(store.getState().playerSide).toBe('RED');
+
+    // Verify deep runtime carryover math (damage debt, airframe attrition, scarce munition deduction)
+    const s2Units = structuredClone(store.getState().units);
+    s2Units.red_055_nanchang.hp = Math.round(s2Units.red_055_nanchang.maxHp * 0.4);
+    s2Units.red_055_nanchang.weaponUsage = { yj21_hypersonic: { expended: 6, cooldownUntil: 0 } };
+    s2Units.red_j20_alpha.hp = 0;
+    s2Units.red_j20_alpha.status = 'destroyed';
+    s2Units.red_j10c_reinforce.hp = 0;
+    s2Units.red_j10c_reinforce.status = 'destroyed';
+
+    const nextCarry = computeNextCampaignCarryover(
+      createInitialCampaignState(BUILTIN_CAMPAIGN_WESTPAC, 'RED').carryover,
+      { endedAt: 3600000, reason: 'time_limit', outcomes: { RED: 'costly_victory', BLUE: 'defeat' } },
+      'RED',
+      850,
+      2,
+      s2Units
+    );
+    expect(nextCarry.platformDamageDebt.type055_destroyer).toBeGreaterThan(0);
+    expect(nextCarry.airframeAttritionDebt).toBe(1); // 2 air losses - 1 replenished = 1 debt
+    expect(nextCarry.scarceAmmoDebt.yj21_hypersonic).toBe(3); // 50% of 6 expended
+
+    const freshUnits = structuredClone(store.getState().units);
+    const beforeHp = freshUnits.red_055_nanchang.maxHp;
+    const beforeYj21 = freshUnits.red_055_nanchang.mounts.find((m) => m.weaponId === 'yj21_hypersonic')!.currentAmmo;
+    const beforeHeloTotal = freshUnits.red_054b_screen.hangar[0].totalAirframes;
+
+    const carriedUnits = applyCampaignRuntimeCarryover(freshUnits, nextCarry, 'RED', catalog);
+    expect(carriedUnits.red_055_nanchang.hp).toBeLessThan(beforeHp);
+    expect(carriedUnits.red_055_nanchang.hp).toBeGreaterThanOrEqual(Math.ceil(beforeHp * 0.55));
+    expect(carriedUnits.red_055_nanchang.mounts.find((m) => m.weaponId === 'yj21_hypersonic')!.currentAmmo).toBe(beforeYj21 - 3);
+    expect(carriedUnits.red_054b_screen.hangar[0].totalAirframes).toBe(beforeHeloTotal - 1);
   });
 });
 
