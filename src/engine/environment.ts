@@ -22,14 +22,92 @@ export function cloneEnvironment(environment?: ScenarioEnvironment): ScenarioEnv
   };
 }
 
-function polygonFeature(areaPolygon: [number, number][]) {
-  return turf.polygon([[...areaPolygon, areaPolygon[0]]]);
+export interface CompiledPolygon {
+  feature: ReturnType<typeof turf.polygon>;
+  boundary: ReturnType<typeof turf.lineString>;
+  bbox: [number, number, number, number];
+}
+
+const polygonWeakCache = new WeakMap<readonly [number, number][], CompiledPolygon>();
+const polygonSigCache = new Map<string, CompiledPolygon>();
+
+export function getCompiledPolygon(areaPolygon: readonly [number, number][]): CompiledPolygon {
+  const weakHit = polygonWeakCache.get(areaPolygon);
+  if (weakHit) return weakHit;
+
+  let sig = `${areaPolygon.length}`;
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (let i = 0; i < areaPolygon.length; i++) {
+    const pt = areaPolygon[i];
+    sig += `|${pt[0]},${pt[1]}`;
+    if (pt[0] < minLon) minLon = pt[0];
+    if (pt[0] > maxLon) maxLon = pt[0];
+    if (pt[1] < minLat) minLat = pt[1];
+    if (pt[1] > maxLat) maxLat = pt[1];
+  }
+
+  let compiled = polygonSigCache.get(sig);
+  if (!compiled) {
+    const closedRing = [...areaPolygon, areaPolygon[0]];
+    compiled = {
+      feature: turf.polygon([closedRing]),
+      boundary: turf.lineString(closedRing),
+      bbox: [minLon, minLat, maxLon, maxLat],
+    };
+    if (polygonSigCache.size >= 512) {
+      const oldestKey = polygonSigCache.keys().next().value;
+      if (oldestKey !== undefined) polygonSigCache.delete(oldestKey);
+    }
+    polygonSigCache.set(sig, compiled);
+  }
+  polygonWeakCache.set(areaPolygon, compiled);
+  return compiled;
+}
+
+export function pointInBbox(
+  point: readonly [number, number],
+  bbox: readonly [number, number, number, number]
+): boolean {
+  return (
+    point[0] >= bbox[0] &&
+    point[0] <= bbox[2] &&
+    point[1] >= bbox[1] &&
+    point[1] <= bbox[3]
+  );
+}
+
+export function segmentOverlapsBbox(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  bbox: readonly [number, number, number, number]
+): boolean {
+  const segMinLon = a[0] < b[0] ? a[0] : b[0];
+  const segMaxLon = a[0] > b[0] ? a[0] : b[0];
+  if (segMaxLon < bbox[0] || segMinLon > bbox[2]) return false;
+  const segMinLat = a[1] < b[1] ? a[1] : b[1];
+  const segMaxLat = a[1] > b[1] ? a[1] : b[1];
+  return segMaxLat >= bbox[1] && segMinLat <= bbox[3];
+}
+
+export function isPointInCompiledPolygon(
+  position: [number, number],
+  areaPolygon: readonly [number, number][]
+): boolean {
+  const compiled = getCompiledPolygon(areaPolygon);
+  if (!pointInBbox(position, compiled.bbox)) return false;
+  return turf.booleanPointInPolygon(position, compiled.feature);
 }
 
 export function isPointOnLand(position: [number, number], environment?: ScenarioEnvironment): boolean {
-  return (environment?.landPolygons ?? []).some((land) =>
-    turf.booleanPointInPolygon(position, polygonFeature(land.areaPolygon))
-  );
+  const land = environment?.landPolygons;
+  if (!land || land.length === 0) return false;
+  for (let i = 0; i < land.length; i++) {
+    if (isPointInCompiledPolygon(position, land[i].areaPolygon)) return true;
+  }
+  return false;
 }
 
 export function isRouteAllowed(
@@ -41,14 +119,24 @@ export function isRouteAllowed(
   const land = environment?.landPolygons ?? [];
   if (domain === 'air' || land.length === 0) return true;
   if (domain === 'land') {
-    const midpoint = turf.midpoint(from, to).geometry.coordinates as [number, number];
-    return [from, midpoint, to].every((position) => isPointOnLand(position, environment));
+    const midpoint: [number, number] = [(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5];
+    return (
+      isPointOnLand(from, environment) &&
+      isPointOnLand(midpoint, environment) &&
+      isPointOnLand(to, environment)
+    );
   }
-  const route = turf.lineString([from, to]);
-  return !land.some((polygon) =>
-    turf.booleanIntersects(route, polygonFeature(polygon.areaPolygon)) ||
-    turf.booleanPointInPolygon(to, polygonFeature(polygon.areaPolygon))
-  );
+  let route: ReturnType<typeof turf.lineString> | undefined;
+  for (let i = 0; i < land.length; i++) {
+    const compiled = getCompiledPolygon(land[i].areaPolygon);
+    if (!segmentOverlapsBbox(from, to, compiled.bbox)) continue;
+    if (pointInBbox(to, compiled.bbox) && turf.booleanPointInPolygon(to, compiled.feature)) {
+      return false;
+    }
+    route ??= turf.lineString([from, to]);
+    if (turf.booleanIntersects(route, compiled.feature)) return false;
+  }
+  return true;
 }
 
 export function hasRadarLineOfSight(
@@ -62,30 +150,43 @@ export function hasRadarLineOfSight(
   const land = environment?.landPolygons;
   if (!land?.length) return true;
   if (observerAltM < 0 || targetAltM < 0) return true;
-  const elevated = land.filter((polygon) => (polygon.elevationM ?? 0) > 0);
-  if (!elevated.length) return true;
+
+  let hasElevatedCandidate = false;
+  for (let i = 0; i < land.length; i++) {
+    if ((land[i].elevationM ?? 0) > 0) {
+      hasElevatedCandidate = true;
+      break;
+    }
+  }
+  if (!hasElevatedCandidate) return true;
 
   const totalKm = getDistanceKm(observerPos, targetPos);
   if (totalKm <= 0.05) return true;
   const hObs = Math.max(0, observerAltM) + Math.max(0, observerAntennaM);
   const hTgt = Math.max(0, targetAltM);
-  const ray = turf.lineString([observerPos, targetPos]);
+  let ray: ReturnType<typeof turf.lineString> | undefined;
   const samples = 16;
 
-  for (const polygon of elevated) {
-    const feature = polygonFeature(polygon.areaPolygon);
-    if (!turf.booleanIntersects(ray, feature)) continue;
+  for (let p = 0; p < land.length; p++) {
+    const polygon = land[p];
+    const terrainHeightM = polygon.elevationM ?? 0;
+    if (terrainHeightM <= 0) continue;
+    const compiled = getCompiledPolygon(polygon.areaPolygon);
+    if (!segmentOverlapsBbox(observerPos, targetPos, compiled.bbox)) continue;
+
+    ray ??= turf.lineString([observerPos, targetPos]);
+    if (!turf.booleanIntersects(ray, compiled.feature)) continue;
 
     const inPoly: boolean[] = new Array(samples + 1);
-    inPoly[0] = turf.booleanPointInPolygon(observerPos, feature);
-    inPoly[samples] = turf.booleanPointInPolygon(targetPos, feature);
+    inPoly[0] = pointInBbox(observerPos, compiled.bbox) && turf.booleanPointInPolygon(observerPos, compiled.feature);
+    inPoly[samples] = pointInBbox(targetPos, compiled.bbox) && turf.booleanPointInPolygon(targetPos, compiled.feature);
     for (let i = 1; i < samples; i++) {
       const t = i / samples;
       const samplePos: [number, number] = [
         observerPos[0] + (targetPos[0] - observerPos[0]) * t,
         observerPos[1] + (targetPos[1] - observerPos[1]) * t,
       ];
-      inPoly[i] = turf.booleanPointInPolygon(samplePos, feature);
+      inPoly[i] = pointInBbox(samplePos, compiled.bbox) && turf.booleanPointInPolygon(samplePos, compiled.feature);
     }
 
     // Samples continuously inside an endpoint's own plateau do not self-occlude;
@@ -94,7 +195,6 @@ export function hasRadarLineOfSight(
     if (firstExit === -1) continue;
     const lastExit = inPoly.lastIndexOf(false);
 
-    const terrainHeightM = polygon.elevationM ?? 0;
     for (let i = Math.max(1, firstExit + 1); i < lastExit; i++) {
       if (!inPoly[i]) continue;
       const t = i / samples;
@@ -125,42 +225,56 @@ export function resolveMissileTerrainInteraction(
   weapon: WeaponSpec,
   environment?: ScenarioEnvironment
 ): MissileTerrainOutcome {
-  if (missileAltM < 0 || weapon.guidance === 'hypersonic_glide') {
+  const land = environment?.landPolygons;
+  if (!land?.length || missileAltM < 0 || weapon.guidance === 'hypersonic_glide') {
     return { impacted: false };
   }
-  const elevated = (environment?.landPolygons ?? []).filter((p) => (p.elevationM ?? 0) > 0);
-  if (elevated.length === 0) {
-    return { impacted: false };
+
+  let hasElevated = false;
+  for (let i = 0; i < land.length; i++) {
+    if ((land[i].elevationM ?? 0) > 0) {
+      hasElevated = true;
+      break;
+    }
   }
+  if (!hasElevated) return { impacted: false };
 
   // Terrain-following Land-Attack Cruise Missiles (TERCOM) climb 60m AGL over ridges
   if (weapon.category === 'lacm') {
     let maxElev = 0;
-    for (const poly of elevated) {
-      const feature = polygonFeature(poly.areaPolygon);
-      if (turf.booleanPointInPolygon(toPos, feature) || turf.booleanPointInPolygon(fromPos, feature)) {
-        maxElev = Math.max(maxElev, poly.elevationM ?? 0);
+    for (let i = 0; i < land.length; i++) {
+      const poly = land[i];
+      const elev = poly.elevationM ?? 0;
+      if (elev <= 0) continue;
+      if (
+        isPointInCompiledPolygon(toPos, poly.areaPolygon) ||
+        isPointInCompiledPolygon(fromPos, poly.areaPolygon)
+      ) {
+        if (elev > maxElev) maxElev = elev;
       }
     }
     const desiredAltM = maxElev > 0 ? Math.max(weapon.cruiseAltitudeM, maxElev + 60) : weapon.cruiseAltitudeM;
     return { impacted: false, terrainFollowAltitudeM: desiredAltM };
   }
 
-  const segment =
-    fromPos[0] === toPos[0] && fromPos[1] === toPos[1]
-      ? undefined
-      : turf.lineString([fromPos, toPos]);
+  let segment: ReturnType<typeof turf.lineString> | undefined;
+  const moved = fromPos[0] !== toPos[0] || fromPos[1] !== toPos[1];
 
-  for (const poly of elevated) {
+  for (let i = 0; i < land.length; i++) {
+    const poly = land[i];
     const terrainHeightM = poly.elevationM ?? 0;
-    if (missileAltM >= terrainHeightM) continue;
-    const feature = polygonFeature(poly.areaPolygon);
-    if (turf.booleanPointInPolygon(launchPos, feature)) continue;
-    if (targetPos && turf.booleanPointInPolygon(targetPos, feature)) continue;
+    if (terrainHeightM <= 0 || missileAltM >= terrainHeightM) continue;
+    const compiled = getCompiledPolygon(poly.areaPolygon);
+    if (!segmentOverlapsBbox(fromPos, toPos, compiled.bbox)) continue;
+    if (pointInBbox(launchPos, compiled.bbox) && turf.booleanPointInPolygon(launchPos, compiled.feature)) continue;
+    if (targetPos && pointInBbox(targetPos, compiled.bbox) && turf.booleanPointInPolygon(targetPos, compiled.feature)) continue;
 
-    const hit =
-      turf.booleanPointInPolygon(toPos, feature) ||
-      (!!segment && turf.booleanIntersects(segment, feature));
+    const toInside = pointInBbox(toPos, compiled.bbox) && turf.booleanPointInPolygon(toPos, compiled.feature);
+    let hit = toInside;
+    if (!hit && moved) {
+      segment ??= turf.lineString([fromPos, toPos]);
+      hit = turf.booleanIntersects(segment, compiled.feature);
+    }
     if (hit) {
       return {
         impacted: true,
@@ -221,9 +335,13 @@ export function acousticRangeFactor(
   target: [number, number],
   environment?: ScenarioEnvironment
 ): number {
-  if (!environment?.acousticZones.length) return 1;
+  const zones = environment?.acousticZones;
+  if (!zones?.length) return 1;
   const midpoint = turf.midpoint(observer, target).geometry.coordinates as [number, number];
-  return environment.acousticZones.find((zone) =>
-    turf.booleanPointInPolygon(midpoint, polygonFeature(zone.areaPolygon))
-  )?.sonarRangeFactor ?? 1;
+  for (let i = 0; i < zones.length; i++) {
+    if (isPointInCompiledPolygon(midpoint, zones[i].areaPolygon)) {
+      return zones[i].sonarRangeFactor;
+    }
+  }
+  return 1;
 }

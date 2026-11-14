@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
-import { hasRadarLineOfSight } from '../../../src/engine/environment';
+import { resolveUnitConfiguration } from '../../../src/db/unitConfiguration';
+import { getCompiledPolygon, hasRadarLineOfSight, pointInBbox, segmentOverlapsBbox } from '../../../src/engine/environment';
 import { computeMissileEnergyFactor } from '../../../src/engine/guidance';
 import { evaluateBattleAssessment } from '../../../src/engine/simulation/battleAssessment';
 import { createRuntimeUnitFromPlacement } from '../../../src/engine/simulation/unitFactory';
@@ -160,5 +161,28 @@ describe('modular simulation boundaries', () => {
     const client = new SimulationWorkerClient();
     const clientResult = await client.runBatch(world, catalog, 2, pauses, 'RED', 0);
     expect(clientResult.nextState).toEqual(syncResult.nextState);
+  });
+
+  test('compiled polygon bbox cache and resolveUnitConfiguration memoization preserve identity and invalidate on mutation', () => {
+    const polyA: [number, number][] = [[120, 23], [122, 23], [122, 25], [120, 25]];
+    const polyB: [number, number][] = [[120, 23], [122, 23], [122, 25], [120, 25]];
+    const compiledA = getCompiledPolygon(polyA);
+    const compiledB = getCompiledPolygon(polyB);
+    expect(compiledA).toBe(compiledB);
+    expect(compiledA.bbox).toEqual([120, 23, 122, 25]);
+    expect(pointInBbox([121, 24], compiledA.bbox)).toBe(true);
+    expect(pointInBbox([118, 24], compiledA.bbox)).toBe(false);
+    expect(segmentOverlapsBbox([118, 24], [119.5, 24], compiledA.bbox)).toBe(false);
+    expect(segmentOverlapsBbox([119, 24], [123, 24], compiledA.bbox)).toBe(true);
+
+    const cfg1 = resolveUnitConfiguration(catalog, 'j20_mighty_dragon');
+    const cfg2 = resolveUnitConfiguration(catalog, 'j20_mighty_dragon');
+    expect(cfg1).toBe(cfg2);
+
+    const clonedCatalog = structuredClone(catalog);
+    const c1 = resolveUnitConfiguration(clonedCatalog, 'j20_mighty_dragon');
+    clonedCatalog.platforms.j20_mighty_dragon.mounts = [];
+    const c2 = resolveUnitConfiguration(clonedCatalog, 'j20_mighty_dragon');
+    expect(c2).not.toBe(c1);
   });
 });

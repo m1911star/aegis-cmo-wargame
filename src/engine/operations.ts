@@ -1,6 +1,7 @@
 import * as turf from '@turf/turf';
 import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { getCompiledPolygon, pointInBbox } from './environment';
 import { guidanceProfile } from './fireControl';
 import { getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
@@ -149,8 +150,9 @@ export function updateUnitOperations(
   if ((unit.nextMissionDecisionTime ?? 0) > simTime) return;
   if (unit.waypoints.length && !unit.missionTargetId) return;
   unit.nextMissionDecisionTime = simTime + 5000;
-  const area = turf.polygon([[...mission.areaPolygon, mission.areaPolygon[0]]]);
-  const boundary = turf.lineString([...mission.areaPolygon, mission.areaPolygon[0]]);
+  const compiledArea = getCompiledPolygon(mission.areaPolygon);
+  const area = compiledArea.feature;
+  const boundary = compiledArea.boundary;
 
   if (mission.type === 'escort') {
     const protectedUnit = mission.escortUnitId ? units[mission.escortUnitId] : undefined;
@@ -188,7 +190,7 @@ export function updateUnitOperations(
     contact.observerSide === unit.side && targetDomains.includes(contact.domain) &&
     (mission.type !== 'sead' || contact.emitterObserved === true) &&
     simTime - contact.lastDetectedTime <= 5000 &&
-    (turf.booleanPointInPolygon(contact.estimatedPosition, area) ||
+    (pointInBbox(contact.estimatedPosition, compiledArea.bbox) && turf.booleanPointInPolygon(contact.estimatedPosition, area) ||
       turf.pointToLineDistance(contact.estimatedPosition, boundary, { units: 'kilometers' }) <= mission.prosecuteOutsideAreaKm)
   ).sort((a, b) => getDistanceKm(unit.position, a.estimatedPosition) - getDistanceKm(unit.position, b.estimatedPosition) || a.id.localeCompare(b.id));
   const target = candidates.find((contact) => contact.id === unit.missionTargetId) ?? candidates[0];
@@ -245,6 +247,6 @@ export function updateUnitOperations(
     unit.missionTargetId = undefined;
     unit.waypoints = [];
     unit.missionState = wasEngaging ? 'egress'
-      : turf.booleanPointInPolygon(unit.position, area) ? 'on_station' : 'ingress';
+      : pointInBbox(unit.position, compiledArea.bbox) && turf.booleanPointInPolygon(unit.position, area) ? 'on_station' : 'ingress';
   }
 }

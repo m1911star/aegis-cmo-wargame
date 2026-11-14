@@ -1,5 +1,5 @@
-import { booleanPointInPolygon, polygon } from '@turf/turf';
 import type { RuntimeScenarioEvent, RuntimeUnit, TacticalContact } from '../types/wargame';
+import { isPointInCompiledPolygon } from './environment';
 
 const CLASSIFICATION_RANK = { unknown: 0, classified: 1, identified: 2 } as const;
 
@@ -37,11 +37,10 @@ export function getEventOccurrences(
       (!trigger.targetDomain || trigger.targetDomain === contact.domain)
     ).map((contact) => contact.actualUnitId);
   } else {
-    const area = polygon([[...trigger.areaPolygon, trigger.areaPolygon[0]]]);
     matches = Object.values(units).filter((unit) =>
       unit.hp > 0 && unit.status !== 'destroyed' && unit.side === trigger.side &&
       (!trigger.unitCategory || trigger.unitCategory === unit.category) &&
-      booleanPointInPolygon(unit.position, area)
+      isPointInCompiledPolygon(unit.position, trigger.areaPolygon)
     ).map((unit) => unit.id);
   }
   const previous = new Set(event.matchedUnitIds ?? []);

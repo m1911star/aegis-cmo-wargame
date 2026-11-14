@@ -1,5 +1,5 @@
-import * as turf from '@turf/turf';
 import type { BattleResult, CombatLogEntry, ObjectiveHoldProgress, ObjectiveProgress, RuntimeUnit, ScenarioObjective, ScoreLedger, TacticalContact, VictoryConditionRule } from '../types/wargame';
+import { isPointInCompiledPolygon } from './environment';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 
 export type AreaControlState = 'uncontested' | 'suppressing' | 'contested' | 'overwhelmed' | 'vacant';
@@ -17,7 +17,6 @@ export function evaluateAreaControlStatus(
   if (!objective.areaPolygon || objective.areaPolygon.length < 3) {
     return { state: 'vacant', ownStrength: 0, hostileStrength: 0 };
   }
-  const area = turf.polygon([[...objective.areaPolygon, objective.areaPolygon[0]]]);
   const domains = objective.controlDomains && objective.controlDomains.length > 0
     ? objective.controlDomains
     : ['land', 'surface'];
@@ -26,7 +25,7 @@ export function evaluateAreaControlStatus(
   for (const unit of Object.values(units)) {
     if (!isActiveUnit(unit) || !domains.includes(unit.domain) || unit.side === 'NEUTRAL') continue;
     if (getUnitCapabilities(unit).state === 'mission_killed') continue;
-    if (!turf.booleanPointInPolygon(unit.position, area)) continue;
+    if (!isPointInCompiledPolygon(unit.position, objective.areaPolygon)) continue;
     const weight = unit.category === 'ground_force' ? 1.5 : 1.0;
     const unitStrength = Math.max(0.25, unit.hp / Math.max(1, unit.maxHp)) * weight;
     if (unit.side === objective.side) ownStrength += unitStrength;
@@ -75,13 +74,12 @@ export function resolveWithdrawalAreas(
 ): void {
   for (const objective of objectives) {
     if (objective.type !== 'withdraw' || !objective.withdrawAreaPolygon) continue;
-    const area = turf.polygon([[...objective.withdrawAreaPolygon, objective.withdrawAreaPolygon[0]]]);
     for (const unitId of objective.unitIds) {
       const unit = units[unitId];
       if (!unit || !isActiveUnit(unit) || unit.side !== objective.side ||
           objective.withdrawUnitDomains && !objective.withdrawUnitDomains.includes(unit.domain) ||
           unit.completedWithdrawalObjectiveIds.includes(objective.id) ||
-          !turf.booleanPointInPolygon(unit.position, area)) continue;
+          !isPointInCompiledPolygon(unit.position, objective.withdrawAreaPolygon)) continue;
       unit.completedWithdrawalObjectiveIds.push(objective.id);
       unit.status = 'recovered';
       unit.speedKts = unit.targetSpeedKts = 0;

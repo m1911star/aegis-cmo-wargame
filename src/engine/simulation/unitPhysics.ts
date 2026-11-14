@@ -10,7 +10,7 @@ import type {
   TacticalMission,
   WeaponInFlight,
 } from '../../types/wargame';
-import { isRouteAllowed } from '../environment';
+import { getCompiledPolygon, isRouteAllowed } from '../environment';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { updateUnitOperations } from '../operations';
 import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
@@ -201,9 +201,7 @@ export function advanceUnitPhysics({
       } else if (assignedMission.type !== 'escort') {
         unit.waypoints.push({
           position: turf.pointOnFeature(
-            turf.polygon([
-              [...assignedMission.areaPolygon, assignedMission.areaPolygon[0]],
-            ])
+            getCompiledPolygon(assignedMission.areaPolygon).feature
           ).geometry.coordinates as [number, number],
         });
       }
