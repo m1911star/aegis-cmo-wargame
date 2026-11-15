@@ -10,6 +10,7 @@ import { Button } from './ui/button';
 
 export function FireControlDiagnostics({ contact }: { contact: TacticalContact }) {
   const units = useWargameStore((s) => s.units);
+  const weaponsInFlight = useWargameStore((s) => s.weaponsInFlight);
   const catalog = useWargameStore((s) => s.catalog);
   const missions = useWargameStore((s) => s.missions);
   const simTime = useWargameStore((s) => s.simTime);
@@ -31,7 +32,7 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
       </Select>
       {attacker.mounts.map((mount) => {
         const weapon = catalog.weapons[mount.weaponId];
-        const solution = evaluateFireControl({ ...attacker, doctrine: effectiveDoctrine(attacker, missions) }, contact, mount, weapon, catalog, units, simTime);
+        const solution = evaluateFireControl({ ...attacker, doctrine: effectiveDoctrine(attacker, missions) }, contact, mount, weapon, catalog, units, simTime, 'manual', weaponsInFlight);
         const blocked = solution.status === 'blocked';
         const risky = solution.status === 'risky';
         return <article key={mount.mountId} className="border-t border-border pt-2.5 space-y-1.5 text-xs">

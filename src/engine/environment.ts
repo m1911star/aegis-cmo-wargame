@@ -226,7 +226,13 @@ export function resolveMissileTerrainInteraction(
   environment?: ScenarioEnvironment
 ): MissileTerrainOutcome {
   const land = environment?.landPolygons;
-  if (!land?.length || missileAltM < 0 || weapon.guidance === 'hypersonic_glide') {
+  if (
+    !land?.length ||
+    missileAltM < 0 ||
+    weapon.guidance === 'hypersonic_glide' ||
+    weapon.flightProfile === 'hypersonic_glide' ||
+    weapon.flightProfile === 'ballistic_loft'
+  ) {
     return { impacted: false };
   }
 

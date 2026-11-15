@@ -9,7 +9,13 @@ import type {
   TacticalMission,
   WeaponInFlight,
 } from '../../types/wargame';
-import { evaluateFireControl, weaponLaunchRangeKm } from '../fireControl';
+import {
+  countActiveGuidanceChannels,
+  evaluateFireControl,
+  resolveMaxGuidanceChannels,
+  weaponLaunchRangeKm,
+  weaponUsesGuidanceChannel,
+} from '../fireControl';
 import { findShootAndScootDestination } from '../environment';
 import { getBearingDeg, getDistanceKm, calculateRadarHorizonKm } from '../geometry';
 import { launchGuidance } from '../guidance';
@@ -113,7 +119,8 @@ export function runAutoDefense({
             catalog,
             units,
             nextSimTime,
-            'defense'
+            'defense',
+            weaponsInFlight
           );
           if (solution.status !== 'executable' || solution.distanceKm === undefined ||
               solution.distanceKm > weapon.maxRangeKm * doctrine.automaticFireRangeFraction) return [];
@@ -136,7 +143,11 @@ export function runAutoDefense({
 
         const { mount: samMount, weapon: samSpec, solution } = selected;
         const distanceToIncomingKm = solution.distanceKm!;
-        const interceptCount = Math.min(neededInterceptors, selected.availableAmmo);
+        const maxCh = resolveMaxGuidanceChannels(catalog.platforms[shooter.platformId]);
+        const usedCh = countActiveGuidanceChannels(shooter.id, weaponsInFlight, catalog);
+        const channelCap = weaponUsesGuidanceChannel(samSpec) ? Math.max(0, maxCh - usedCh) : neededInterceptors;
+        const interceptCount = Math.min(neededInterceptors, selected.availableAmmo, channelCap);
+        if (interceptCount <= 0) continue;
         const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some((id) => id !== shooter.id);
         const ownHorizonKm = calculateRadarHorizonKm(
           shooter.altitudeM,
@@ -240,7 +251,8 @@ export function runAutoDefense({
           catalog,
           units,
           nextSimTime,
-          'automatic'
+          'automatic',
+          weaponsInFlight
         );
         if (solution.status !== 'executable' ||
             solution.distanceKm! > weaponLaunchRangeKm(weapon) * doctrine.automaticFireRangeFraction ||
@@ -259,9 +271,13 @@ export function runAutoDefense({
       );
       if (inFlightToTarget.length >= doctrine.salvoSize) continue;
 
+      const maxCh = resolveMaxGuidanceChannels(catalog.platforms[shooter.platformId]);
+      const usedCh = countActiveGuidanceChannels(shooter.id, weaponsInFlight, catalog);
+      const offChannelCap = weaponUsesGuidanceChannel(weapon) ? Math.max(0, maxCh - usedCh) : doctrine.salvoSize;
       const salvo = Math.min(
         doctrine.salvoSize,
-        matchingMount.currentAmmo - doctrine.minimumWeaponReserve
+        matchingMount.currentAmmo - doctrine.minimumWeaponReserve,
+        offChannelCap
       );
       if (salvo <= 0) continue;
       for (let index = 0; index < salvo; index++) {

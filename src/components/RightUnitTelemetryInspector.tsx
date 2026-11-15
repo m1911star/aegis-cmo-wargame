@@ -3,6 +3,7 @@ import { ChevronDown, Crosshair, Navigation } from 'lucide-react';
 import ms from 'milsymbol';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
 import { findAmphibiousLandingPoint, isPointOnLand, MAX_AMPHIBIOUS_STANDOFF_KM } from '../engine/environment';
+import { countActiveGuidanceChannels, resolveMaxGuidanceChannels } from '../engine/fireControl';
 import { calculateRadarHorizonKm } from '../engine/simulationEngine';
 import { getUnitCapabilities } from '../engine/unitCapabilities';
 import { useWargameStore } from '../store/useWargameStore';
@@ -43,6 +44,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const [selectedTankerId, setSelectedTankerId] = useState('');
 
   const units = useWargameStore((s) => s.units);
+  const weaponsInFlight = useWargameStore((s) => s.weaponsInFlight);
   const environment = useWargameStore((s) => s.environment);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
@@ -301,6 +303,18 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
               <span className="font-mono tabular-nums text-cyan-300">{Math.floor(selectedUnit.fuelRemainingSec / 60)} 分钟</span>
             </div>
           )}
+          {selectedUnit.mounts.length > 0 && (() => {
+            const maxCh = resolveMaxGuidanceChannels(platformSpec);
+            const usedCh = countActiveGuidanceChannels(selectedUnit.id, weaponsInFlight, catalog);
+            return (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">火控/制导通道占用</span>
+                <span className={`font-mono tabular-nums ${usedCh >= maxCh ? 'text-rose-300 font-semibold' : 'text-emerald-300'}`}>
+                  {usedCh} / {maxCh}
+                </span>
+              </div>
+            );
+          })()}
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted-foreground">导航模式</span>
             <span>{selectedUnit.status === 'returning' ? '资源约束返航' : selectedUnit.navigationMode === 'manual' ? '人工指挥' : '任务自动驾驶'}</span>

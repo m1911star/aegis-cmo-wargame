@@ -41,6 +41,11 @@ const sensor = object({
   detectDomains: array(domain), frequencyBand: text, jammingPowerKw: optional(number(0)),
   coverageArcDeg: optional(number(10, 360)), blindArcRearDeg: optional(number(0, 180)),
 });
+const altitudeBand: Check = (value, path) => {
+  array(number(), 2)(value, path);
+  const arr = value as number[];
+  if (arr.length !== 2 || arr[0] > arr[1]) invalid(path, 'expected [minAltitudeM, maxAltitudeM] with min <= max');
+};
 const weapon = object({
   ...metadata, codeName: text,
   category: oneOf(['aam', 'sam', 'ashm', 'lacm', 'torpedo', 'arm']),
@@ -48,6 +53,8 @@ const weapon = object({
   targetDomains: array(domain), canInterceptMissile: boolean,
   maxRangeKm: positive, minRangeKm: number(0), speedKts: positive, cruiseAltitudeM: number(),
   basePk: number(0, 1), warheadDamage: number(0), salvoDefault: number(1, Number.MAX_SAFE_INTEGER, true),
+  flightProfile: optional(oneOf(['cruise_flat', 'sea_skimming', 'ballistic_loft', 'hypersonic_glide'])),
+  interceptAltitudeBandM: optional(altitudeBand),
   requiresDatalinkBeyondHorizon: optional(boolean),
   launchMedium: optional(oneOf(['direct', 'air_drop'])),
   airDropRangeKm: optional(positive), airDropSpeedKts: optional(positive),
@@ -78,6 +85,7 @@ const platform = object({
   maxFuelSec: number(0), maxHp: positive, rcsM2: number(0),
   rcsProfile: optional(object({ frontalM2: number(0), beamM2: number(0), rearM2: number(0) })),
   ecmStrength: optional(number(0, 0.75)), acousticSignatureDb: number(0), hasDatalink: boolean,
+  maxGuidanceChannels: optional(number(1, 128, true)),
   ciwsDefenseProb: number(0, 1), sensorIds: identifiers,
   defaultLoadoutId: optional(id), availableLoadoutIds: optional(identifiers),
   mounts: array(mount), hangarSlots: optional(array(hangar)),

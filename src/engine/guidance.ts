@@ -8,6 +8,39 @@ import { isRadioEmitting, isActiveUnit } from './unitCapabilities';
 const move = (position: [number, number], km: number, heading: number) =>
   turf.destination(position, km, heading, { units: 'kilometers' }).geometry.coordinates as [number, number];
 
+export function computeFlightProfileAltitudeM(
+  missile: WeaponInFlight,
+  weapon: WeaponSpec,
+  targetAltitudeM = 0
+): number | undefined {
+  const profile = weapon.flightProfile ?? (weapon.guidance === 'hypersonic_glide' ? 'hypersonic_glide' : undefined);
+  if (!profile || profile === 'cruise_flat' || profile === 'sea_skimming') return undefined;
+  const totalDistKm = Math.max(1, missile.traveledKm + missile.distanceRemainingKm);
+  const progress = Math.max(0, Math.min(1, missile.traveledKm / totalDistKm));
+  const peakM = Math.max(8000, weapon.cruiseAltitudeM);
+  const endAltM = Math.max(0, targetAltitudeM);
+
+  if (profile === 'hypersonic_glide') {
+    if (progress <= 0.16) {
+      return Math.round(peakM * (progress / 0.16));
+    }
+    if (progress <= 0.76) {
+      const glideDecay = (progress - 0.16) / 0.6;
+      return Math.round(peakM - glideDecay * (peakM * 0.08));
+    }
+    const diveT = (progress - 0.76) / 0.24;
+    const startDiveAlt = peakM * 0.92;
+    return Math.round(endAltM + (startDiveAlt - endAltM) * Math.pow(1 - diveT, 2));
+  }
+
+  if (profile === 'ballistic_loft') {
+    const arc = Math.sin(progress * Math.PI);
+    return Math.round(endAltM * progress + peakM * arc);
+  }
+
+  return undefined;
+}
+
 export function computeMissileEnergyFactor(missile: WeaponInFlight, weapon: WeaponSpec): number {
   if (!Number.isFinite(weapon.maxRangeKm) || weapon.maxRangeKm <= 0) return 1;
   const ratio = Math.max(0, Math.min(1, missile.traveledKm / weapon.maxRangeKm));
@@ -121,6 +154,14 @@ export function advanceGuidance(
   missile.position = move(before, step, missile.heading);
   missile.traveledKm += step;
   missile.distanceRemainingKm = getDistanceKm(missile.position, missile.aimPosition);
+  const profileAltM = computeFlightProfileAltitudeM(
+    missile,
+    weapon,
+    target ? target.altitudeM : missile.aimAltitudeM ?? 0
+  );
+  if (profileAltM !== undefined) {
+    missile.altitudeM = profileAltM;
+  }
   missile.trail.push([...missile.position]);
   if (missile.trail.length > 18) missile.trail.shift();
   const targetEnd = target && !('platformId' in target)

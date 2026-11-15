@@ -1482,10 +1482,10 @@ describe('Deterministic replay and scenario contracts', () => {
       tick: 12000,
       reason: 'time_limit',
       outcomes: { RED: 'costly_victory', BLUE: 'costly_victory' },
-      losses: [2, 9],
-      fired: [156, 170],
+      losses: [3, 8],
+      fired: [156, 160],
       sorties: 5,
-      aar: 276,
+      aar: 262,
     });
     expect(state.pendingSortieOrders.filter((order) => order.status === 'pending')).toEqual([]);
     expect(state.pendingSortieOrders.filter((order) => order.status === 'failed')

@@ -80,6 +80,12 @@ export interface SensorSpec {
   description: string;
 }
 
+export type WeaponFlightProfile =
+  | 'cruise_flat'
+  | 'sea_skimming'
+  | 'ballistic_loft'
+  | 'hypersonic_glide';
+
 export interface WeaponSpec {
   id: string;
   name: string;
@@ -95,6 +101,8 @@ export interface WeaponSpec {
   basePk: number;               // 基准命中概率 (0.0 - 1.0)
   warheadDamage: number;        // 毁伤值
   salvoDefault: number;         // 默认齐射发数 (WRA)
+  flightProfile?: WeaponFlightProfile;
+  interceptAltitudeBandM?: [number, number]; // 防空反导拦截射高包线 [最低米, 最高米]
   /**
    * Legacy catalog hint for midcourse support. GuidanceProfile defines actual capabilities.
    * Loss of optional support freezes/extrapolates the aimpoint; it is not a universal launch ban
@@ -187,6 +195,7 @@ export interface PlatformSpec {
   ecmStrength?: number;         // 有源电子对抗压制强度 (0.0 - 0.75，开启 ECM 时压制敌方雷达探测距离与导弹命中率)
   acousticSignatureDb: number;
   hasDatalink: boolean;
+  maxGuidanceChannels?: number; // 同时制导/中继通道上限
   ciwsDefenseProb: number;
   sensorIds: string[];
   defaultLoadoutId?: string;    // 默认挂载方案 ID

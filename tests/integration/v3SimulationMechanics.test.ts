@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
 import { deployCarriedUnitFromLauncher } from '../../src/engine/carrierOperations';
-import { evaluateFireControl } from '../../src/engine/fireControl';
+import { countActiveGuidanceChannels, evaluateFireControl, resolveMaxGuidanceChannels } from '../../src/engine/fireControl';
+import { computeFlightProfileAltitudeM, launchGuidance } from '../../src/engine/guidance';
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
+import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
 import { createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
 import { buildSensorEnvelopeFeature } from '../../src/map/tacticalProjection';
-import type { CombatLogEntry, InitialUnitPlacement, ScoreLedger } from '../../src/types/wargame';
+import type { CombatLogEntry, InitialUnitPlacement, ScoreLedger, TacticalContact, WeaponInFlight } from '../../src/types/wargame';
 
 const emptyScore = (): ScoreLedger => ({
   redLosses: 0,
@@ -253,5 +255,148 @@ describe('Module 2: Deployable DIFAR/DICASS sonobuoys & networked airborne ASW',
     updateUnitOperations(dropDicass.deployed!, units, {}, [], catalog, 3000, 1, score, logs);
     expect(dropDicass.deployed!.status).toBe('destroyed');
     expect(score.blueLosses).toBe(0);
+  });
+});
+
+describe('Module 3: Platform guidance channel saturation & 3-tier HGV/ballistic altitude envelopes', () => {
+  test('saturating frigate radar guidance channels blocks ESSM midcourse launches while freeing autonomous IR RAM point defense', () => {
+    const ffg = createRuntimeUnitFromPlacement(
+      placement('blue_ffg', {
+        side: 'BLUE',
+        platformId: 'constellation_ffg',
+        position: [0, 0],
+        doctrine: { roe: 'free', emconRadar: true, salvoSize: 2, minimumWeaponReserve: 0 },
+      }),
+      catalog
+    );
+    const maxCh = resolveMaxGuidanceChannels(catalog.platforms.constellation_ffg);
+    expect(maxCh).toBe(8);
+
+    const weaponsInFlight: Record<string, WeaponInFlight> = {};
+    // Pre-fill all 8 radar guidance channels with midcourse ESSM interceptors
+    for (let i = 0; i < maxCh; i++) {
+      weaponsInFlight[`essm_busy_${i}`] = {
+        id: `essm_busy_${i}`,
+        weaponId: 'essm_blk2',
+        name: 'ESSM Block 2',
+        side: 'BLUE',
+        shooterId: ffg.id,
+        shooterName: ffg.callsign,
+        targetId: `decoy_${i}`,
+        targetType: 'unit',
+        position: [0.05, 0],
+        launchPosition: [0, 0],
+        trail: [],
+        altitudeM: 5000,
+        heading: 90,
+        speedKts: 2500,
+        distanceRemainingKm: 20,
+        maxRangeKm: 50,
+        traveledKm: 5,
+        basePk: 0.74,
+        warheadDamage: 42,
+        seekerState: 'midcourse_datalink',
+      };
+    }
+    expect(countActiveGuidanceChannels(ffg.id, weaponsInFlight, catalog)).toBe(8);
+
+    // Incoming sea-skimming missile at 10km (within both ESSM 50km and RAM 15km range!)
+    weaponsInFlight.incoming_leaker = {
+      id: 'incoming_leaker',
+      weaponId: 'yj18_ashm',
+      name: 'YJ-18',
+      side: 'RED',
+      shooterId: 'red_055',
+      shooterName: 'RED-055',
+      targetId: ffg.id,
+      targetType: 'unit',
+      position: [0.09, 0], // ~10 km
+      launchPosition: [0.5, 0],
+      trail: [],
+      altitudeM: 12,
+      heading: 270,
+      speedKts: 1850,
+      distanceRemainingKm: 10,
+      maxRangeKm: 540,
+      traveledKm: 40,
+      basePk: 0.74,
+      warheadDamage: 65,
+      seekerState: 'terminal_locked',
+    };
+
+    const pausesOff = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
+    runAutoDefense({
+      units: { blue_ffg: ffg },
+      missions: [],
+      contacts: {},
+      weaponsInFlight,
+      catalog,
+      nextSimTime: 1000,
+      score: emptyScore(),
+      logs: [],
+      autoPauseSettings: pausesOff,
+      triggerPause: () => undefined,
+    });
+
+    // ESSM is channel-saturated (0 launched), while fire-and-forget IR RAM Block 2 still launches 2 rounds!
+    const launchedInterceptors = Object.values(weaponsInFlight).filter((m) => m.targetId === 'incoming_leaker');
+    expect(launchedInterceptors).toHaveLength(2);
+    expect(launchedInterceptors.every((m) => m.weaponId === 'ram_blk2')).toBe(true);
+
+    // Once one ESSM goes Pitbull (terminal_locked), a channel frees up immediately!
+    weaponsInFlight.essm_busy_0.seekerState = 'terminal_locked';
+    expect(countActiveGuidanceChannels(ffg.id, weaponsInFlight, catalog)).toBe(7);
+  });
+
+  test('hypersonic glide & ballistic loft follow boost-glide-dive altitude curves and enforce 3-tier SAM altitude bands', () => {
+    const yj21 = catalog.weapons.yj21_hypersonic;
+    const baseHvg = { traveledKm: 0, distanceRemainingKm: 500 } as WeaponInFlight;
+    // Boost climb -> 38km near-space glide -> terminal steep dive
+    const midGlideAlt = computeFlightProfileAltitudeM({ ...baseHvg, traveledKm: 200, distanceRemainingKm: 300 }, yj21, 0)!;
+    const lateDiveAlt = computeFlightProfileAltitudeM({ ...baseHvg, traveledKm: 480, distanceRemainingKm: 20 }, yj21, 0)!;
+    expect(midGlideAlt).toBeGreaterThan(35500);
+    expect(lateDiveAlt).toBeLessThan(8000);
+
+    // At 37,000m near-space glide: Tier-1 BMD (SM-6 Dual II max 40km) CAN engage, while Tier-2 ESSM (17.5km) and Tier-3 RAM (8.5km) CANNOT!
+    const ddg = createRuntimeUnitFromPlacement(
+      placement('ddg', { side: 'BLUE', platformId: 'arleigh_burke_flt3', position: [0, 0], doctrine: { roe: 'free', emconRadar: true } }),
+      catalog
+    );
+    const ffg = createRuntimeUnitFromPlacement(
+      placement('ffg', { side: 'BLUE', platformId: 'constellation_ffg', position: [0, 0], doctrine: { roe: 'free', emconRadar: true } }),
+      catalog
+    );
+    const highGlideTrack: TacticalContact = {
+      id: 'BLUE_MISSILE_hvg',
+      actualUnitId: 'hvg_1',
+      observerSide: 'BLUE',
+      targetSide: 'RED',
+      domain: 'air',
+      classification: 'classified',
+      displayName: 'HGV',
+      sidc: ddg.sidc,
+      estimatedPosition: [0.25, 0],
+      truePosition: [0.25, 0],
+      uncertaintyRadiusKm: 0.3,
+      heading: 270,
+      speedKts: 4600,
+      altitudeM: 37000,
+      firstDetectedTime: 0,
+      lastDetectedTime: 0,
+      detectedBySources: ['ddg', 'ffg'],
+      sourceUnitIds: ['ddg', 'ffg'],
+      fireControlSourceIds: ['ddg', 'ffg'],
+      threatLevel: 'critical',
+    };
+    const sm6Mount = ddg.mounts.find((m) => m.weaponId === 'sm6_eram')!;
+    const essmMount = ffg.mounts.find((m) => m.weaponId === 'essm_blk2')!;
+    expect(evaluateFireControl(ddg, highGlideTrack, sm6Mount, catalog.weapons.sm6_eram, catalog, { ddg, ffg }, 0, 'defense').status).toBe('executable');
+    expect(evaluateFireControl(ffg, highGlideTrack, essmMount, catalog.weapons.essm_blk2, catalog, { ddg, ffg }, 0, 'defense').status).toBe('blocked');
+
+    // Above 40,000m exo-atmospheric apex, even Endo-BMD SM-6 is blocked; in terminal dive (< 8,000m), ESSM and RAM both unlock!
+    highGlideTrack.altitudeM = 42000;
+    expect(evaluateFireControl(ddg, highGlideTrack, sm6Mount, catalog.weapons.sm6_eram, catalog, { ddg, ffg }, 0, 'defense').status).toBe('blocked');
+    highGlideTrack.altitudeM = 6000;
+    expect(evaluateFireControl(ffg, highGlideTrack, essmMount, catalog.weapons.essm_blk2, catalog, { ddg, ffg }, 0, 'defense').status).toBe('executable');
   });
 });

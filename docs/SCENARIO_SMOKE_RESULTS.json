@@ -23,16 +23,16 @@
         "blue": 8
       },
       "missilesFired": {
-        "red": 172,
-        "blue": 158
+        "red": 178,
+        "blue": 164
       },
       "interceptions": {
-        "red": 38,
-        "blue": 27
+        "red": 44,
+        "blue": 28
       },
       "score": {
         "red": 1350,
-        "blue": 1145
+        "blue": 1040
       },
       "sortiesLaunched": 2,
       "events": [
@@ -83,7 +83,7 @@
         "east_red_preserve_y9g": "achieved",
         "east_blue_preserve_mq4c": "achieved"
       },
-      "aarEvents": 256,
+      "aarEvents": 271,
       "finiteState": true
     },
     {
@@ -170,20 +170,20 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 2,
-        "blue": 9
+        "red": 3,
+        "blue": 8
       },
       "missilesFired": {
         "red": 156,
-        "blue": 170
+        "blue": 160
       },
       "interceptions": {
-        "red": 32,
-        "blue": 45
+        "red": 34,
+        "blue": 38
       },
       "score": {
-        "red": 1990,
-        "blue": 1002
+        "red": 1924,
+        "blue": 1000
       },
       "sortiesLaunched": 5,
       "events": [
@@ -267,7 +267,7 @@
         "bashi_blue_disable_coastal": "failed",
         "bashi_blue_preserve_mq4c": "failed"
       },
-      "aarEvents": 276,
+      "aarEvents": 262,
       "finiteState": true
     },
     {

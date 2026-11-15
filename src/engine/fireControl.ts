@@ -1,7 +1,58 @@
-import type { EquipmentCatalog, GuidanceProfile, RuntimeUnit, RuntimeWeaponMount, TacticalContact, WeaponSpec } from '../types/wargame';
+import type { EquipmentCatalog, GuidanceProfile, PlatformSpec, RuntimeUnit, RuntimeWeaponMount, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
 import { getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 import { GUIDANCE_DEFAULTS } from './constants';
+
+export function resolveMaxGuidanceChannels(platform: PlatformSpec | undefined): number {
+  if (!platform) return 8;
+  if (platform.maxGuidanceChannels !== undefined) return platform.maxGuidanceChannels;
+  switch (platform.category) {
+    case 'destroyer':
+      return platform.id === 'type055_destroyer' ? 20 : platform.id === 'arleigh_burke_flt3' ? 18 : 12;
+    case 'carrier':
+    case 'airbase':
+    case 'sam_battery':
+      return 12;
+    case 'frigate':
+    case 'amphibious':
+      return 8;
+    case 'stealth_fighter':
+    case 'fighter':
+      return platform.id === 'j10c_multirole' ? 4 : 6;
+    case 'bomber':
+    case 'asm_battery':
+    case 'ssn':
+    case 'ground_force':
+      return 8;
+    default:
+      return 4;
+  }
+}
+
+export function weaponUsesGuidanceChannel(weapon: WeaponSpec): boolean {
+  const profile = guidanceProfile(weapon);
+  return profile.requiresSupport || profile.receivesUpdates;
+}
+
+export function countActiveGuidanceChannels(
+  shooterId: string,
+  weaponsInFlight: Record<string, WeaponInFlight> | undefined,
+  catalog: EquipmentCatalog
+): number {
+  if (!weaponsInFlight) return 0;
+  let active = 0;
+  for (const missile of Object.values(weaponsInFlight)) {
+    if (missile.shooterId !== shooterId || missile.isIntercepted) continue;
+    const w = catalog.weapons[missile.weaponId];
+    if (!w || !weaponUsesGuidanceChannel(w)) continue;
+    const holdsUntilImpact = guidanceProfile(w).requiresSupport;
+    const inMidcourse = !missile.seekerState || missile.seekerState.startsWith('midcourse');
+    if (holdsUntilImpact || inMidcourse) {
+      active += 1;
+    }
+  }
+  return active;
+}
 
 export function guidanceProfile(weapon: WeaponSpec): GuidanceProfile {
   const acoustic = weapon.guidance === 'acoustic_homing';
@@ -91,18 +142,24 @@ export interface FireControlSolution {
   nezRangeKm?: number;
   withinNez?: boolean;
   estimatedTofSec?: number;
+  activeChannels?: number;
+  maxChannels?: number;
   supportSourceIds: string[];
 }
 
 export function evaluateFireControl(
   attacker: RuntimeUnit, contact: TacticalContact | undefined, mount: RuntimeWeaponMount,
   weapon: WeaponSpec, catalog: EquipmentCatalog, units: Record<string, RuntimeUnit>,
-  simTime: number, mode: 'manual' | 'automatic' | 'defense' = 'manual'
+  simTime: number, mode: 'manual' | 'automatic' | 'defense' = 'manual',
+  weaponsInFlight?: Record<string, WeaponInFlight>
 ): FireControlSolution {
   const hardBlockReasons: string[] = [];
   const riskWarnings: string[] = [];
   const profile = guidanceProfile(weapon);
   const supportSourceIds = trackSupport(attacker, contact, weapon, units, catalog, simTime);
+  const maxChannels = resolveMaxGuidanceChannels(catalog.platforms[attacker.platformId]);
+  const activeChannels = countActiveGuidanceChannels(attacker.id, weaponsInFlight, catalog);
+  const availableChannels = Math.max(0, maxChannels - activeChannels);
   if (!isActiveUnit(attacker) || !getUnitCapabilities(attacker).canFire) hardBlockReasons.push('平台已失去发射能力');
   if (attacker.domain === 'air' && weapon.category === 'torpedo' && weapon.launchMedium !== 'air_drop') {
     hardBlockReasons.push('航空平台不能投放重型直射鱼雷');
@@ -126,10 +183,25 @@ export function evaluateFireControl(
     withinNez = distanceKm >= weapon.minRangeKm && distanceKm <= nezRangeKm;
     estimatedTofSec = estimateWeaponTimeOfFlightSec(distanceKm, weapon);
     if (!weapon.targetDomains.includes(contact.domain)) hardBlockReasons.push('武器与目标域不匹配');
+    if (weapon.interceptAltitudeBandM && contact.domain === 'air') {
+      const [minAlt, maxAlt] = weapon.interceptAltitudeBandM;
+      if (contact.altitudeM < minAlt || contact.altitudeM > maxAlt) {
+        hardBlockReasons.push(
+          `目标高度 (${Math.round(contact.altitudeM)}m) 超出拦截射高包线 [${minAlt}m~${maxAlt}m]`
+        );
+      }
+    }
     if (distanceKm > weaponLaunchRangeKm(weapon) || distanceKm < weapon.minRangeKm) hardBlockReasons.push('已知瞄准点不在武器射程内');
     if (trackAgeSec > profile.maxTrackAgeSec) riskWarnings.push(`情报已陈旧（${trackAgeSec.toFixed(1)} 秒未更新）`);
     if (contact.uncertaintyRadiusKm > profile.maxUncertaintyKm) riskWarnings.push(`定位误差 ±${contact.uncertaintyRadiusKm.toFixed(1)} km，存在搜索失败风险`);
     if (contact.classification === 'unknown') riskWarnings.push('目标尚未分类');
+  }
+  if (weaponUsesGuidanceChannel(weapon) && availableChannels <= 0) {
+    if (profile.requiresSupport || mode !== 'manual') {
+      hardBlockReasons.push(`平台火控/制导通道已饱和 (${activeChannels}/${maxChannels})`);
+    } else {
+      riskWarnings.push(`本平台制导通道已满 (${activeChannels}/${maxChannels})，导弹将以无本机中继盲飞发射`);
+    }
   }
   if (profile.requiresSupport && supportSourceIds.length === 0) hardBlockReasons.push('该制导方式必须获得持续火控支援');
   else if (profile.receivesUpdates && supportSourceIds.length === 0) riskWarnings.push('无有效中继，将依靠最后已知信息飞行');
@@ -147,5 +219,6 @@ export function evaluateFireControl(
     hardBlockReasons.push('条令要求识别目标后方可自动开火');
   }
   return { status: hardBlockReasons.length ? 'blocked' : riskWarnings.length ? 'risky' : 'executable',
-    hardBlockReasons, riskWarnings, distanceKm, trackAgeSec, nezRangeKm, withinNez, estimatedTofSec, supportSourceIds };
+    hardBlockReasons, riskWarnings, distanceKm, trackAgeSec, nezRangeKm, withinNez, estimatedTofSec,
+    activeChannels, maxChannels, supportSourceIds };
 }

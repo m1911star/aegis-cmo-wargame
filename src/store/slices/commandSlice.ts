@@ -660,7 +660,23 @@ export function createCommandSlice(set: StoreSet) {
       const mounts = attacker.mounts.filter((m) => !weaponId || m.weaponId === weaponId);
       const solutions = mounts.flatMap((mount) => {
         const weapon = s.catalog.weapons[mount.weaponId];
-        return weapon ? [{ mount, weapon, solution: evaluateFireControl({ ...attacker, doctrine: effectiveDoctrine(attacker, s.missions) }, contact, mount, weapon, s.catalog, s.units, s.simTime) }] : [];
+        return weapon
+          ? [{
+              mount,
+              weapon,
+              solution: evaluateFireControl(
+                { ...attacker, doctrine: effectiveDoctrine(attacker, s.missions) },
+                contact,
+                mount,
+                weapon,
+                s.catalog,
+                s.units,
+                s.simTime,
+                'manual',
+                s.weaponsInFlight
+              ),
+            }]
+          : [];
       });
       const chosen = solutions.find((entry) => entry.solution.status === 'executable') ??
         solutions.find((entry) => entry.solution.status === 'risky') ?? solutions[0];
