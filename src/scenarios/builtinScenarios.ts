@@ -1380,18 +1380,20 @@ export function instantiateScenarioUnits(
   const compiled = compileScenario(scenario, catalog);
   const runtimeUnits: Record<string, RuntimeUnit> = {};
 
-  for (const placement of compiled.scenario.units) {
+  for (const [index, placement] of compiled.scenario.units.entries()) {
     if (
       placement.appearProbability !== undefined &&
       rng() >= placement.appearProbability
     ) {
       continue;
     }
-    runtimeUnits[placement.id] = createRuntimeUnitFromPlacement(
+    const created = createRuntimeUnitFromPlacement(
       placement,
       catalog,
       rng
     );
+    created.spawnOrder = index;
+    runtimeUnits[placement.id] = created;
   }
 
   return runtimeUnits;

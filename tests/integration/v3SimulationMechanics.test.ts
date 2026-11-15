@@ -830,3 +830,97 @@ describe('Module 7: BDA fog-of-war confirmation & periodic satellite ISR passes'
     expect(atSarPass.logs.some((l) => l.title.includes('BDA毁伤复核确认'))).toBe(true);
   });
 });
+
+describe('Code review remediation: key-order determinism, no-op command filtering & incremental replay', () => {
+  test('shuffled unit/contact key insertion order produces identical autoDefense & simulation state', () => {
+    const u1 = createRuntimeUnitFromPlacement(
+      placement('u_alpha', { position: [0, 0], doctrine: { roe: 'free', emconRadar: true, salvoSize: 1 } }),
+      catalog
+    );
+    const u2 = createRuntimeUnitFromPlacement(
+      placement('u_beta', { position: [0, 0.05], doctrine: { roe: 'free', emconRadar: true, salvoSize: 1 } }),
+      catalog
+    );
+    const e1 = createRuntimeUnitFromPlacement(
+      placement('e_one', { side: 'BLUE', platformId: 'constellation_ffg', position: [0.35, 0], doctrine: { roe: 'free', emconRadar: true } }),
+      catalog
+    );
+    const e2 = createRuntimeUnitFromPlacement(
+      placement('e_two', { side: 'BLUE', platformId: 'arleigh_burke_flt3', position: [0.35, 0.05], doctrine: { roe: 'free', emconRadar: true } }),
+      catalog
+    );
+    const pauses = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
+    const forwardWorld = advanceSimulation(
+      {
+        startTime: 0,
+        simTime: 0,
+        tick: 0,
+        rngState: 777,
+        units: { u_alpha: u1, u_beta: u2, e_one: e1, e_two: e2 },
+        contacts: {},
+        weaponsInFlight: {},
+        explosions: [],
+        missions: [],
+        score: emptyScore(),
+      },
+      catalog,
+      6,
+      pauses,
+      'RED'
+    ).nextState;
+
+    const reversedWorld = advanceSimulation(
+      {
+        startTime: 0,
+        simTime: 0,
+        tick: 0,
+        rngState: 777,
+        units: { e_two: structuredClone(e2), u_beta: structuredClone(u2), e_one: structuredClone(e1), u_alpha: structuredClone(u1) },
+        contacts: {},
+        weaponsInFlight: {},
+        explosions: [],
+        missions: [],
+        score: emptyScore(),
+      },
+      catalog,
+      6,
+      pauses,
+      'RED'
+    ).nextState;
+
+    expect(reversedWorld.score).toEqual(forwardWorld.score);
+    expect(Object.keys(reversedWorld.weaponsInFlight).sort()).toEqual(Object.keys(forwardWorld.weaponsInFlight).sort());
+  });
+
+  test('no-op removeReferencePoint, clearUnitWaypoints, setPlayerSide, and setPlayMode do not pollute commandHistory, and incremental seekReplayPlayer matches full replay', () => {
+    store.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 1234);
+    store.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
+
+    // No-op calls must NOT record into commandHistory
+    store.getState().removeReferencePoint('non_existent_rp');
+    const lockedRp = store.getState().referencePoints.find((r) => r.locked);
+    if (lockedRp) store.getState().removeReferencePoint(lockedRp.id);
+    const blueRp = store.getState().referencePoints.find((r) => r.side === 'BLUE');
+    if (blueRp) store.getState().removeReferencePoint(blueRp.id);
+    store.getState().setPlayerSide('RED');
+    store.getState().setPlayMode('command');
+    store.getState().clearUnitWaypoints('red_radar_fujian');
+    store.getState().batchClearUnitWaypoints(['red_radar_fujian']);
+    expect(store.getState().commandHistory).toHaveLength(0);
+    expect(store.getState().commandSequence).toBe(0);
+
+    // Record real commands across ticks and verify incremental seekReplayPlayer matches full replay
+    store.getState().stepSingleTick(5);
+    store.getState().updateUnitDoctrine('red_055_nanchang', { roe: 'hold' });
+    store.getState().stepSingleTick(5);
+    const finalCanonical = canonicalBattleState();
+    const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
+
+    store.getState().startReplayPlayer(recording, 0);
+    store.getState().seekReplayPlayer(12);
+    store.getState().seekReplayPlayer(24);
+    store.getState().seekReplayPlayer(recording.untilTick);
+    expect(canonicalBattleState()).toEqual(finalCanonical);
+    store.getState().exitReplayPlayer();
+  });
+});

@@ -8,7 +8,7 @@ import {
   isPointInCompiledPolygon,
 } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
-import { getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
+import { compareRuntimeUnits, getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
 import {
   REFERENCE_RCS_M2,
   RCS_ASPECT_ANGLE,
@@ -338,9 +338,9 @@ export function computeContactsOnly(
     resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId)]));
   const newLogs: CombatLogEntry[] = [];
   const nextContacts: Record<string, TacticalContact> = {};
-  const aliveUnits = Object.values(units).filter(
-    isActiveUnit
-  );
+  const aliveUnits = Object.values(units)
+    .filter(isActiveUnit)
+    .sort(compareRuntimeUnits);
   const elapsedSec = startTime !== undefined ? Math.max(0, (nextSimTime - startTime) / 1000) : 0;
   const activeSatPasses = (environment?.satellitePasses ?? []).filter((pass) =>
     isSatellitePassActive(pass.firstPassSec, pass.intervalSec, elapsedSec)
@@ -821,7 +821,8 @@ export function observeMissile(
   allowPassiveWarning = false
 ): TacticalContact | undefined {
   const sources: RuntimeUnit[] = [];
-  for (const observer of Object.values(units)) {
+  const sortedObservers = Object.values(units).sort(compareRuntimeUnits);
+  for (const observer of sortedObservers) {
     if (observer.side !== side || !isActiveUnit(observer)) continue;
     const config = resolveUnitConfiguration(catalog, observer.platformId, observer.activeLoadoutId);
     if (receiver && receiver.id !== observer.id &&

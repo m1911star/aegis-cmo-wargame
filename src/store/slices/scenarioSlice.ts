@@ -26,6 +26,7 @@ import type { ScenarioDefinition } from '../../types/wargame';
 import { emitActionFeedback } from '../actionFeedbackBus';
 import {
   AUTOSAVE_STORAGE_KEY,
+  advanceReplayRecordingIncremental,
   captureBattleSave,
   replayBattleRecording,
   restoreBattleSave,
@@ -195,7 +196,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     pendingRiskEngagement: null,
     setPlayerSide: (side: 'RED' | 'BLUE') => {
       const s = get();
-      if (s.tick !== 0 || s.timeScale !== 0) return;
+      if (s.tick !== 0 || s.timeScale !== 0 || s.playerSide === side) return;
       const firstUnitId = Object.values(s.units).find((u) => u.side === side)?.id ?? null;
       set({
         playerSide: side,
@@ -205,10 +206,13 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         selectedUnitIds: firstUnitId ? [firstUnitId] : [],
       });
     },
-    setPlayMode: (mode: WargameStoreState['playMode']) => set({
-      playMode: mode, timeScale: 0, pendingRiskEngagement: null,
-      selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide,
-    }),
+    setPlayMode: (mode: WargameStoreState['playMode']) => {
+      if (get().playMode === mode) return;
+      set({
+        playMode: mode, timeScale: 0, pendingRiskEngagement: null,
+        selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide,
+      });
+    },
     dismissRiskEngagement: () => set({ pendingRiskEngagement: null }),
     selectLogEntry: (id: string) => {
       const s = get(); const log = s.logs.find((l) => l.id === id);
@@ -449,8 +453,12 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       try {
         const clamped = Math.max(0, Math.min(startTick, recording.untilTick));
         replayBattleRecording(recording, 60, clamped);
+        const enrichedRecording: BattleRecording =
+          recording.snapshots && recording.snapshots.length > 0
+            ? recording
+            : { ...recording, snapshots: structuredClone(get().replaySnapshots) };
         set({
-          replayPlayer: { recording, currentTick: clamped, isPlaying: false, speed: 5 },
+          replayPlayer: { recording: enrichedRecording, currentTick: clamped, isPlaying: false, speed: 5 },
           activeModal: 'none',
           timeScale: 0,
         });
@@ -471,7 +479,11 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       if (!player) return;
       const clamped = Math.max(0, Math.min(targetTick, player.recording.untilTick));
       try {
-        replayBattleRecording(player.recording, 60, clamped);
+        if (clamped >= player.currentTick && get().tick === player.currentTick) {
+          advanceReplayRecordingIncremental(player.recording, clamped, 60);
+        } else {
+          replayBattleRecording(player.recording, 60, clamped);
+        }
         const reachedEnd = clamped >= player.recording.untilTick;
         set({
           replayPlayer: {

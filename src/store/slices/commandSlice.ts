@@ -124,6 +124,15 @@ export function createCommandSlice(set: StoreSet) {
       set((s) => {
         const unit = s.units[unitId];
         if (!canCommandUnit(s, unit)) return s;
+        if (
+          unit.waypoints.length === 0 &&
+          unit.navigationMode === 'manual' &&
+          unit.missionTargetId === undefined &&
+          unit.formationLeaderId === undefined &&
+          unit.formationOffset === undefined
+        ) {
+          return s;
+        }
         return {
           units: {
             ...s.units,
@@ -211,6 +220,15 @@ export function createCommandSlice(set: StoreSet) {
         for (const id of uniqueSorted) {
           const unit = s.units[id];
           if (!canCommandUnit(s, unit)) continue;
+          if (
+            unit.waypoints.length === 0 &&
+            unit.navigationMode === 'manual' &&
+            unit.missionTargetId === undefined &&
+            unit.formationLeaderId === undefined &&
+            unit.formationOffset === undefined
+          ) {
+            continue;
+          }
           nextUnits[id] = {
             ...unit,
             waypoints: [],
@@ -890,8 +908,14 @@ export function createCommandSlice(set: StoreSet) {
       }),
 
     removeReferencePoint: (rpId: string) =>
-      set((s) => ({
-        referencePoints: s.referencePoints.filter((r) => r.id !== rpId || r.locked || (s.playMode !== 'sandbox' && r.side !== s.playerSide)),
-      })),
+      set((s) => {
+        const target = s.referencePoints.find((r) => r.id === rpId);
+        if (!target || target.locked || s.battleResult || (s.playMode !== 'sandbox' && target.side !== s.playerSide)) {
+          return s;
+        }
+        return {
+          referencePoints: s.referencePoints.filter((r) => r.id !== rpId),
+        };
+      }),
   };
 }

@@ -316,6 +316,7 @@ export interface UnitSubsystems {
 
 export interface RuntimeUnit {
   id: string;
+  spawnOrder?: number;
   name: string;
   callsign: string;
   side: SideId;

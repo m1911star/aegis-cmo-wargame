@@ -22,7 +22,7 @@ import { getBearingDeg, getDistanceKm, calculateRadarHorizonKm } from '../geomet
 import { launchGuidance } from '../guidance';
 import { effectiveDoctrine } from '../operations';
 import { observeMissile } from '../sensors';
-import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
+import { compareRuntimeUnits, getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
 import { recordWeaponLaunch } from '../unitConfiguration';
 import type { PauseTrigger } from './types';
 
@@ -58,7 +58,9 @@ export function runAutoDefense({
   autoPauseSettings,
   triggerPause,
 }: AutoDefenseContext): string[] {
-  const aliveUnits = Object.values(units).filter(isActiveUnit);
+  const aliveUnits = Object.values(units)
+    .filter(isActiveUnit)
+    .sort(compareRuntimeUnits);
 
   for (const shooter of aliveUnits) {
     const doctrine = effectiveDoctrine(shooter, missions);
@@ -150,9 +152,10 @@ export function runAutoDefense({
         const interceptCount = Math.min(neededInterceptors, selected.availableAmmo, channelCap);
         if (interceptCount <= 0) continue;
         const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some((id) => id !== shooter.id);
+        const shooterAntennaM = catalog.platforms[shooter.platformId]?.radarAntennaHeightM ?? 0;
         const ownHorizonKm = calculateRadarHorizonKm(
           shooter.altitudeM,
-          catalog.platforms[shooter.platformId].radarAntennaHeightM,
+          shooterAntennaM,
           incoming.altitudeM
         );
         for (let index = 0; index < interceptCount; index++) {
@@ -224,11 +227,18 @@ export function runAutoDefense({
     if (readyMounts.length === 0) continue;
 
     const coordinatedContactId = shooter.coordinatedAttack?.contactId;
-    const sideContacts = Object.values(contacts).filter(
-      (contact) => contact.observerSide === shooter.side &&
-        (!coordinatedContactId || contact.id === coordinatedContactId) &&
-        (!coordinatedContactId || nextSimTime - contact.lastDetectedTime <= 5000)
-    );
+    const sideContacts = Object.values(contacts)
+      .filter(
+        (contact) =>
+          contact.observerSide === shooter.side &&
+          (!coordinatedContactId || contact.id === coordinatedContactId) &&
+          (!coordinatedContactId || nextSimTime - contact.lastDetectedTime <= 5000)
+      )
+      .sort((a, b) => {
+        const orderA = units[a.actualUnitId]?.spawnOrder ?? 1_000_000_000;
+        const orderB = units[b.actualUnitId]?.spawnOrder ?? 1_000_000_000;
+        return orderA - orderB || a.id.localeCompare(b.id);
+      });
     if (coordinatedContactId && sideContacts.length === 0) {
       shooter.coordinatedAttack = undefined;
       continue;
@@ -281,6 +291,9 @@ export function runAutoDefense({
         offChannelCap
       );
       if (salvo <= 0) continue;
+      const isAirDrop = weapon.launchMedium === 'air_drop';
+      const launchSpeedKts = isAirDrop ? (weapon.airDropSpeedKts ?? weapon.speedKts) : weapon.speedKts;
+      const launchMaxRangeKm = isAirDrop ? (weapon.airDropRangeKm ?? weapon.maxRangeKm) : weapon.maxRangeKm;
       for (let index = 0; index < salvo; index++) {
         const missileId = `msl_${nextSimTime}_${shooter.id}_${targetId}_${index}`;
         weaponsInFlight[missileId] = {
@@ -295,21 +308,21 @@ export function runAutoDefense({
           position: [...shooter.position],
           launchPosition: [...shooter.position],
           trail: [[...shooter.position]],
-          altitudeM: weapon.launchMedium === 'air_drop' ? shooter.altitudeM : weapon.cruiseAltitudeM,
+          altitudeM: isAirDrop ? shooter.altitudeM : weapon.cruiseAltitudeM,
           heading: getBearingDeg(
             shooter.position,
             contact.estimatedPosition
           ),
-          speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
+          speedKts: launchSpeedKts,
           distanceRemainingKm: distanceKm,
-          maxRangeKm: weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm! : weapon.maxRangeKm,
+          maxRangeKm: launchMaxRangeKm,
           traveledKm: 0,
           basePk: weapon.basePk,
           warheadDamage: weapon.warheadDamage,
           requiresDatalinkBeyondHorizon:
             weapon.requiresDatalinkBeyondHorizon,
           datalinkSupported: true,
-          deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
+          deliveryPhase: isAirDrop ? 'air_drop' : undefined,
           ...launchGuidance(contact),
         };
         matchingMount.currentAmmo -= 1;
@@ -385,7 +398,8 @@ export function runAutoDefense({
   }
 
   const detectedMissileIds: string[] = [];
-  for (const missile of Object.values(weaponsInFlight)) {
+  const sortedInFlight = Object.values(weaponsInFlight).sort((a, b) => a.id.localeCompare(b.id));
+  for (const missile of sortedInFlight) {
     for (const side of ['RED', 'BLUE'] as const) {
       if (missile.side === side) continue;
       const observed = observeMissile(

@@ -5,6 +5,12 @@ export function isActiveUnit(unit: RuntimeUnit): boolean {
   return unit.hp > 0 && unit.status !== 'destroyed' && unit.status !== 'recovered';
 }
 
+export function compareRuntimeUnits(a: RuntimeUnit, b: RuntimeUnit): number {
+  const orderA = a.spawnOrder ?? 1_000_000_000;
+  const orderB = b.spawnOrder ?? 1_000_000_000;
+  return orderA - orderB || a.id.localeCompare(b.id);
+}
+
 // Deliberately coarse game profiles enhanced with subsystem integrity & fire/flooding modifiers.
 export function getUnitCapabilities(unit: RuntimeUnit) {
   const fraction = unit.hp / unit.maxHp;

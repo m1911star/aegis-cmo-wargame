@@ -274,9 +274,9 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
     spawnUnitAtCoordinate: (coord: [number, number]) =>
       set((s) => {
         const cfg = s.pendingSpawnConfig;
-        if (!cfg || s.playMode !== 'sandbox' || s.battleResult) return { interactionMode: 'select' };
+        if (!cfg || s.playMode !== 'sandbox' || s.battleResult) return s;
         const spec = s.catalog.platforms[cfg.platformId];
-        if (!spec) return { interactionMode: 'select' };
+        if (!spec) return s;
 
         const newId = `unit_spawn_${s.tick}_${s.commandSequence}`;
         const defaultGroup =

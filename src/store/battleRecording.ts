@@ -205,6 +205,62 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
   }
 }
 
+export function advanceReplayRecordingIncremental(
+  recording: BattleRecording,
+  targetTick: number,
+  batchTicks = 60
+) {
+  const previous = useWargameStore.getState();
+  if (
+    targetTick < previous.tick ||
+    targetTick > recording.untilTick ||
+    previous.currentScenario.id !== recording.scenario.id ||
+    previous.seed !== recording.seed
+  ) {
+    return replayBattleRecording(recording, batchTicks, targetTick);
+  }
+  if (targetTick === previous.tick) {
+    return canonicalBattleState();
+  }
+
+  try {
+    useWargameStore.setState({
+      autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false },
+    });
+    let index = previous.commandSequence;
+    while (true) {
+      let state = useWargameStore.getState();
+      while (recording.commands[index]?.tick === state.tick) {
+        const command = recording.commands[index++];
+        const action = state[command.action as (typeof COMMAND_ACTIONS)[number]] as (...args: unknown[]) => void;
+        action(...structuredClone(command.args).map((arg) => (arg === null ? undefined : arg)));
+        state = useWargameStore.getState();
+        if (state.commandSequence !== command.sequence + 1) {
+          throw new Error('Recorded command is incompatible with the current rules');
+        }
+      }
+      if (state.tick >= targetTick) break;
+      if (state.battleResult) throw new Error('Recording advances past the end of the battle');
+      const nextCommandTick = recording.commands[index]?.tick ?? targetTick;
+      const ticks = Math.min(batchTicks, nextCommandTick - state.tick, targetTick - state.tick);
+      state.stepSingleTick(ticks * FIXED_DT_SEC);
+    }
+    useWargameStore.setState({
+      autoPause: previous.autoPause,
+      timeScale: 0,
+      pendingRiskEngagement: null,
+      pendingSpawnConfig: null,
+      pendingWeaponIdForEngage: null,
+      pendingStrikeWaypoints: [],
+      interactionMode: 'select',
+    });
+    return canonicalBattleState();
+  } catch {
+    useWargameStore.setState(previous, true);
+    return replayBattleRecording(recording, batchTicks, targetTick);
+  }
+}
+
 export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick?: number) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('Invalid recording header');
