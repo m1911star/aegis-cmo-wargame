@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
 import { resolveUnitConfiguration } from '../../../src/db/unitConfiguration';
 import { getCompiledPolygon, hasRadarLineOfSight, pointInBbox, segmentOverlapsBbox } from '../../../src/engine/environment';
+import { evaluateTargetEcmSuppression, resolveUnitJammingCapability } from '../../../src/engine/sensors';
+import { seekerCanObserve } from '../../../src/engine/guidance';
+import { advanceWeaponPhysics } from '../../../src/engine/simulation/weaponPhysics';
 import { computeMissileEnergyFactor } from '../../../src/engine/guidance';
 import { deriveMissionAssignments } from '../../../src/engine/missions';
 import { evaluateBattleAssessment } from '../../../src/engine/simulation/battleAssessment';
@@ -325,4 +328,179 @@ describe('modular simulation boundaries', () => {
     client.resetRecoveryState();
     client.dispose();
   });
+
+  test('active EW jammers extend standoff escort protection while triggering Home-on-Jam and ARM priority', () => {
+    const jammer = createRuntimeUnitFromPlacement(
+      {
+        id: 'red_y9g',
+        name: 'Y-9G',
+        callsign: 'Y9G-1',
+        side: 'RED',
+        platformId: 'y9g_jammer',
+        parentGroupId: 'red_air',
+        position: [120.0, 25.0],
+        altitudeM: 8000,
+        heading: 90,
+        speedKts: 300,
+        doctrine: { roe: 'hold', emconRadar: false, emconJamming: true },
+      },
+      catalog
+    );
+    const striker = createRuntimeUnitFromPlacement(
+      {
+        id: 'red_striker',
+        name: 'Striker',
+        callsign: 'STRIKE-1',
+        side: 'RED',
+        platformId: 'j20_mighty_dragon',
+        parentGroupId: 'red_air',
+        position: [120.9, 25.0], // ~90 km east: covered by 135 km standoff OECM pod!
+        altitudeM: 9000,
+        heading: 90,
+        speedKts: 500,
+        doctrine: { roe: 'hold', emconRadar: false, emconJamming: false },
+      },
+      catalog
+    );
+    const silentTarget = createRuntimeUnitFromPlacement(
+      {
+        id: 'red_silent',
+        name: 'Silent Radar',
+        callsign: 'SILENT-1',
+        side: 'RED',
+        platformId: 'type052d_destroyer',
+        parentGroupId: 'red_sea',
+        position: [120.05, 25.0],
+        heading: 90,
+        speedKts: 0,
+        doctrine: { roe: 'hold', emconRadar: false, emconJamming: false },
+      },
+      catalog
+    );
+
+    const jamCap = resolveUnitJammingCapability(jammer, catalog);
+    expect(jamCap.strength).toBeGreaterThanOrEqual(0.6);
+    expect(jamCap.effectiveRadiusKm).toBeGreaterThan(100);
+    const escortSuppression = evaluateTargetEcmSuppression(striker, [jammer, striker], catalog);
+    expect(escortSuppression).toBeGreaterThan(0.2);
+
+    // Stealth fighter j20 has tiny radar seeker range (~5.5km) normally, but HOJ against strong jammer gives 60% seeker floor (~10.8km)
+    const aam = catalog.weapons.aim120d_aam;
+    const missileAt10Km: WeaponInFlight = {
+      id: 'msl_hoj',
+      weaponId: aam.id,
+      name: aam.codeName,
+      side: 'BLUE',
+      shooterId: 'blue_f35',
+      shooterName: 'F-35',
+      targetId: jammer.id,
+      targetType: 'unit',
+      position: [120.09, 25.0], // ~9 km from jammer
+      launchPosition: [121.0, 25.0],
+      trail: [[120.09, 25.0]],
+      altitudeM: 8000,
+      heading: 270,
+      speedKts: 2200,
+      distanceRemainingKm: 9,
+      maxRangeKm: aam.maxRangeKm,
+      traveledKm: 80,
+      basePk: aam.basePk,
+      warheadDamage: aam.warheadDamage,
+      seekerState: 'terminal_searching',
+    };
+    const lockedHoj = seekerCanObserve(missileAt10Km, aam, jammer, catalog, false, undefined, [jammer, striker]);
+    expect(lockedHoj).toBe(true);
+    // Turn off jamming on a low-RCS stealth fighter -> seeker cannot lock at 10km without HOJ
+    striker.doctrine.emconJamming = false;
+    const missileOnStealth: WeaponInFlight = {
+      ...missileAt10Km,
+      position: [120.99, 25.0], // ~9 km from striker
+      targetId: striker.id,
+    };
+    expect(seekerCanObserve(missileOnStealth, aam, striker, catalog, false, undefined, [striker])).toBe(false);
+
+    // Area ARM prioritizes active jammer over closer radar-off ship (or non-jammer)
+    const arm = catalog.weapons.ld10_arm;
+    const armMissile: WeaponInFlight = {
+      id: 'msl_arm_area',
+      weaponId: arm.id,
+      name: arm.codeName,
+      side: 'BLUE',
+      shooterId: 'blue_f35',
+      shooterName: 'F-35',
+      targetId: 'area_target',
+      targetType: 'area',
+      position: [120.1, 25.0],
+      launchPosition: [121.0, 25.0],
+      aimPosition: [120.0, 25.0],
+      trail: [[120.1, 25.0]],
+      altitudeM: 9000,
+      heading: 270,
+      speedKts: 2200,
+      distanceRemainingKm: 10,
+      maxRangeKm: arm.maxRangeKm,
+      traveledKm: 60,
+      basePk: arm.basePk,
+      warheadDamage: arm.warheadDamage,
+      seekerState: 'terminal_searching',
+    };
+    silentTarget.doctrine.emconRadar = true; // closer (~5 km) radar emitter, not jamming
+    advanceWeaponPhysics({
+      units: { [jammer.id]: jammer, [silentTarget.id]: silentTarget },
+      contacts: {},
+      weaponsInFlight: { [armMissile.id]: armMissile },
+      previousExplosions: [],
+      catalog,
+      nextSimTime: 1000,
+      dtSec: 0.25,
+      score: emptyScore(),
+      creditedDamage: {},
+      rng: () => 0.99,
+      logs: [],
+      autoPauseSettings: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false },
+      triggerPause: () => undefined,
+    });
+    expect(armMissile.targetId).toBe(jammer.id);
+  });
+
+  test('thermocline attenuates hull sonar more than variable-depth sonar and speed scales cavitation noise nonlinearly', async () => {
+    const { calculateSonarDetectionRangeKm } = await import('../../../src/engine/sensors');
+    const hullSonar = {
+      id: 'hull_sonar_test',
+      name: '舰壳声呐',
+      codeName: 'Hull Sonar',
+      type: 'sonar_passive' as const,
+      maxRangeKm: 30,
+      detectDomains: ['subsurface' as const],
+      isActiveEmitter: false,
+      lookDownCapable: true,
+      frequencyBand: 'LF Passive',
+      description: 'Test hull sonar',
+    };
+    const towedSonar = {
+      id: 'towed_array_sonar_test',
+      name: '拖曳阵列声呐',
+      codeName: 'Towed Array Sonar',
+      type: 'sonar_passive' as const,
+      maxRangeKm: 30,
+      detectDomains: ['subsurface' as const],
+      isActiveEmitter: false,
+      lookDownCapable: true,
+      frequencyBand: 'VLF Passive',
+      description: 'Test towed sonar',
+    };
+
+    const hullSameLayer = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 8, false);
+    const hullCrossLayer = calculateSonarDetectionRangeKm(hullSonar, -20, -180, 95, 8, false);
+    const towedCrossLayer = calculateSonarDetectionRangeKm(towedSonar, 0, -180, 95, 8, false);
+
+    expect(hullCrossLayer).toBeLessThan(hullSameLayer * 0.55);
+    expect(towedCrossLayer).toBeGreaterThan(hullCrossLayer);
+
+    const quietCrawl = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 8, false);
+    const moderateSpeed = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 16, false);
+    const highSpeed = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 24, false);
+    expect(highSpeed - moderateSpeed).toBeGreaterThan(moderateSpeed - quietCrawl);
+  });
 });
+

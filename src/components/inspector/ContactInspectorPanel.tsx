@@ -70,6 +70,11 @@ export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml 
               : '机动正常 / 未见显伤'}
         </span>
       </div>
+      {contact.isJammingDetected && (
+        <div className="p-1.5 rounded bg-purple-500/15 border border-purple-400/40 text-[11px] text-purple-200">
+          强有源干扰源：正在压制雷达烧穿距离；主动/反辐射弹具备 Home-on-Jam 跟踪优势。
+        </div>
+      )}
       <div className="pt-1.5 border-t border-border text-[11px] text-cyan-300">
         探测传感器: {contact.detectedBySources.join(' , ')}
       </div>

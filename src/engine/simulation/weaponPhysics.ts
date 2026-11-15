@@ -172,25 +172,39 @@ export function advanceWeaponPhysics({
     if (missile.targetType === 'area') {
       target = aliveUnits.filter((candidate) =>
         candidate.side !== missile.side && candidate.side !== 'NEUTRAL' &&
-        seekerCanObserve(missile, weapon, candidate, catalog, false, environment)
-      ).sort((a, b) => getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
-        a.id.localeCompare(b.id))[0];
+        seekerCanObserve(missile, weapon, candidate, catalog, false, environment, aliveUnits)
+      ).sort((a, b) => {
+        if (weapon.guidance === 'anti_radiation') {
+          const jamDiff = Number(b.doctrine.emconJamming) - Number(a.doctrine.emconJamming);
+          if (jamDiff !== 0) return jamDiff;
+        }
+        return getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
+          a.id.localeCompare(b.id);
+      })[0];
+      if (target && weapon.guidance === 'anti_radiation' && target.doctrine.emconJamming) {
+        missile.targetId = target.id;
+        missile.targetType = 'unit';
+      }
     } else if (
       missile.targetType === 'unit' &&
       weapon.guidance !== 'semi_active_radar' &&
       (missile.seekerState === 'terminal_searching' || !target || !isActiveUnit(target as RuntimeUnit))
     ) {
       const canStayOnPrimary = target && isActiveUnit(target as RuntimeUnit) &&
-        seekerCanObserve(missile, weapon, target, catalog, false, environment);
+        seekerCanObserve(missile, weapon, target, catalog, false, environment, aliveUnits);
       if (!canStayOnPrimary && missile.seekerState?.startsWith('terminal')) {
         const alternative = aliveUnits.filter((candidate) =>
           candidate.side !== missile.side && candidate.side !== 'NEUTRAL' &&
           candidate.id !== missile.targetId &&
-          seekerCanObserve(missile, weapon, candidate, catalog, false, environment)
-        ).sort((a, b) =>
-          getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
-          a.id.localeCompare(b.id)
-        )[0];
+          seekerCanObserve(missile, weapon, candidate, catalog, false, environment, aliveUnits)
+        ).sort((a, b) => {
+          if (weapon.guidance === 'anti_radiation') {
+            const jamDiff = Number(b.doctrine.emconJamming) - Number(a.doctrine.emconJamming);
+            if (jamDiff !== 0) return jamDiff;
+          }
+          return getDistanceKm(missile.position, a.position) - getDistanceKm(missile.position, b.position) ||
+            a.id.localeCompare(b.id);
+        })[0];
         if (alternative) {
           missile.targetId = alternative.id;
           target = alternative;
@@ -231,7 +245,8 @@ export function advanceWeaponPhysics({
       nextSimTime,
       dtSec,
       target,
-      environment
+      environment,
+      aliveUnits
     );
     const terrainCheck = resolveMissileTerrainInteraction(
       beforePos,

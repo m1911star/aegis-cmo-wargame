@@ -3,6 +3,7 @@ import type { EquipmentCatalog, RuntimeUnit, ScenarioEnvironment, TacticalContac
 import { evaluateWeatherModifiers, hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { computeStrikeRouteDistanceKm, guidanceProfile, trackSupport } from './fireControl';
+import { evaluateTargetEcmSuppression, resolveUnitJammingCapability } from './sensors';
 import { isRadioEmitting, isActiveUnit } from './unitCapabilities';
 
 const move = (position: [number, number], km: number, heading: number) =>
@@ -59,7 +60,8 @@ export function launchGuidance(contact: TacticalContact) {
 // Truth is permitted inside the sensor test and collision resolver, never as an unconditional steering input.
 export function seekerCanObserve(
   missile: WeaponInFlight, weapon: WeaponSpec, target: RuntimeUnit | WeaponInFlight | undefined,
-  catalog: EquipmentCatalog, supportAvailable: boolean, environment?: ScenarioEnvironment
+  catalog: EquipmentCatalog, supportAvailable: boolean, environment?: ScenarioEnvironment,
+  allAliveUnits?: RuntimeUnit[]
 ): boolean {
   if (!target) return false;
   const isUnit = 'platformId' in target;
@@ -94,6 +96,19 @@ export function seekerCanObserve(
   } else if (['active_radar', 'semi_active_radar', 'hypersonic_glide'].includes(weapon.guidance)) {
     const rcs = isUnit ? catalog.platforms[target.platformId]?.rcsM2 ?? 5 : 0.1;
     range *= Math.min(1, Math.pow(Math.max(0.001, rcs) / 5, 0.25));
+    if (isUnit) {
+      const jamStrength = allAliveUnits
+        ? evaluateTargetEcmSuppression(target, allAliveUnits, catalog)
+        : resolveUnitJammingCapability(target, catalog).strength;
+      // Home-on-Jam (HOJ): active radar missiles can home on a strong self-jammer at reduced precision/range floor
+      if (jamStrength > 0) {
+        const ecmRetention = Math.max(0.45, 1 - jamStrength * 0.55);
+        const hojFloorKm = weapon.guidance === 'active_radar' && resolveUnitJammingCapability(target, catalog).strength >= 0.45
+          ? profile.seekerRangeKm * 0.6
+          : 0;
+        range = Math.max(range * ecmRetention, Math.min(profile.seekerRangeKm, hojFloorKm));
+      }
+    }
   }
   return distance <= range;
 }
@@ -116,7 +131,8 @@ export function sweptSeparationKm(
 export function advanceGuidance(
   missile: WeaponInFlight, weapon: WeaponSpec, contact: TacticalContact | undefined,
   units: Record<string, RuntimeUnit>, catalog: EquipmentCatalog, simTime: number, dtSec: number,
-  target: RuntimeUnit | WeaponInFlight | undefined, environment?: ScenarioEnvironment
+  target: RuntimeUnit | WeaponInFlight | undefined, environment?: ScenarioEnvironment,
+  allAliveUnits?: RuntimeUnit[]
 ): { reached: boolean; expired: boolean } {
   const profile = guidanceProfile(weapon);
   const shooter = units[missile.shooterId];
@@ -143,7 +159,7 @@ export function advanceGuidance(
     missile.seekerState.startsWith('terminal') ||
     getDistanceKm(missile.position, missile.aimPosition) <= profile.activationRangeKm
   );
-  const locked = terminal && seekerCanObserve(missile, weapon, target, catalog, support, environment);
+  const locked = terminal && seekerCanObserve(missile, weapon, target, catalog, support, environment, allAliveUnits);
   if (locked && target) {
     missile.seekerState = 'terminal_locked';
     missile.searchElapsedSec = 0;

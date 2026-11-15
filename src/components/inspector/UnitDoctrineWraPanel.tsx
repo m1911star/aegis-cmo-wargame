@@ -1,5 +1,6 @@
 import React from 'react';
 import { Radio } from 'lucide-react';
+import { resolveUnitJammingCapability } from '../../engine/sensors';
 import { useWargameStore } from '../../store/useWargameStore';
 import { domainLabels } from '../../ui/labels';
 import type { Domain, PlatformSpec, ROEStatus, RuntimeUnit, TacticalMission, ThreatLevel } from '../../types/wargame';
@@ -24,7 +25,7 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
   const deployCountermeasure = useWargameStore((s) => s.deployCountermeasure);
   const loadoutLocked = tick > 0 && playMode !== 'sandbox';
   const unitDead = unit.hp <= 0 || unit.status === 'destroyed';
-
+  const jammingCap = resolveUnitJammingCapability(unit, catalog);
   return (
     <div className="space-y-3">
       <div className="stat-line telemetry-heading flex items-center justify-between text-[11px] text-foreground font-semibold">
@@ -102,6 +103,11 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
           </div>
         </button>
       </div>
+      {jammingCap.strength > 0 && (
+        <div className="px-2 py-1 rounded bg-purple-500/15 border border-purple-400/35 text-[10px] text-purple-200">
+          OECM 压制生效中：强度 {Math.round(jammingCap.strength * 100)}% · 伴随掩护半径 {Math.round(jammingCap.effectiveRadiusKm)} km（注意防反辐射/HOJ锁定）
+        </div>
+      )}
 
       <Separator />
 

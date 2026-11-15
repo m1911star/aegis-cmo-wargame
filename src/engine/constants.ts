@@ -50,8 +50,14 @@ export const THERMOCLINE = {
   UPPER_BOUNDARY: -90,
   /** 温跃层下界 (约 -140m) */
   LOWER_BOUNDARY: -140,
-  /** 跨温跃层探测折算系数 */
+  /** 跨温跃层探测折算系数 (默认) */
   CROSS_LAYER_FACTOR: 0.68,
+  /** 舰壳声呐跨温跃层衰减系数 */
+  HULL_CROSS_LAYER_FACTOR: 0.48,
+  /** 拖曳阵/吊放/浮标等变深声呐跨温跃层衰减系数 */
+  VARIABLE_DEPTH_CROSS_LAYER_FACTOR: 0.82,
+  /** 同处深水层(温跃层下方)声道增益 */
+  SAME_DEEP_LAYER_BONUS: 1.05,
 } as const;
 
 /** 主动声呐探测主动雷达目标的探测距离加成 */
@@ -67,8 +73,10 @@ export const SONAR_DETECTION = {
   MIN_ACOUSTIC_FACTOR: 0.35,
   /** 航速噪声阈值 (节) */
   SPEED_NOISE_THRESHOLD: 10,
-  /** 航速噪声系数 (每节增益) */
-  SPEED_NOISE_COEFFICIENT: 0.035,
+  /** 航速噪声系数 (非线性空化增益) */
+  SPEED_NOISE_COEFFICIENT: 0.018,
+  /** 航速噪声非线性指数 */
+  SPEED_NOISE_EXPONENT: 1.5,
 } as const;
 
 // ---------------------------------------------------------------------------

@@ -150,16 +150,32 @@ export function calculateSonarDetectionRangeKm(
     return sensor.maxRangeKm * ACTIVE_SONAR_PING_BONUS;
   }
 
+  const isVariableDepth = /towed|dipping|sonobuoy|dicass|difar|vds/i.test(
+    `${sensor.id} ${sensor.name} ${sensor.codeName ?? ''}`
+  );
+  const effectiveObserverAltM =
+    isVariableDepth && observerAltM >= 0 ? THERMOCLINE.LOWER_BOUNDARY - 10 : observerAltM;
+
   const acrossThermocline =
-    (observerAltM > THERMOCLINE.UPPER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY) ||
-    (observerAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM > THERMOCLINE.UPPER_BOUNDARY);
-  const thermoclineFactor = acrossThermocline ? THERMOCLINE.CROSS_LAYER_FACTOR : 1.0;
+    (effectiveObserverAltM > THERMOCLINE.UPPER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY) ||
+    (effectiveObserverAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM > THERMOCLINE.UPPER_BOUNDARY);
+  const sameDeepLayer =
+    effectiveObserverAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY;
+  const thermoclineFactor = acrossThermocline
+    ? (isVariableDepth
+        ? THERMOCLINE.VARIABLE_DEPTH_CROSS_LAYER_FACTOR
+        : THERMOCLINE.HULL_CROSS_LAYER_FACTOR)
+    : sameDeepLayer
+      ? THERMOCLINE.SAME_DEEP_LAYER_BONUS
+      : 1.0;
 
   if (sensor.type === 'sonar_active') {
     return sensor.maxRangeKm * thermoclineFactor;
   }
 
-  const speedNoiseBonus = 1 + Math.max(0, targetSpeedKts - SONAR_DETECTION.SPEED_NOISE_THRESHOLD) * SONAR_DETECTION.SPEED_NOISE_COEFFICIENT;
+  const excessSpeed = Math.max(0, targetSpeedKts - SONAR_DETECTION.SPEED_NOISE_THRESHOLD);
+  const speedNoiseBonus =
+    1 + Math.pow(excessSpeed, SONAR_DETECTION.SPEED_NOISE_EXPONENT) * SONAR_DETECTION.SPEED_NOISE_COEFFICIENT;
   const acousticFactor = Math.max(
     SONAR_DETECTION.MIN_ACOUSTIC_FACTOR,
     (targetAcousticDb - SONAR_DETECTION.BASELINE_ACOUSTIC_DB) / SONAR_DETECTION.ACOUSTIC_NORMALIZATION
@@ -242,30 +258,53 @@ export function getContactSidc(
 }
 
 /**
- * 评估目标当前享有的友军电子战伴随干扰 (Escort Jamming) + 自卫干扰综合压制系数 (0.0 - 0.75)
+ * 计算单位当前开启 OECM 后的有效干扰压制强度 (0.0 - 0.75) 与覆盖半径 (km)
+ * 同时考虑平台基础 ecmStrength 与挂载的 ecm_jammer 传感器功率 (jammingPowerKw / maxRangeKm)
+ */
+export function resolveUnitJammingCapability(
+  unit: RuntimeUnit,
+  catalog: EquipmentCatalog
+): { strength: number; effectiveRadiusKm: number } {
+  if (!isActiveUnit(unit) || !unit.doctrine.emconJamming || getUnitCapabilities(unit).radarFactor <= 0) {
+    return { strength: 0, effectiveRadiusKm: 0 };
+  }
+  const config = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
+  let strength = config.platform.ecmStrength ?? 0;
+  let effectiveRadiusKm = strength > 0 ? 75 : 0;
+  for (const sensorId of config.sensorIds) {
+    const sensor = catalog.sensors[sensorId];
+    if (!sensor || sensor.type !== 'ecm_jammer') continue;
+    const podStrength = Math.min(0.75, Math.max(0.25, (sensor.jammingPowerKw ?? 90) / 200));
+    if (podStrength > strength) strength = podStrength;
+    const podRadius = Math.max(75, Math.min(180, sensor.maxRangeKm * 0.45));
+    if (podRadius > effectiveRadiusKm) effectiveRadiusKm = podRadius;
+  }
+  return {
+    strength: Math.min(0.75, Math.max(0, strength)),
+    effectiveRadiusKm,
+  };
+}
+
+/**
+ * 评估目标当前享有的友军电子战伴随/防区外干扰 + 自卫干扰综合压制系数 (0.0 - 0.75)
  */
 export function evaluateTargetEcmSuppression(
   target: RuntimeUnit,
   allAliveUnits: RuntimeUnit[],
   catalog: EquipmentCatalog
 ): number {
-  const targetSpec = catalog.platforms[target.platformId];
-  let bestEcm =
-    isActiveUnit(target) && getUnitCapabilities(target).radarFactor > 0 && target.doctrine.emconJamming && targetSpec?.ecmStrength
-      ? targetSpec.ecmStrength
-      : 0;
+  let bestEcm = resolveUnitJammingCapability(target, catalog).strength;
 
-  // 检查 75km 伴随半径内是否有开启 OECM 干扰的友军电子战机或大型舰艇
+  // 检查有效干扰半径内是否有开启 OECM 干扰的友军电子战机或大型舰艇
   for (const ally of allAliveUnits) {
-    if (!isActiveUnit(ally) || !getUnitCapabilities(ally).radarFactor) continue;
     if (ally.side !== target.side || ally.id === target.id) continue;
-    if (!ally.doctrine.emconJamming) continue;
-    const allySpec = catalog.platforms[ally.platformId];
-    if (!allySpec || !allySpec.ecmStrength) continue;
+    const allyJamming = resolveUnitJammingCapability(ally, catalog);
+    if (allyJamming.strength <= 0 || allyJamming.effectiveRadiusKm <= 0) continue;
 
     const distKm = getDistanceKm(ally.position, target.position);
-    if (distKm <= 75) {
-      const escortEffect = allySpec.ecmStrength * (1 - distKm / 120);
+    if (distKm <= allyJamming.effectiveRadiusKm) {
+      const falloffDenominator = allyJamming.effectiveRadiusKm * 1.45;
+      const escortEffect = allyJamming.strength * (1 - distKm / falloffDenominator);
       if (escortEffect > bestEcm) {
         bestEcm = escortEffect;
       }
@@ -364,10 +403,7 @@ export function computeContactsOnly(
     observerSensorMeta.set(unit.id, { sensors, domains });
   }
   const activeJammers = aliveUnits.filter(
-    (unit) =>
-      unit.doctrine.emconJamming &&
-      (capabilitiesById.get(unit.id)?.radarFactor ?? 0) > 0 &&
-      (catalog.platforms[unit.platformId]?.ecmStrength ?? 0) > 0
+    (unit) => resolveUnitJammingCapability(unit, catalog).strength > 0
   );
   const emittingCache = new Map<string, boolean>();
   const getIsEmitting = (unit: RuntimeUnit): boolean => {
@@ -769,7 +805,7 @@ export function computeContactsOnly(
           detectedBySources: Array.from(new Set(detectingSources)).slice(0, 3),
           sourceUnitIds,
           fireControlSourceIds: [...new Set(fireControlSourceIds)],
-          isJammingDetected: target.doctrine.emconJamming,
+          isJammingDetected: resolveUnitJammingCapability(target, catalog).strength > 0,
           emitterObserved,
           lastEmitterDetectedTime: emitterObserved ? nextSimTime : prevContact?.lastEmitterDetectedTime,
           threatLevel,
