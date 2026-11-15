@@ -2,6 +2,7 @@ import type {
   AutoPauseSettings,
   CombatLogEntry,
   EquipmentCatalog,
+  PendingTotStrikeOrder,
   RuntimeUnit,
   ScenarioEnvironment,
   ScoreLedger,
@@ -417,4 +418,114 @@ export function runAutoDefense({
     }
   }
   return detectedMissileIds;
+}
+
+export function processPendingTotStrikeOrders(
+  orders: PendingTotStrikeOrder[],
+  units: Record<string, RuntimeUnit>,
+  contacts: Record<string, TacticalContact>,
+  missions: TacticalMission[],
+  weaponsInFlight: Record<string, WeaponInFlight>,
+  catalog: EquipmentCatalog,
+  nextSimTime: number,
+  score: ScoreLedger,
+  logs: CombatLogEntry[]
+): PendingTotStrikeOrder[] {
+  if (!orders.length) return [];
+  const remaining: PendingTotStrikeOrder[] = [];
+  const sorted = [...orders].sort(
+    (a, b) => a.launchAtSimTime - b.launchAtSimTime || a.orderId.localeCompare(b.orderId)
+  );
+
+  for (const order of sorted) {
+    if (order.launchAtSimTime > nextSimTime + 1e-6) {
+      remaining.push(order);
+      continue;
+    }
+    const shooter = units[order.shooterId];
+    const contact = contacts[order.contactId];
+    const weapon = catalog.weapons[order.weaponId];
+    if (!shooter || !isActiveUnit(shooter) || !getUnitCapabilities(shooter).canFire || !contact || !weapon) {
+      continue;
+    }
+    const mount = shooter.mounts.find((m) => m.weaponId === order.weaponId && m.currentAmmo > 0);
+    if (!mount) continue;
+    if (mount.cooldownRemainingSec > 0) {
+      if (nextSimTime - order.launchAtSimTime <= 15_000) {
+        remaining.push(order);
+      }
+      continue;
+    }
+    const fireUnit = { ...shooter, doctrine: effectiveDoctrine(shooter, missions) };
+    const solution = evaluateFireControl(
+      fireUnit,
+      contact,
+      mount,
+      weapon,
+      catalog,
+      units,
+      nextSimTime,
+      'manual',
+      weaponsInFlight,
+      order.doglegWaypoints
+    );
+    if (solution.status === 'blocked' || !solution.distanceKm) {
+      continue;
+    }
+    const salvo = Math.min(order.salvoCount, mount.currentAmmo);
+    if (salvo <= 0) continue;
+    const areaAttack = weapon.guidance === 'anti_radiation' && contact.lastEmitterDetectedTime !== undefined;
+    const firstLegTarget = order.doglegWaypoints?.[0] ?? contact.estimatedPosition;
+
+    for (let i = 0; i < salvo; i++) {
+      const missileId = `tot_${order.orderId}_${i}`;
+      weaponsInFlight[missileId] = {
+        id: missileId,
+        weaponId: weapon.id,
+        name: weapon.codeName,
+        side: shooter.side,
+        shooterId: shooter.id,
+        shooterName: shooter.callsign,
+        targetId: areaAttack ? contact.id : contact.actualUnitId,
+        targetType: areaAttack ? 'area' : 'unit',
+        position: [...shooter.position],
+        launchPosition: [...shooter.position],
+        trail: [[...shooter.position]],
+        altitudeM: weapon.launchMedium === 'air_drop' ? shooter.altitudeM : weapon.cruiseAltitudeM,
+        heading: getBearingDeg(shooter.position, firstLegTarget),
+        speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
+        distanceRemainingKm: solution.distanceKm,
+        maxRangeKm: weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm! : weapon.maxRangeKm,
+        traveledKm: 0,
+        basePk: weapon.basePk,
+        warheadDamage: weapon.warheadDamage,
+        requiresDatalinkBeyondHorizon: weapon.requiresDatalinkBeyondHorizon,
+        datalinkSupported: solution.supportSourceIds.length > 0,
+        deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
+        waypoints: order.doglegWaypoints?.map((wp) => [...wp] as [number, number]),
+        ...launchGuidance(contact),
+      };
+      mount.currentAmmo -= 1;
+      if (shooter.side === 'RED') score.redMissilesFired += 1;
+      else score.blueMissilesFired += 1;
+    }
+    mount.cooldownRemainingSec = mount.reloadTimeSec * getUnitCapabilities(shooter).reloadFactor;
+    recordWeaponLaunch(shooter, mount, salvo, nextSimTime);
+    shooter.status = 'engaged';
+    logs.push({
+      id: `tot_launch_${nextSimTime}_${order.orderId}`,
+      simTime: nextSimTime,
+      side: shooter.side,
+      category: 'LAUNCH',
+      severity: 'warning',
+      title: `[TOT同时弹着升空] ${shooter.callsign} 按计划释放 ${salvo} 枚 ${weapon.codeName}`,
+      message: `预定弹着窗口 T+${Math.round((order.plannedImpactSimTime - nextSimTime) / 1000)}s，与友邻波次同步突防。`,
+      position: [...shooter.position],
+      unitId: shooter.id,
+      weaponId: weapon.id,
+      targetUnitId: areaAttack ? undefined : contact.actualUnitId,
+      quantity: salvo,
+    });
+  }
+  return remaining;
 }

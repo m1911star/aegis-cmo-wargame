@@ -41,6 +41,7 @@ export type TacticalProjectionInput = {
   selectedContactId: string | null;
   hoveredContactId?: string | null;
   pendingWeaponIdForEngage?: string | null;
+  pendingStrikeWaypoints?: readonly [number, number][];
   mapLayers: ProjectionLayers;
   catalog: EquipmentCatalog;
   simTime: number;
@@ -113,7 +114,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
   const {
     units, contacts, weaponsInFlight, explosions, missions, referencePoints,
     activePerspective, selectedUnitId, selectedUnitIds, selectedContactId, hoveredContactId,
-    pendingWeaponIdForEngage, mapLayers, catalog, simTime,
+    pendingWeaponIdForEngage, pendingStrikeWaypoints, mapLayers, catalog, simTime,
     environment, objectives,
   } = input;
   const selectedSet = new Set<string>(selectedUnitIds ?? (selectedUnitId ? [selectedUnitId] : []));
@@ -332,10 +333,20 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       geometry: { type: 'Point', coordinates: effect.position } }));
 
   const fireControlLinks: GeoJSON.Feature[] = [];
-  // 1. Active midcourse datalink lines for friendly missiles in flight
+  // 1. Active midcourse datalink lines and dogleg planned legs for friendly missiles in flight
   for (const missile of Object.values(weaponsInFlight)) {
-    if (!missile.datalinkSupported || !missile.seekerState?.startsWith('midcourse')) continue;
     if (activePerspective !== 'GOD' && missile.side !== activePerspective) continue;
+    if (missile.waypoints && missile.waypoints.length > 0 && missile.aimPosition) {
+      fireControlLinks.push({
+        type: 'Feature',
+        properties: { linkKind: 'aim_risky', id: `dogleg_missile_${missile.id}` },
+        geometry: {
+          type: 'LineString',
+          coordinates: [missile.position, ...missile.waypoints, missile.aimPosition],
+        },
+      });
+    }
+    if (!missile.datalinkSupported || !missile.seekerState?.startsWith('midcourse')) continue;
     const shooter = units[missile.shooterId];
     if (shooter && isActiveUnit(shooter)) {
       fireControlLinks.push({
@@ -365,7 +376,9 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
         catalog,
         units,
         simTime,
-        'manual'
+        'manual',
+        weaponsInFlight,
+        pendingStrikeWaypoints
       );
       const linkKind =
         solution.status === 'executable'
@@ -373,12 +386,17 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
           : solution.status === 'risky'
             ? 'aim_risky'
             : 'aim_blocked';
+      const strikeCoords: [number, number][] = [
+        previewShooter.position,
+        ...(pendingStrikeWaypoints ?? []),
+        previewContact.estimatedPosition,
+      ];
       fireControlLinks.push({
         type: 'Feature',
         properties: { linkKind, id: `fc_aim_${previewShooter.id}_${previewContact.id}` },
         geometry: {
           type: 'LineString',
-          coordinates: [previewShooter.position, previewContact.estimatedPosition],
+          coordinates: strikeCoords,
         },
       });
       const midPoint: [number, number] = [

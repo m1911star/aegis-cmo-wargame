@@ -159,6 +159,7 @@ export function extractSimulationWorldState(s: WargameStoreState): SimulationWor
     missions: s.missions,
     events: s.events,
     pendingSortieOrders: s.pendingSortieOrders,
+    pendingTotStrikeOrders: s.pendingTotStrikeOrders,
     environment: s.environment,
     victoryConditions: s.currentScenario.victoryConditions,
     score: s.score,
@@ -245,6 +246,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     missions: initialBoot.missions,
     events: initialBoot.events,
     pendingSortieOrders: initialBoot.pendingSortieOrders,
+    pendingTotStrikeOrders: [],
     environment: initialBoot.environment,
     referencePoints: initialBoot.referencePoints,
     logs: initialBoot.logs,
@@ -256,6 +258,14 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     interactionMode: 'select' as const,
     pendingWeaponIdForEngage: null,
     pendingSalvoCount: 2,
+    pendingStrikeWaypoints: [],
+    appendPendingStrikeWaypoint: (coord: [number, number]) =>
+      set((s) => {
+        if (!Array.isArray(coord) || coord.length !== 2 || !Number.isFinite(coord[0]) || !Number.isFinite(coord[1])) return s;
+        if (s.pendingStrikeWaypoints.length >= 4) return s;
+        return { pendingStrikeWaypoints: [...s.pendingStrikeWaypoints, [...coord] as [number, number]] };
+      }),
+    clearPendingStrikeWaypoints: () => set({ pendingStrikeWaypoints: [] }),
     pendingSpawnConfig: null,
     mapLayers: {
       showRadarRings: true,
@@ -281,7 +291,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           seed: boot.seed, rngState: boot.rngState, tick: 0, pendingSimSeconds: 0,
           commandSequence: 0, commandHistory: [], replaySnapshots: [], objectiveProgress: {}, objectiveHoldProgress: {}, battleResult: undefined,
           creditedDamage: {}, detectedMissileIds: [], aar: boot.aar, pendingRiskEngagement: null,
-          pendingSpawnConfig: null, pendingWeaponIdForEngage: null,
+          pendingSpawnConfig: null, pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [],
           currentScenario: boot.scenario,
           availableScenarios: exists
             ? state.availableScenarios
@@ -300,6 +310,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           missions: boot.missions,
           events: boot.events,
           pendingSortieOrders: boot.pendingSortieOrders,
+          pendingTotStrikeOrders: [],
           environment: boot.environment,
           referencePoints: boot.referencePoints,
           logs: boot.logs,
@@ -544,6 +555,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
             missions: result.nextState.missions,
             events: result.nextState.events || prev.events,
             pendingSortieOrders: result.nextState.pendingSortieOrders ?? prev.pendingSortieOrders,
+            pendingTotStrikeOrders: result.nextState.pendingTotStrikeOrders ?? prev.pendingTotStrikeOrders,
             groups: prev.groups,
             objectives: result.nextState.objectives ?? prev.objectives,
             environment: result.nextState.environment ?? prev.environment,
@@ -581,6 +593,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           missions: result.nextState.missions,
           events: result.nextState.events || prev.events,
           pendingSortieOrders: result.nextState.pendingSortieOrders ?? prev.pendingSortieOrders,
+          pendingTotStrikeOrders: result.nextState.pendingTotStrikeOrders ?? prev.pendingTotStrikeOrders,
           environment: result.nextState.environment ?? prev.environment,
           score: result.nextState.score,
           timeScale: result.shouldAutoPause ? 0 : prev.timeScale,
@@ -670,7 +683,11 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       set({ selectedContactId: contact?.id ?? null, interactionMode: 'select' });
     },
 
-    setInteractionMode: (mode: WargameStoreState['interactionMode']) => set({ interactionMode: mode }),
+    setInteractionMode: (mode: WargameStoreState['interactionMode']) =>
+      set((s) => ({
+        interactionMode: mode,
+        pendingStrikeWaypoints: mode === 'manual_engage' ? s.pendingStrikeWaypoints : [],
+      })),
 
     startManualEngage: (weaponId?: string, salvoCount = 2) => {
       const s = get(); if (!canCommandUnit(s, s.units[s.selectedUnitId ?? ''])) return;
@@ -678,6 +695,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         interactionMode: 'manual_engage',
         pendingWeaponIdForEngage: weaponId || null,
         pendingSalvoCount: salvoCount,
+        pendingStrikeWaypoints: [],
       });
     },
 

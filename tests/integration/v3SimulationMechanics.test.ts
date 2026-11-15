@@ -6,9 +6,12 @@ import { computeFlightProfileAltitudeM, launchGuidance } from '../../src/engine/
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
-import { createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
+import { createRuntimeUnitFromPlacement, stepSimulationWorld } from '../../src/engine/simulationEngine';
 import { buildSensorEnvelopeFeature } from '../../src/map/tacticalProjection';
-import type { CombatLogEntry, InitialUnitPlacement, ScoreLedger, TacticalContact, WeaponInFlight } from '../../src/types/wargame';
+import { SCENARIO_EAST_SEA_THUNDER } from '../../src/scenarios/builtinScenarios';
+import { captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../src/store/battleRecording';
+import { useWargameStore as store } from '../../src/store/useWargameStore';
+import type { CombatLogEntry, InitialUnitPlacement, ScenarioDefinition, ScoreLedger, TacticalContact, WeaponInFlight } from '../../src/types/wargame';
 
 const emptyScore = (): ScoreLedger => ({
   redLosses: 0,
@@ -398,5 +401,156 @@ describe('Module 3: Platform guidance channel saturation & 3-tier HGV/ballistic 
     expect(evaluateFireControl(ddg, highGlideTrack, sm6Mount, catalog.weapons.sm6_eram, catalog, { ddg, ffg }, 0, 'defense').status).toBe('blocked');
     highGlideTrack.altitudeM = 6000;
     expect(evaluateFireControl(ffg, highGlideTrack, essmMount, catalog.weapons.essm_blk2, catalog, { ddg, ffg }, 0, 'defense').status).toBe('executable');
+  });
+});
+
+describe('Module 4: Missile dogleg waypoints & multi-unit synchronized TOT strikes', () => {
+  test('dogleg waypoints route sea-skimming missiles around high island ridges and enforce total polyline range', () => {
+    const islandEnv = {
+      landPolygons: [
+        {
+          id: 'high_island',
+          name: 'High Island',
+          elevationM: 900,
+          areaPolygon: [[0.18, -0.15], [0.32, -0.15], [0.32, 0.15], [0.18, 0.15]] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    const scenario: ScenarioDefinition = {
+      ...structuredClone(SCENARIO_EAST_SEA_THUNDER),
+      units: [
+        placement('red_ship', {
+          platformId: 'type052d_destroyer',
+          position: [0, 0],
+          doctrine: { roe: 'hold', emconRadar: false },
+        }),
+        placement('red_awacs', {
+          platformId: 'kj500_awacs',
+          parentGroupId: 'red_air_cmd',
+          position: [0.25, 0.3],
+          altitudeM: 9200,
+          doctrine: { roe: 'hold', emconRadar: true },
+        }),
+        placement('blue_ship', {
+          side: 'BLUE',
+          platformId: 'constellation_ffg',
+          parentGroupId: 'blue_desron15',
+          position: [0.5, 0],
+          doctrine: { roe: 'hold', emconRadar: false },
+        }),
+      ],
+      missions: [],
+      events: [],
+      objectives: [],
+      referencePoints: [],
+      environment: islandEnv,
+      victoryConditions: undefined,
+    };
+
+    store.getState().loadScenario(scenario, false, 404);
+    const pausesOff = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
+    store.setState({ autoPause: pausesOff });
+    // Ensure AWACS high-altitude contact is established
+    store.getState().stepSingleTick(1);
+    const contactId = 'RED_CONTACT_blue_ship';
+    expect(store.getState().contacts[contactId]).toBeDefined();
+
+    // Out-of-range dogleg detour (>540km) is rejected at fire-control boundary
+    const yj18Mount = store.getState().units.red_ship.mounts.find((m) => m.weaponId === 'yj18_ashm')!;
+    expect(
+      evaluateFireControl(
+        store.getState().units.red_ship,
+        store.getState().contacts[contactId],
+        yj18Mount,
+        catalog.weapons.yj18_ashm,
+        catalog,
+        store.getState().units,
+        store.getState().simTime,
+        'manual',
+        {},
+        [[4.0, 4.0]]
+      ).status
+    ).toBe('blocked');
+
+    // 1) Direct straight-line launch crashes into the 900m island ridge!
+    store.getState().executeManualEngage('red_ship', contactId, 'yj18_ashm', 1, true);
+    store.getState().stepSingleTick(60);
+    expect(store.getState().logs.some((l) => l.title.includes('撞击高地山脊坠毁'))).toBe(true);
+
+    // 2) Dogleg launch via northern sea channel [0.25, 0.22] bypasses island and reaches terminal phase!
+    store.getState().loadScenario(scenario, false, 404);
+    store.setState({ autoPause: pausesOff });
+    store.getState().stepSingleTick(1);
+    store.getState().executeManualEngage('red_ship', contactId, 'yj18_ashm', 1, true, [[0.25, 0.22]]);
+    const launched = Object.values(store.getState().weaponsInFlight)[0];
+    expect(launched.waypoints).toEqual([[0.25, 0.22]]);
+
+    store.getState().stepSingleTick(45);
+    // At 45s (~42 km traveled), missile has cleanly rounded the northern dogleg [0.25, 0.22] without hitting the island!
+    expect(store.getState().logs.some((l) => l.title.includes('撞击高地山脊坠毁'))).toBe(false);
+    const midAfterTurn = Object.values(store.getState().weaponsInFlight)[0];
+    expect(midAfterTurn).toBeDefined();
+    expect(midAfterTurn.waypoints).toBeUndefined();
+
+    // Advance another 50s -> reaches target and resolves terminal engagement!
+    store.getState().stepSingleTick(50);
+    expect(store.getState().logs.some((l) => l.title.includes('撞击高地山脊坠毁'))).toBe(false);
+    expect(store.getState().logs.some((l) => l.title.includes('末段攻击结束'))).toBe(true);
+  });
+
+  test('scheduleTotStrike staggers subsonic and supersonic launches for simultaneous arrival and replays across batches', () => {
+    const scenario: ScenarioDefinition = {
+      ...structuredClone(SCENARIO_EAST_SEA_THUNDER),
+      units: [
+        placement('slow_lhd', {
+          platformId: 'type075_lhd', // YJ-83K subsonic (560 kts)
+          position: [0, 0],
+          doctrine: { roe: 'hold', emconRadar: true, salvoSize: 1 },
+        }),
+        placement('fast_ddg', {
+          platformId: 'type052d_destroyer', // YJ-18 supersonic (1850 kts)
+          position: [0, 0.05],
+          doctrine: { roe: 'hold', emconRadar: true, salvoSize: 1 },
+        }),
+        placement('enemy_target', {
+          side: 'BLUE',
+          platformId: 'arleigh_burke_flt3',
+          parentGroupId: 'blue_desron15',
+          position: [0.6, 0], // ~66 km away
+          doctrine: { roe: 'hold', emconRadar: false },
+        }),
+      ],
+      missions: [],
+      events: [],
+      objectives: [],
+      referencePoints: [],
+      environment: undefined,
+      victoryConditions: undefined,
+    };
+
+    store.getState().loadScenario(scenario, false, 818);
+    store.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
+    store.getState().scheduleTotStrike(['slow_lhd', 'fast_ddg'], 'RED_CONTACT_enemy_target', 1);
+
+    const orders = store.getState().pendingTotStrikeOrders;
+    expect(orders).toHaveLength(2);
+    const slowOrder = orders.find((o) => o.shooterId === 'slow_lhd')!;
+    const fastOrder = orders.find((o) => o.shooterId === 'fast_ddg')!;
+    expect(slowOrder.plannedImpactSimTime).toBe(fastOrder.plannedImpactSimTime);
+    // Slow subsonic missile MUST launch much earlier than fast supersonic missile!
+    expect(slowOrder.launchAtSimTime).toBeLessThan(fastOrder.launchAtSimTime - 60_000);
+
+    // Step 10s: slow missile is already airborne while fast missile is still holding on the rail
+    store.getState().stepSingleTick(10);
+    expect(Object.values(store.getState().weaponsInFlight).map((m) => m.shooterId)).toEqual(['slow_lhd']);
+    expect(store.getState().pendingTotStrikeOrders).toHaveLength(1);
+
+    // Replay deterministically across speed batches
+    const expected = canonicalBattleState();
+    const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
+    for (const batch of [1, 15, 60]) {
+      expect(replayBattleRecording(recording, batch)).toEqual(expected);
+    }
   });
 });

@@ -102,6 +102,24 @@ export function trackSupport(
   });
 }
 
+export function computeStrikeRouteDistanceKm(
+  origin: [number, number],
+  aimpoint: [number, number],
+  doglegWaypoints?: readonly [number, number][]
+): number {
+  if (!doglegWaypoints || doglegWaypoints.length === 0) {
+    return getDistanceKm(origin, aimpoint);
+  }
+  let total = 0;
+  let prev = origin;
+  for (const wp of doglegWaypoints) {
+    total += getDistanceKm(prev, wp);
+    prev = wp;
+  }
+  total += getDistanceKm(prev, aimpoint);
+  return total;
+}
+
 export function weaponLaunchRangeKm(weapon: WeaponSpec): number {
   return weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm ?? 0 : weapon.maxRangeKm;
 }
@@ -151,7 +169,8 @@ export function evaluateFireControl(
   attacker: RuntimeUnit, contact: TacticalContact | undefined, mount: RuntimeWeaponMount,
   weapon: WeaponSpec, catalog: EquipmentCatalog, units: Record<string, RuntimeUnit>,
   simTime: number, mode: 'manual' | 'automatic' | 'defense' = 'manual',
-  weaponsInFlight?: Record<string, WeaponInFlight>
+  weaponsInFlight?: Record<string, WeaponInFlight>,
+  doglegWaypoints?: readonly [number, number][]
 ): FireControlSolution {
   const hardBlockReasons: string[] = [];
   const riskWarnings: string[] = [];
@@ -178,7 +197,7 @@ export function evaluateFireControl(
   let withinNez: boolean | undefined;
   let estimatedTofSec: number | undefined;
   if (contact) {
-    distanceKm = getDistanceKm(attacker.position, contact.estimatedPosition);
+    distanceKm = computeStrikeRouteDistanceKm(attacker.position, contact.estimatedPosition, doglegWaypoints);
     trackAgeSec = Math.max(0, (simTime - contact.lastDetectedTime) / 1000);
     withinNez = distanceKm >= weapon.minRangeKm && distanceKm <= nezRangeKm;
     estimatedTofSec = estimateWeaponTimeOfFlightSec(distanceKm, weapon);
@@ -191,7 +210,16 @@ export function evaluateFireControl(
         );
       }
     }
-    if (distanceKm > weaponLaunchRangeKm(weapon) || distanceKm < weapon.minRangeKm) hardBlockReasons.push('已知瞄准点不在武器射程内');
+    if (doglegWaypoints && doglegWaypoints.length > 0 && weapon.launchMedium === 'air_drop') {
+      hardBlockReasons.push('空投鱼雷不支持中段转折航点规划');
+    }
+    if (distanceKm > weaponLaunchRangeKm(weapon) || distanceKm < weapon.minRangeKm) {
+      hardBlockReasons.push(
+        doglegWaypoints && doglegWaypoints.length > 0
+          ? `转折航路总长 (${distanceKm.toFixed(1)} km) 超出武器最大射程`
+          : '已知瞄准点不在武器射程内'
+      );
+    }
     if (trackAgeSec > profile.maxTrackAgeSec) riskWarnings.push(`情报已陈旧（${trackAgeSec.toFixed(1)} 秒未更新）`);
     if (contact.uncertaintyRadiusKm > profile.maxUncertaintyKm) riskWarnings.push(`定位误差 ±${contact.uncertaintyRadiusKm.toFixed(1)} km，存在搜索失败风险`);
     if (contact.classification === 'unknown') riskWarnings.push('目标尚未分类');

@@ -15,7 +15,7 @@ import type {
   WeaponInFlight,
 } from '../../types/wargame';
 import { advanceAirRefueling } from './airRefueling';
-import { runAutoDefense } from './autoDefense';
+import { processPendingTotStrikeOrders, runAutoDefense } from './autoDefense';
 import { resolveEventsAndObjectives } from './eventResolver';
 import { runEvasionAndSoftKill } from './evasion';
 import type {
@@ -96,6 +96,7 @@ function cloneWorldForStepping(world: SimulationWorldState): WorkingWorldState {
       ...weapon,
       position: [...weapon.position],
       trail: [...weapon.trail],
+      waypoints: weapon.waypoints ? weapon.waypoints.map((wp) => [...wp] as [number, number]) : undefined,
     };
   }
   const events: RuntimeScenarioEvent[] = (world.events || []).map((event) => ({
@@ -113,6 +114,10 @@ function cloneWorldForStepping(world: SimulationWorldState): WorkingWorldState {
     missions: deriveMissionAssignments(world.missions, units),
     events,
     pendingSortieOrders: (world.pendingSortieOrders ?? []).map((order) => ({ ...order })),
+    pendingTotStrikeOrders: (world.pendingTotStrikeOrders ?? []).map((order) => ({
+      ...order,
+      doglegWaypoints: order.doglegWaypoints ? order.doglegWaypoints.map((wp) => [...wp] as [number, number]) : undefined,
+    })),
     score: {
       ...world.score,
       firedEventIds: [...(world.score.firedEventIds || [])],
@@ -160,6 +165,7 @@ function stepWorkingWorldInPlace(
   const missions = deriveMissionAssignments(world.missions, units);
   const events = (world.events || []) as RuntimeScenarioEvent[];
   let pendingSortieOrders = world.pendingSortieOrders ?? (world.pendingSortieOrders = []);
+  let pendingTotStrikeOrders = world.pendingTotStrikeOrders ?? (world.pendingTotStrikeOrders = []);
   const score = world.score;
   const creditedDamage = world.creditedDamage ?? (world.creditedDamage = {});
   const aar = world.aar ?? (world.aar = createAarLedger());
@@ -224,6 +230,18 @@ function stepWorkingWorldInPlace(
   for (const log of sensed.logs) {
     triggerPause(autoPauseSettings.onNewContact, log.title, log.side);
   }
+
+  pendingTotStrikeOrders = processPendingTotStrikeOrders(
+    pendingTotStrikeOrders,
+    units,
+    contacts,
+    missions,
+    weaponsInFlight,
+    catalog,
+    nextSimTime,
+    score,
+    logs
+  );
 
   const detectedMissileIds = runAutoDefense({
     units,
@@ -308,6 +326,7 @@ function stepWorkingWorldInPlace(
   world.missions = deriveMissionAssignments(missions, units);
   world.events = events;
   world.pendingSortieOrders = pendingSortieOrders;
+  world.pendingTotStrikeOrders = pendingTotStrikeOrders;
 
   return {
     nextState: world,

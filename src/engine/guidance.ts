@@ -2,7 +2,7 @@ import * as turf from '@turf/turf';
 import type { EquipmentCatalog, RuntimeUnit, ScenarioEnvironment, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
 import { hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
-import { guidanceProfile, trackSupport } from './fireControl';
+import { computeStrikeRouteDistanceKm, guidanceProfile, trackSupport } from './fireControl';
 import { isRadioEmitting, isActiveUnit } from './unitCapabilities';
 
 const move = (position: [number, number], km: number, heading: number) =>
@@ -129,8 +129,11 @@ export function advanceGuidance(
     if (missile.seekerState.startsWith('midcourse')) missile.seekerState = 'midcourse_blind';
   }
 
-  const terminal = missile.seekerState.startsWith('terminal') ||
-    getDistanceKm(missile.position, missile.aimPosition) <= profile.activationRangeKm;
+  const hasDogleg = !!missile.waypoints && missile.waypoints.length > 0;
+  const terminal = !hasDogleg && (
+    missile.seekerState.startsWith('terminal') ||
+    getDistanceKm(missile.position, missile.aimPosition) <= profile.activationRangeKm
+  );
   const locked = terminal && seekerCanObserve(missile, weapon, target, catalog, support, environment);
   if (locked && target) {
     missile.seekerState = 'terminal_locked';
@@ -148,12 +151,32 @@ export function advanceGuidance(
   const remaining = Math.max(0, missile.maxRangeKm - missile.traveledKm);
   const step = Math.min(remaining, missile.speedKts * 1.852 * dtSec / 3600);
   const before = [...missile.position] as [number, number];
-  const aimDistance = getDistanceKm(before, missile.aimPosition);
-  // Once past an unobserved aimpoint, search forward instead of circling a magic coordinate.
-  if (locked || aimDistance > step) missile.heading = getBearingDeg(before, missile.aimPosition);
-  missile.position = move(before, step, missile.heading);
-  missile.traveledKm += step;
-  missile.distanceRemainingKm = getDistanceKm(missile.position, missile.aimPosition);
+
+  if (hasDogleg && missile.waypoints) {
+    const nextWp = missile.waypoints[0];
+    const distToWp = getDistanceKm(before, nextWp);
+    missile.heading = getBearingDeg(before, nextWp);
+    if (distToWp <= Math.max(0.35, step * 1.05)) {
+      missile.position = [...nextWp];
+      missile.traveledKm += distToWp;
+      missile.waypoints.shift();
+      if (missile.waypoints.length === 0) missile.waypoints = undefined;
+    } else {
+      missile.position = move(before, step, missile.heading);
+      missile.traveledKm += step;
+    }
+  } else {
+    const aimDistance = getDistanceKm(before, missile.aimPosition);
+    // Once past an unobserved aimpoint, search forward instead of circling a magic coordinate.
+    if (locked || aimDistance > step) missile.heading = getBearingDeg(before, missile.aimPosition);
+    missile.position = move(before, step, missile.heading);
+    missile.traveledKm += step;
+  }
+  missile.distanceRemainingKm = computeStrikeRouteDistanceKm(
+    missile.position,
+    missile.aimPosition,
+    missile.waypoints
+  );
   const profileAltM = computeFlightProfileAltitudeM(
     missile,
     weapon,

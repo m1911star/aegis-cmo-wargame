@@ -6,6 +6,7 @@ import type {
   ObjectiveHoldProgress,
   ObjectiveProgress,
   PendingSortieOrder,
+  PendingTotStrikeOrder,
   RuntimeScenarioEvent,
   RuntimeUnit,
   ScenarioEnvironment,
@@ -38,6 +39,7 @@ export interface SimulationWorldState {
   missions: MissionDefinition[];
   events?: RuntimeScenarioEvent[];
   pendingSortieOrders?: PendingSortieOrder[];
+  pendingTotStrikeOrders?: PendingTotStrikeOrder[];
   environment?: ScenarioEnvironment;
   victoryConditions?: VictoryConditionRule;
   score: ScoreLedger;

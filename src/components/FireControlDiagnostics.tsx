@@ -18,7 +18,9 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
   const playMode = useWargameStore((s) => s.playMode);
   const battleResult = useWargameStore((s) => s.battleResult);
   const selectedUnitId = useWargameStore((s) => s.selectedUnitId);
+  const selectedUnitIds = useWargameStore((s) => s.selectedUnitIds);
   const execute = useWargameStore((s) => s.executeManualEngage);
+  const scheduleTotStrike = useWargameStore((s) => s.scheduleTotStrike);
   const [chosenId, setChosenId] = useState(selectedUnitId);
   const choices = Object.values(units).filter((u) => u.side === contact.observerSide && u.mounts.length &&
     canCommandUnit({ playerSide, playMode, battleResult }, u));
@@ -30,6 +32,18 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
       <Select aria-label="选择火力平台" value={attacker.id} onChange={(e) => setChosenId(e.target.value)}>
         {choices.map((u) => <option key={u.id} value={u.id}>{u.callsign}</option>)}
       </Select>
+      {selectedUnitIds.length > 1 && (
+        <div className="p-2 rounded-md bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-rose-200">已多选 {selectedUnitIds.length} 单元 · 异速导弹错峰同秒饱和突防</span>
+          <Button
+            size="xs"
+            variant="destructive"
+            onClick={() => scheduleTotStrike(selectedUnitIds, contact.id)}
+          >
+            TOT 同步齐射
+          </Button>
+        </div>
+      )}
       {attacker.mounts.map((mount) => {
         const weapon = catalog.weapons[mount.weaponId];
         const solution = evaluateFireControl({ ...attacker, doctrine: effectiveDoctrine(attacker, missions) }, contact, mount, weapon, catalog, units, simTime, 'manual', weaponsInFlight);
@@ -82,7 +96,7 @@ export function RiskEngagementDialog() {
       <div className="mt-5 flex gap-2 justify-end">
         <Button variant="outline" autoFocus onClick={dismiss}>取消</Button>
         <Button variant="warning" onClick={() =>
-          execute(pending.attackerId, pending.contactId, pending.weaponId, pending.salvoCount, true)}>接受风险，授权发射</Button>
+          execute(pending.attackerId, pending.contactId, pending.weaponId, pending.salvoCount, true, pending.doglegWaypoints)}>接受风险，授权发射</Button>
       </div>
     </>}
   </dialog>;

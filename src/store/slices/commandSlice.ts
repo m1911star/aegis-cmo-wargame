@@ -12,6 +12,7 @@ import { emitActionFeedback } from '../actionFeedbackBus';
 import type {
   CombatLogEntry,
   Domain,
+  PendingTotStrikeOrder,
   RouteLeg,
   RuntimeUnit,
   ScenarioEnvironment,
@@ -652,10 +653,17 @@ export function createCommandSlice(set: StoreSet) {
       targetId: string,
       weaponId?: string,
       salvoCount?: number,
-      acceptRisk = false
+      acceptRisk = false,
+      doglegWaypoints?: [number, number][]
     ) => set((s) => {
       const attacker = s.units[attackerId];
       if (!canCommandUnit(s, attacker)) return s;
+      const validDogleg = doglegWaypoints && doglegWaypoints.length > 0
+        ? doglegWaypoints
+            .filter((wp) => Array.isArray(wp) && wp.length === 2 && Number.isFinite(wp[0]) && Number.isFinite(wp[1]))
+            .slice(0, 4)
+            .map((wp) => [...wp] as [number, number])
+        : undefined;
       const contact = s.contacts[targetId] ?? contactForUnit(s.contacts, attacker.side, targetId);
       const mounts = attacker.mounts.filter((m) => !weaponId || m.weaponId === weaponId);
       const solutions = mounts.flatMap((mount) => {
@@ -673,7 +681,8 @@ export function createCommandSlice(set: StoreSet) {
                 s.units,
                 s.simTime,
                 'manual',
-                s.weaponsInFlight
+                s.weaponsInFlight,
+                validDogleg
               ),
             }]
           : [];
@@ -688,16 +697,17 @@ export function createCommandSlice(set: StoreSet) {
         const log: CombatLogEntry = { id: `fire_rejected_${s.tick}_${s.commandSequence}`, simTime: s.simTime,
           side: attacker.side, category: 'DOCTRINE', severity: 'warning', title: '火力指令未执行',
           message: reason, unitId: attacker.id };
-        return { pendingRiskEngagement: null, interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
+        return { pendingRiskEngagement: null, pendingStrikeWaypoints: [], interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
       }
       const { mount, weapon, solution } = chosen;
       if (solution.status === 'risky' && !acceptRisk) return {
-        timeScale: 0, interactionMode: 'select',
-        pendingRiskEngagement: { attackerId, contactId: contact.id, weaponId: weapon.id, salvoCount: requestedSalvo, solution },
+        timeScale: 0, interactionMode: 'select', pendingStrikeWaypoints: [],
+        pendingRiskEngagement: { attackerId, contactId: contact.id, weaponId: weapon.id, salvoCount: requestedSalvo, doglegWaypoints: validDogleg, solution },
       };
       const salvo = Math.min(requestedSalvo, mount.currentAmmo);
       const weaponsInFlight = { ...s.weaponsInFlight };
       const areaAttack = weapon.guidance === 'anti_radiation' && contact.lastEmitterDetectedTime !== undefined;
+      const firstAimTarget = validDogleg?.[0] ?? contact.estimatedPosition;
       for (let i = 0; i < salvo; i++) {
         const id = `manual_${s.tick}_${s.commandSequence}_${attacker.id}_${i}`;
         weaponsInFlight[id] = { id, weaponId: weapon.id, name: weapon.codeName, side: attacker.side,
@@ -706,7 +716,7 @@ export function createCommandSlice(set: StoreSet) {
           targetType: areaAttack ? 'area' : 'unit',
           position: [...attacker.position], launchPosition: [...attacker.position], trail: [[...attacker.position]],
           altitudeM: weapon.launchMedium === 'air_drop' ? attacker.altitudeM : weapon.cruiseAltitudeM,
-          heading: getBearingDeg(attacker.position, contact.estimatedPosition),
+          heading: getBearingDeg(attacker.position, firstAimTarget),
           speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
           distanceRemainingKm: solution.distanceKm!,
           maxRangeKm: weapon.launchMedium === 'air_drop' ? weapon.airDropRangeKm! : weapon.maxRangeKm,
@@ -714,6 +724,7 @@ export function createCommandSlice(set: StoreSet) {
           requiresDatalinkBeyondHorizon: weapon.requiresDatalinkBeyondHorizon,
           datalinkSupported: solution.supportSourceIds.length > 0,
           deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
+          waypoints: validDogleg ? validDogleg.map((wp) => [...wp] as [number, number]) : undefined,
           ...launchGuidance(contact) };
       }
       const updatedAttacker = { ...attacker, status: 'engaged' as const, mounts: attacker.mounts.map((m) =>
@@ -744,11 +755,116 @@ export function createCommandSlice(set: StoreSet) {
       if (attacker.side === 'RED') score.redMissilesFired += salvo; else score.blueMissilesFired += salvo;
       const log: CombatLogEntry = { id: `manual_log_${s.tick}_${s.commandSequence}`, simTime: s.simTime,
         side: attacker.side, category: 'LAUNCH', severity: 'warning', title: `${attacker.callsign} 发射 ${salvo} 枚 ${weapon.codeName}`,
-        message: `${areaAttack ? '按最近辐射方位/AOU发射，不绑定隐藏平台' : `瞄准 ${contact.displayName}`}（估计距离 ${solution.distanceKm!.toFixed(1)} km）。${solution.riskWarnings.join('；')}`,
+        message: `${areaAttack ? '按最近辐射方位/AOU发射，不绑定隐藏平台' : `瞄准 ${contact.displayName}`}（${validDogleg ? `含 ${validDogleg.length} 个转折点 · ` : ''}估计航程 ${solution.distanceKm!.toFixed(1)} km）。${solution.riskWarnings.join('；')}`,
         unitId: attacker.id, position: [...attacker.position], weaponId: weapon.id,
         targetUnitId: areaAttack ? undefined : contact.actualUnitId, quantity: salvo };
       return { units: { ...s.units, [attacker.id]: updatedAttacker }, score, weaponsInFlight,
-        pendingRiskEngagement: null, pendingWeaponIdForEngage: null, interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
+        pendingRiskEngagement: null, pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [], interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };
+    }),
+
+    scheduleTotStrike: (
+      shooterIds: string[],
+      targetId: string,
+      salvoPerUnit?: number,
+      doglegWaypoints?: [number, number][]
+    ) => set((s) => {
+      if (!Array.isArray(shooterIds) || shooterIds.length === 0) return s;
+      const uniqueShooters = [...new Set(shooterIds)].sort((a, b) => a.localeCompare(b));
+      const firstUnit = s.units[uniqueShooters[0]];
+      if (!firstUnit) return s;
+      const contact = s.contacts[targetId] ?? contactForUnit(s.contacts, firstUnit.side, targetId);
+      if (!contact) {
+        emitActionFeedback('warning', 'TOT 协同齐射未执行：缺少有效本方目标接触');
+        return s;
+      }
+      const validDogleg = doglegWaypoints && doglegWaypoints.length > 0
+        ? doglegWaypoints
+            .filter((wp) => Array.isArray(wp) && wp.length === 2 && Number.isFinite(wp[0]) && Number.isFinite(wp[1]))
+            .slice(0, 4)
+            .map((wp) => [...wp] as [number, number])
+        : undefined;
+
+      const participants: Array<{
+        shooter: RuntimeUnit;
+        weaponId: string;
+        salvo: number;
+        tofSec: number;
+      }> = [];
+
+      for (const uid of uniqueShooters) {
+        const shooter = s.units[uid];
+        if (!canCommandUnit(s, shooter) || shooter.side !== contact.observerSide) continue;
+        const unitSolutions = shooter.mounts.flatMap((mount) => {
+          const weapon = s.catalog.weapons[mount.weaponId];
+          if (!weapon || mount.currentAmmo <= 0) return [];
+          const sol = evaluateFireControl(
+            { ...shooter, doctrine: effectiveDoctrine(shooter, s.missions) },
+            contact,
+            mount,
+            weapon,
+            s.catalog,
+            s.units,
+            s.simTime,
+            'manual',
+            s.weaponsInFlight,
+            validDogleg
+          );
+          return sol.status !== 'blocked' && sol.estimatedTofSec !== undefined
+            ? [{ mount, weapon, sol }]
+            : [];
+        });
+        const best =
+          unitSolutions.find((item) => item.sol.status === 'executable') ?? unitSolutions[0];
+        if (!best) continue;
+        const salvo = Math.min(salvoPerUnit ?? shooter.doctrine.salvoSize, best.mount.currentAmmo);
+        if (salvo <= 0) continue;
+        participants.push({
+          shooter,
+          weaponId: best.weapon.id,
+          salvo,
+          tofSec: best.sol.estimatedTofSec!,
+        });
+      }
+
+      if (participants.length === 0) {
+        emitActionFeedback('warning', '所选编组中没有满足射程/弹药条件的火力单元');
+        return s;
+      }
+
+      const maxTofSec = Math.max(...participants.map((p) => p.tofSec));
+      const plannedImpactSimTime = s.simTime + (maxTofSec + 3) * 1000;
+      const newOrders: PendingTotStrikeOrder[] = participants.map((p, idx) => ({
+        orderId: `tot_${s.tick}_${s.commandSequence}_${p.shooter.id}_${idx}`,
+        shooterId: p.shooter.id,
+        contactId: contact.id,
+        weaponId: p.weaponId,
+        salvoCount: p.salvo,
+        launchAtSimTime: Math.max(s.simTime + 250, plannedImpactSimTime - p.tofSec * 1000),
+        plannedImpactSimTime,
+        doglegWaypoints: validDogleg ? validDogleg.map((wp) => [...wp] as [number, number]) : undefined,
+      }));
+
+      const log: CombatLogEntry = {
+        id: `log_tot_plan_${s.tick}_${s.commandSequence}`,
+        simTime: s.simTime,
+        side: contact.observerSide,
+        category: 'DOCTRINE',
+        severity: 'warning',
+        title: `[TOT同时弹着窗口已装订] ${participants.length} 个平台错峰齐射 ${contact.displayName}`,
+        message: `统一弹着 T+${maxTofSec + 3}s：${participants
+          .map((p) => `${p.shooter.callsign}(T+${Math.max(0, maxTofSec + 3 - p.tofSec)}s发射)`)
+          .join('、')}。`,
+        position: [...contact.estimatedPosition],
+        contactId: contact.id,
+      };
+      emitActionFeedback('info', `已装订 ${participants.length} 平台 TOT 同步齐射窗口（T+${maxTofSec + 3}s 同时弹着）`);
+      return {
+        pendingTotStrikeOrders: [...s.pendingTotStrikeOrders, ...newOrders],
+        pendingStrikeWaypoints: [],
+        pendingWeaponIdForEngage: null,
+        interactionMode: 'select',
+        logs: [log, ...s.logs].slice(0, 250),
+      };
     }),
 
     addReferencePoint: (coord: [number, number], side?: SideId) =>

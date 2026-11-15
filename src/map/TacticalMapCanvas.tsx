@@ -37,6 +37,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
   const selectedCount = useWargameStore((s) => s.selectedUnitIds.length);
+  const doglegCount = useWargameStore((s) => s.pendingStrikeWaypoints.length);
+  const clearPendingStrikeWaypoints = useWargameStore((s) => s.clearPendingStrikeWaypoints);
   // The map layers subscribe imperatively; React only needs the stable banner label.
   const selectedUnitCallsign = useWargameStore((s) =>
     s.selectedUnitIds.length > 1
@@ -265,6 +267,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         selectedContactId: state.selectedContactId,
         hoveredContactId: hoveredContactIdRef.current,
         pendingWeaponIdForEngage: state.pendingWeaponIdForEngage,
+        pendingStrikeWaypoints: state.pendingStrikeWaypoints,
         mapLayers: state.mapLayers,
         catalog: state.catalog,
         simTime: state.simTime,
@@ -345,7 +348,18 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
             ) ?? shooter?.mounts[0];
             const weapon = mount ? state.catalog.weapons[mount.weaponId] : undefined;
             if (shooter && contact && mount && weapon) {
-              const sol = evaluateFireControl(shooter, contact, mount, weapon, state.catalog, state.units, state.simTime, 'manual');
+              const sol = evaluateFireControl(
+                shooter,
+                contact,
+                mount,
+                weapon,
+                state.catalog,
+                state.units,
+                state.simTime,
+                'manual',
+                state.weaponsInFlight,
+                state.pendingStrikeWaypoints
+              );
               const relay = sol.supportSourceIds.map((id) => state.units[id]?.callsign).filter(Boolean).join('/') || '自主盲飞';
               setHoverEngageSummary(
                 `${weapon.codeName} → ${contact.displayName} · ${(sol.distanceKm ?? 0).toFixed(0)}km (${sol.withinNez ? 'NEZ高杀伤区' : `NEZ ${sol.nezRangeKm}km外`}) · 预计TOF ${sol.estimatedTofSec ?? 0}s · 中继:${relay}`
@@ -432,14 +446,20 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
 
         // 模式 D: F1 手动火力分配模式下点击敌方 Contact 或敌方 Unit
         if (state.interactionMode === 'manual_engage' && state.selectedUnitId) {
-          const targetId =
-            props.entityType === 'contact' ? props.id : props.id;
-          state.executeManualEngage(
-            state.selectedUnitId,
-            targetId,
-            state.pendingWeaponIdForEngage || undefined,
-            state.pendingSalvoCount
-          );
+          const targetId = props.id;
+          const doglegs = state.pendingStrikeWaypoints.length > 0 ? state.pendingStrikeWaypoints : undefined;
+          if (state.selectedUnitIds.length > 1) {
+            state.scheduleTotStrike(state.selectedUnitIds, targetId, state.pendingSalvoCount, doglegs);
+          } else {
+            state.executeManualEngage(
+              state.selectedUnitId,
+              targetId,
+              state.pendingWeaponIdForEngage || undefined,
+              state.pendingSalvoCount,
+              false,
+              doglegs
+            );
+          }
           return;
         }
 
@@ -452,6 +472,9 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         } else if (props.entityType === 'contact') {
           state.selectContact(props.id);
         }
+      } else if (state.interactionMode === 'manual_engage' && state.selectedUnitId) {
+        // 点击空白海域/山谷追加导弹绕障转折航点 (Dogleg Waypoint)
+        state.appendPendingStrikeWaypoint(clickedCoord);
       }
     });
 
@@ -543,6 +566,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         selectedUnitIds: s.selectedUnitIds,
         selectedContactId: s.selectedContactId,
         pendingWeaponIdForEngage: s.pendingWeaponIdForEngage,
+        pendingStrikeWaypoints: s.pendingStrikeWaypoints,
         interactionMode: s.interactionMode,
         mapLayers: s.mapLayers,
         environment: s.environment,
@@ -685,9 +709,17 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
           {interactionMode === 'manual_engage' && (
             <span className="text-rose-200 truncate">
               {hoverEngageSummary
-                ? `[F1 火控解算] ${hoverEngageSummary}`
-                : '[F1 手动火力分配模式] 悬停或点击敌方目标预览 NEZ 不可逃逸区、CEC 中继链路与预计命中 TOF · 右键取消'}
+                ? `[F1 火控解算${doglegCount > 0 ? ` · ${doglegCount}个转折点` : ''}] ${hoverEngageSummary}`
+                : `[F1 火力分配${selectedCount > 1 ? ` · ${selectedCount}平台TOT同步齐射` : ''}] 点击空白处可添加绕障转折点${doglegCount > 0 ? `(已设${doglegCount}点)` : ''}，点击敌目标发射`}
             </span>
+          )}
+          {interactionMode === 'manual_engage' && doglegCount > 0 && (
+            <button
+              onClick={() => clearPendingStrikeWaypoints()}
+              className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-rose-200 cursor-pointer shrink-0 whitespace-nowrap"
+            >
+              清空转折点 ({doglegCount})
+            </button>
           )}
           {interactionMode === 'place_ref_point' && (
             <span className="text-amber-200">

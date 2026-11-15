@@ -439,6 +439,18 @@ export interface WeaponInFlight {
   seekerState?: 'midcourse_datalink' | 'midcourse_blind' | 'terminal_searching' | 'terminal_locked' | 'lost';
   searchElapsedSec?: number;
   deliveryPhase?: 'air_drop' | 'water_search';
+  waypoints?: [number, number][];
+}
+
+export interface PendingTotStrikeOrder {
+  orderId: string;
+  shooterId: string;
+  contactId: string;
+  weaponId: string;
+  salvoCount: number;
+  launchAtSimTime: number;
+  plannedImpactSimTime: number;
+  doglegWaypoints?: [number, number][];
 }
 
 export interface TacticalExplosionEffect {

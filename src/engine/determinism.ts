@@ -9,7 +9,7 @@ export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypo
   'assignUnitMission', 'createMissionFromReferencePoints', 'updateMissionFromReferencePoints',
   'updateMissionDoctrine', 'deleteMission', 'toggleMissionActive', 'moveUnitInSandbox', 'updateScenarioGroup',
   'assignUnitGroup', 'upsertObjective', 'deleteObjective', 'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
-  'executeManualEngage', 'addReferencePoint',
+  'executeManualEngage', 'scheduleTotStrike', 'addReferencePoint',
   'removeReferencePoint', 'startSpawnUnitOnMap', 'spawnUnitAtCoordinate'] as const;
 
 export function createRandomStream(initialState: number) {

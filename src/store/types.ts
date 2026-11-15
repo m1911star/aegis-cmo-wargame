@@ -17,6 +17,7 @@ import type {
   ObjectiveProgress,
   OrbatGroup,
   PendingSortieOrder,
+  PendingTotStrikeOrder,
   PlayMode,
   ReferencePoint,
   RouteLeg,
@@ -108,7 +109,14 @@ export interface WargameStoreState {
   creditedDamage: Record<string, number>;
   detectedMissileIds: string[];
   aar: BattleAarLedger;
-  pendingRiskEngagement: { attackerId: string; contactId: string; weaponId: string; salvoCount: number; solution: FireControlSolution } | null;
+  pendingRiskEngagement: {
+    attackerId: string;
+    contactId: string;
+    weaponId: string;
+    salvoCount: number;
+    doglegWaypoints?: [number, number][];
+    solution: FireControlSolution;
+  } | null;
   setPlayerSide: (side: 'RED' | 'BLUE') => void;
   setPlayMode: (mode: PlayMode) => void;
   dismissRiskEngagement: () => void;
@@ -146,6 +154,7 @@ export interface WargameStoreState {
   missions: TacticalMission[];
   events: RuntimeScenarioEvent[];
   pendingSortieOrders: PendingSortieOrder[];
+  pendingTotStrikeOrders: PendingTotStrikeOrder[];
   environment: ScenarioEnvironment;
   referencePoints: ReferencePoint[];
   logs: CombatLogEntry[];
@@ -158,6 +167,9 @@ export interface WargameStoreState {
   interactionMode: MapInteractionMode;
   pendingWeaponIdForEngage: string | null;
   pendingSalvoCount: number;
+  pendingStrikeWaypoints: [number, number][];
+  appendPendingStrikeWaypoint: (coord: [number, number]) => void;
+  clearPendingStrikeWaypoints: () => void;
   pendingSpawnConfig: {
     platformId: string;
     loadoutId?: string;
@@ -270,7 +282,14 @@ export interface WargameStoreState {
     targetId: string,
     weaponId?: string,
     salvoCount?: number,
-    acceptRisk?: boolean
+    acceptRisk?: boolean,
+    doglegWaypoints?: [number, number][]
+  ) => void;
+  scheduleTotStrike: (
+    shooterIds: string[],
+    targetId: string,
+    salvoPerUnit?: number,
+    doglegWaypoints?: [number, number][]
   ) => void;
   addReferencePoint: (coord: [number, number], side?: SideId) => void;
   removeReferencePoint: (rpId: string) => void;

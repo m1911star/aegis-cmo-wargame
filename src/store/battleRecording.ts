@@ -7,7 +7,7 @@ import { useWargameStore, type WargameStoreState } from './useWargameStore';
 export const BATTLE_RECORDING_VERSION = 2 as const;
 export const BATTLE_SAVE_VERSION = 1 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
-export const RULESET_VERSION = '2026.12-ruleset-25';
+export const RULESET_VERSION = '2026.12-ruleset-26';
 export const SCENARIO_SCHEMA_VERSION = 12;
 export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
 export const SAVE_SLOTS_STORAGE_KEY = 'aegis_cmo_save_slots_v1';
@@ -87,6 +87,7 @@ export function canonicalBattleState(state: WargameStoreState = useWargameStore.
     rngState: state.rngState, units: state.units, contacts: state.contacts, weaponsInFlight: state.weaponsInFlight,
     explosions: state.explosions, missions: state.missions, events: state.events,
     pendingSortieOrders: state.pendingSortieOrders,
+    pendingTotStrikeOrders: state.pendingTotStrikeOrders,
     groups: state.groups, objectives: state.objectives,
     environment: state.environment, score: state.score,
     objectiveProgress: state.objectiveProgress,
@@ -181,6 +182,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
     useWargameStore.setState({
       ...clonedSnapshot,
       pendingSortieOrders: clonedSnapshot.pendingSortieOrders ?? [],
+      pendingTotStrikeOrders: clonedSnapshot.pendingTotStrikeOrders ?? [],
       objectiveHoldProgress: clonedSnapshot.objectiveHoldProgress ?? {},
       commandHistory: structuredClone(save.commandHistory),
       replaySnapshots: [structuredClone(clonedSnapshot)],
@@ -193,6 +195,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
       pendingRiskEngagement: null,
       pendingSpawnConfig: null,
       pendingWeaponIdForEngage: null,
+      pendingStrikeWaypoints: [],
       interactionMode: 'select',
     });
     return canonicalBattleState();
@@ -265,6 +268,7 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
       useWargameStore.setState({
         ...restored,
         pendingSortieOrders: restored.pendingSortieOrders ?? [],
+        pendingTotStrikeOrders: restored.pendingTotStrikeOrders ?? [],
         objectiveHoldProgress: restored.objectiveHoldProgress ?? {},
         activePerspective: restored.playerSide,
         commandHistory: structuredClone(validRecording.commands.slice(0, restored.commandSequence)),
