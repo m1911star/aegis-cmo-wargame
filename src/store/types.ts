@@ -177,6 +177,11 @@ export interface WargameStoreState {
     name: string;
     callsign: string;
   } | null;
+  pendingForcePackageConfig: {
+    forcePackageId: string;
+    side: SideId;
+    parentGroupId: string;
+  } | null;
   mapLayers: MapLayerVisibility;
   cameraFlyToRequest: {
     center: [number, number];
@@ -225,6 +230,7 @@ export interface WargameStoreState {
     name: string;
     callsign: string;
   }) => void;
+  startForcePackageSpawnOnMap: (config: NonNullable<WargameStoreState['pendingForcePackageConfig']>) => void;
   toggleMapLayer: (layer: keyof MapLayerVisibility) => void;
   flyToPosition: (center: [number, number], zoom?: number) => void;
   setActiveModal: (modal: WargameStoreState['activeModal']) => void;

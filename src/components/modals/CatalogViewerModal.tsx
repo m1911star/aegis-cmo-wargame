@@ -4,12 +4,13 @@ import { useWargameStore } from '../../store/useWargameStore';
 import { Badge } from '../ui/badge';
 import { ModalHeader, ModalShell } from '../ui/dialog';
 import { Select } from '../ui/select';
+import { FORCE_PACKAGES } from '../../db';
 
 export const CatalogViewerModal: React.FC = () => {
   const catalog = useWargameStore((s) => s.catalog);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const [catalogTab, setCatalogTab] = useState<
-    'platforms' | 'loadouts' | 'weapons' | 'sensors'
+    'platforms' | 'loadouts' | 'weapons' | 'sensors' | 'forcePackages'
   >('platforms');
   const [query, setQuery] = useState('');
   const [domainFilter, setDomainFilter] = useState('ALL');
@@ -43,6 +44,15 @@ export const CatalogViewerModal: React.FC = () => {
     ),
     [catalog.sensors, domainFilter, normalizedQuery]
   );
+  const forcePackages = useMemo(
+    () => Object.values(FORCE_PACKAGES).filter((forcePackage) =>
+      (domainFilter === 'ALL' || forcePackage.domain === domainFilter) &&
+      matchesText(`${forcePackage.id} ${forcePackage.name} ${forcePackage.origin} ${forcePackage.role} ${forcePackage.description} ${
+        forcePackage.members.map((member) => `${member.platformId} ${catalog.platforms[member.platformId]?.name ?? ''}`).join(' ')
+      }`)
+    ),
+    [catalog.platforms, domainFilter, normalizedQuery]
+  );
 
   return (
     <ModalShell className="max-w-4xl">
@@ -71,6 +81,10 @@ export const CatalogViewerModal: React.FC = () => {
             {
               id: 'sensors',
               label: `雷达/声呐/电子战传感器 (${Object.keys(catalog.sensors).length})`,
+            },
+            {
+              id: 'forcePackages',
+              label: `军队配置 (${Object.keys(FORCE_PACKAGES).length})`,
             },
           ] as const
         ).map((t) => (
@@ -194,6 +208,31 @@ export const CatalogViewerModal: React.FC = () => {
                 {s.isActiveEmitter ? '主动辐射源 (受EMCON控制)' : '纯被动静默探测'}
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">{s.description}</p>
+            </div>
+          ))}
+
+        {catalogTab === 'forcePackages' &&
+          forcePackages.map((forcePackage) => (
+            <div
+              key={forcePackage.id}
+              className="p-3 rounded-lg bg-muted/35 border border-border space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-sky-300 truncate">{forcePackage.name}</span>
+                <Badge variant="secondary">{forcePackage.origin} · {forcePackage.role}</Badge>
+              </div>
+              <div className="text-[10px] text-primary">
+                ID: <code>{forcePackage.id}</code> · {forcePackage.domain} · {forcePackage.members.length} 类单位
+              </div>
+              <ul className="space-y-1 text-[11px] text-muted-foreground">
+                {forcePackage.members.map((member, index) => (
+                  <li key={`${member.platformId}-${index}`}>
+                    {member.quantity} × {catalog.platforms[member.platformId]?.name ?? member.platformId}
+                    {member.loadoutId && ` · ${catalog.loadouts[member.loadoutId]?.name ?? member.loadoutId}`}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{forcePackage.description}</p>
             </div>
           ))}
       </div>

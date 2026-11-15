@@ -3,9 +3,12 @@ import { canCommandUnit } from '../../engine/commandPolicy';
 import { isRouteAllowed } from '../../engine/environment';
 import { deriveMissionAssignments } from '../../engine/missions';
 import { createRuntimeUnitFromPlacement } from '../../engine/simulationEngine';
+import { createForcePackagePlacements } from '../../db/forcePackages';
+import { FORCE_PACKAGES } from '../../db';
 import { emitActionFeedback } from '../actionFeedbackBus';
 import type {
   CombatLogEntry,
+  InitialUnitPlacement,
   MissionType,
   OrbatGroup,
   RuntimeScenarioEvent,
@@ -273,6 +276,53 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
 
     spawnUnitAtCoordinate: (coord: [number, number]) =>
       set((s) => {
+        const packageConfig = s.pendingForcePackageConfig;
+        if (packageConfig && s.playMode === 'sandbox' && !s.battleResult &&
+            Array.isArray(coord) && coord.length === 2 &&
+            Number.isFinite(coord[0]) && Math.abs(coord[0]) <= 180 &&
+            Number.isFinite(coord[1]) && Math.abs(coord[1]) <= 90) {
+          const forcePackage = FORCE_PACKAGES[packageConfig.forcePackageId];
+          const group = s.groups.find((candidate) => candidate.id === packageConfig.parentGroupId);
+          if (!forcePackage || !group || group.side !== packageConfig.side) return s;
+          const idPrefix = `pkg_${s.tick}_${s.commandSequence}_${Object.keys(s.units).length}`;
+          let placements: InitialUnitPlacement[];
+          try {
+            placements = createForcePackagePlacements(packageConfig.forcePackageId, {
+              idPrefix,
+              side: packageConfig.side,
+              parentGroupId: packageConfig.parentGroupId,
+              position: coord,
+              heading: packageConfig.side === 'RED' ? 95 : 275,
+              environment: s.environment,
+            }, s.catalog);
+          } catch (error) {
+            if (!(error instanceof Error)) throw error;
+            emitActionFeedback('warning', `军队配置部署失败：${error.message}`);
+            return s;
+          }
+          const newUnits = placements.map((placement) => createRuntimeUnitFromPlacement(placement, s.catalog));
+          const units = { ...s.units, ...Object.fromEntries(newUnits.map((unit) => [unit.id, unit])) };
+          const spawnLog: CombatLogEntry = {
+            id: `log_spawn_${idPrefix}`,
+            simTime: s.simTime,
+            side: packageConfig.side,
+            category: 'SYSTEM',
+            severity: 'info',
+            title: `军队配置已部署：${forcePackage.name}`,
+            message: `已在地图坐标部署 ${newUnits.length} 个单位，并编入 ${group.name}。`,
+            position: [...coord],
+            unitId: newUnits[0]?.id,
+          };
+          return {
+            units,
+            selectedUnitId: newUnits[0]?.id ?? s.selectedUnitId,
+            selectedUnitIds: newUnits.map((unit) => unit.id),
+            interactionMode: 'select',
+            pendingForcePackageConfig: null,
+            logs: [spawnLog, ...s.logs].slice(0, 250),
+          };
+        }
+
         const cfg = s.pendingSpawnConfig;
         if (!cfg || s.playMode !== 'sandbox' || s.battleResult) return s;
         const spec = s.catalog.platforms[cfg.platformId];
@@ -322,6 +372,7 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
           selectedUnitId: newId,
           interactionMode: 'select',
           pendingSpawnConfig: null,
+          pendingForcePackageConfig: null,
           logs: [spawnLog, ...s.logs].slice(0, 250),
         };
       }),

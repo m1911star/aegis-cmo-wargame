@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { MASTER_EQUIPMENT_CATALOG as catalog, resolveEquipmentCatalog, validateCatalogIntegrity } from '../../src/db';
+import {
+  createForcePackagePlacements, FORCE_PACKAGES, MASTER_EQUIPMENT_CATALOG as catalog, resolveEquipmentCatalog,
+  validateCatalogIntegrity, validateForcePackageIntegrity,
+} from '../../src/db';
 import { resolveUnitConfiguration } from '../../src/db/unitConfiguration';
 import { compileScenario } from '../../src/scenarios/compileScenario';
 import {
@@ -211,10 +214,11 @@ describe('Scenario input boundary', () => {
   });
 
   test('content expansion counts, required IDs and scenario consumption remain explicit', () => {
-    expect(Object.keys(catalog.platforms)).toHaveLength(48);
-    expect(Object.keys(catalog.weapons)).toHaveLength(31);
-    expect(Object.keys(catalog.sensors)).toHaveLength(26);
-    expect(Object.keys(catalog.loadouts)).toHaveLength(30);
+    expect(Object.keys(catalog.platforms).length).toBeGreaterThanOrEqual(100);
+    expect(Object.keys(catalog.weapons).length).toBeGreaterThanOrEqual(60);
+    expect(Object.keys(catalog.sensors).length).toBeGreaterThanOrEqual(50);
+    expect(Object.keys(catalog.loadouts).length).toBeGreaterThanOrEqual(60);
+    expect(Object.keys(FORCE_PACKAGES).length).toBeGreaterThanOrEqual(30);
     const addedPlatforms = ['j15t_flanker', 'fa18ef_super_hornet', 'y9g_jammer', 'b1b_lancer',
       'j10c_multirole', 'mq4c_triton', 'f35b_lightning', 'type054b_frigate', 'constellation_ffg',
       'type039c_ssk', 'taigei_ssk', 'type075_lhd', 'america_lha', 'z20f_asw', 'mh60r_seahawk'];
@@ -245,6 +249,35 @@ describe('Scenario input boundary', () => {
     for (const id of addedPlatforms) expect(consumed).toContain(id);
   });
 
+  test('regional platforms, loadouts and reusable force packages resolve cleanly', () => {
+    const addedPlatforms = [
+      'japan_f2a', 'japan_maya_destroyer', 'japan_type10_battalion',
+      'australia_e7a', 'australia_hobart_destroyer',
+      'korea_kf21', 'korea_sejong_destroyer', 'korea_k2_battalion',
+      'red_hq16b_battery', 'blue_nasams_battery',
+    ];
+    for (const id of addedPlatforms) expect(catalog.platforms[id]).toBeDefined();
+    expect(validateForcePackageIntegrity(FORCE_PACKAGES, catalog)).toEqual({ valid: true, errors: [] });
+
+    const invalid = structuredClone(FORCE_PACKAGES);
+    invalid.japan_maritime_task_group.members[0].loadoutId = 'loadout_korea_kf21_cap';
+    expect(validateForcePackageIntegrity(invalid, catalog).valid).toBe(false);
+
+    const placements = createForcePackagePlacements('red_layered_air_defense', {
+      idPrefix: 'package_test', side: 'BLUE', parentGroupId: 'blue_test_group',
+      position: [140, 30], heading: 270,
+    }, catalog);
+    expect(placements).toHaveLength(4);
+    expect(new Set(placements.map((entry) => entry.id)).size).toBe(4);
+    expect(placements.every((entry) => entry.side === 'BLUE' && entry.parentGroupId === 'blue_test_group')).toBe(true);
+    expect(placements[0]?.position).toEqual([140, 30]);
+    expect(placements.slice(1).some((entry) => entry.position[0] !== 140 || entry.position[1] !== 30)).toBe(true);
+    expect(() => createForcePackagePlacements('missing_package', {
+      idPrefix: 'package_test', side: 'RED', parentGroupId: 'red_test_group',
+      position: [0, 0], heading: 0,
+    }, catalog)).toThrow('Unknown force package');
+  });
+
   test('every loadout resolves compatible kinematics, endurance, RCS and finite ammunition', () => {
     for (const loadout of Object.values(catalog.loadouts)) {
       const platformId = loadout.compatiblePlatformIds[0];
@@ -273,6 +306,8 @@ describe('Scenario input boundary', () => {
       ['nsm_ashm', 'constellation_ffg', undefined],
       ['hq10_point_defense', 'type054b_frigate', undefined],
       ['ram_blk2', 'constellation_ffg', undefined],
+      ['aam4b_bvr', 'japan_f2a', 'loadout_japan_f2a_cap'],
+      ['type12_asm', 'japan_f2a', 'loadout_japan_f2a_maritime'],
     ] as const;
     for (const [weaponId, platformId, loadoutId] of launchCases) {
       const weapon = catalog.weapons[weaponId];

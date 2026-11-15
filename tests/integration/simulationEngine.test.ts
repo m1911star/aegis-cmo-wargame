@@ -374,5 +374,23 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
     expect(Object.keys(useWargameStore.getState().units).length).toBe(
       beforeCount + 1
     );
+
+    const beforePackageIds = new Set(Object.keys(useWargameStore.getState().units));
+    const blueGroup = useWargameStore.getState().groups.find((group) => group.side === 'BLUE');
+    expect(blueGroup).toBeDefined();
+    store.startForcePackageSpawnOnMap({
+      forcePackageId: 'blue_carrier_group',
+      side: 'BLUE',
+      parentGroupId: blueGroup!.id,
+    });
+    store.spawnUnitAtCoordinate([124, 27]);
+    const afterPackage = useWargameStore.getState();
+    const deployed = Object.values(afterPackage.units).filter((unit) => !beforePackageIds.has(unit.id));
+    expect(deployed).toHaveLength(4);
+    expect(deployed.every((unit) => unit.side === 'BLUE' && unit.parentGroupId === blueGroup!.id)).toBe(true);
+    expect(new Set(deployed.map((unit) => unit.id)).size).toBe(4);
+    expect(validateAndParseScenarioJson(
+      exportCurrentStateAsScenarioJson(afterPackage.currentScenario, afterPackage.units)
+    ).valid).toBe(true);
   });
 });

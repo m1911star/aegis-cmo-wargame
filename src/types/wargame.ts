@@ -217,6 +217,22 @@ export interface EquipmentCatalog {
   platforms: Record<string, PlatformSpec>;
 }
 
+export interface ForcePackageMember {
+  platformId: string;
+  quantity: number;
+  loadoutId?: string;
+}
+
+export interface ForcePackageSpec {
+  id: string;
+  name: string;
+  origin: string;
+  domain: Domain;
+  role: 'air_wing' | 'surface_group' | 'subsurface_group' | 'ground_force' | 'joint_task_force';
+  members: ForcePackageMember[];
+  description: string;
+}
+
 // ----------------------------------------------------------------------------
 // 2. 战场动态实例与条令 (Runtime Entities & Doctrine)
 // ----------------------------------------------------------------------------

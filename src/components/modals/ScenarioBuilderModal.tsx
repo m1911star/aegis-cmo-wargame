@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PencilRuler } from 'lucide-react';
+import { FORCE_PACKAGES } from '../../db';
 import { useWargameStore } from '../../store/useWargameStore';
 import type { SideId } from '../../types/wargame';
 import { Button } from '../ui/button';
@@ -11,12 +12,14 @@ import { Textarea } from '../ui/textarea';
 export const ScenarioBuilderModal: React.FC = () => {
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const units = useWargameStore((s) => s.units);
+  const catalog = useWargameStore((s) => s.catalog);
   const groups = useWargameStore((s) => s.groups);
   const events = useWargameStore((s) => s.events);
   const objectives = useWargameStore((s) => s.objectives);
   const referencePoints = useWargameStore((s) => s.referencePoints);
   const selectUnit = useWargameStore((s) => s.selectUnit);
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
+  const startForcePackageSpawnOnMap = useWargameStore((s) => s.startForcePackageSpawnOnMap);
   const updateScenarioGroup = useWargameStore((s) => s.updateScenarioGroup);
   const assignUnitGroup = useWargameStore((s) => s.assignUnitGroup);
   const upsertObjective = useWargameStore((s) => s.upsertObjective);
@@ -26,6 +29,8 @@ export const ScenarioBuilderModal: React.FC = () => {
 
   const [builderGroupId, setBuilderGroupId] = useState('');
   const [builderUnitId, setBuilderUnitId] = useState('');
+  const [forcePackageId, setForcePackageId] = useState(Object.keys(FORCE_PACKAGES)[0] ?? '');
+  const [forcePackageSide, setForcePackageSide] = useState<SideId>('RED');
   const [objectiveTitle, setObjectiveTitle] = useState('新建目标');
   const [objectiveSide, setObjectiveSide] = useState<'RED' | 'BLUE'>('RED');
   const [objectiveType, setObjectiveType] = useState<'destroy' | 'disable' | 'preserve' | 'observe' | 'withdraw' | 'control_area'>('destroy');
@@ -38,6 +43,8 @@ export const ScenarioBuilderModal: React.FC = () => {
 
   const selectedBuilderGroup = groups.find((group) => group.id === builderGroupId) ?? groups[0];
   const selectedBuilderUnit = units[builderUnitId] ?? Object.values(units)[0];
+  const selectedForcePackage = FORCE_PACKAGES[forcePackageId];
+  const forcePackageGroup = groups.find((group) => group.side === forcePackageSide);
 
   return (
     <ModalShell className="max-w-5xl max-h-[92dvh] flex flex-col">
@@ -49,6 +56,36 @@ export const ScenarioBuilderModal: React.FC = () => {
       <div className="p-4 grid md:grid-cols-2 gap-4 text-xs overflow-y-auto flex-1">
         <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-3">
           <h3 className="text-primary font-semibold">单位与编组</h3>
+          <div className="space-y-2 rounded-md border border-border/70 bg-background/40 p-2.5">
+            <h4 className="font-medium">部署可复用军队配置</h4>
+            <Select aria-label="部署军队配置" value={forcePackageId} onChange={(event) => setForcePackageId(event.target.value)}>
+              {Object.values(FORCE_PACKAGES).map((forcePackage) =>
+                <option key={forcePackage.id} value={forcePackage.id}>{forcePackage.name}</option>)}
+            </Select>
+            <Select aria-label="军队配置部署阵营" value={forcePackageSide}
+              onChange={(event) => setForcePackageSide(event.target.value as SideId)}>
+              <option value="RED">RED</option><option value="BLUE">BLUE</option>
+            </Select>
+            {selectedForcePackage && <div className="text-[11px] text-muted-foreground">
+              {selectedForcePackage.description}
+              <p className="mt-1">{selectedForcePackage.members.map((member) => {
+                const platform = catalog.platforms[member.platformId];
+                return `${platform?.name ?? member.platformId} ×${member.quantity}`;
+              }).join(' · ')}</p>
+              <p className="mt-1">混合陆海编组建议在海岸附近部署，系统会为成员自动寻找可用域内位置。</p>
+            </div>}
+            <Button size="sm" variant="success" disabled={!selectedForcePackage || !forcePackageGroup}
+              onClick={() => {
+                if (!selectedForcePackage || !forcePackageGroup) return;
+                startForcePackageSpawnOnMap({
+                  forcePackageId: selectedForcePackage.id,
+                  side: forcePackageSide,
+                  parentGroupId: forcePackageGroup.id,
+                });
+              }}>
+              选择后点击地图部署
+            </Button>
+          </div>
           <Select aria-label="Builder 单位" value={selectedBuilderUnit?.id ?? ''} onChange={(event) => setBuilderUnitId(event.target.value)}>
             {Object.values(units).map((unit) => <option key={unit.id} value={unit.id}>{unit.callsign} · {unit.name}</option>)}
           </Select>

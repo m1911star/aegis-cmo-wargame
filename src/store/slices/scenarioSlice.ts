@@ -21,6 +21,7 @@ import {
   createInitialCampaignState,
   type CampaignState,
 } from '../../scenarios/campaign';
+import { FORCE_PACKAGES } from '../../db';
 import { compileScenario } from '../../scenarios/compileScenario';
 import type { ScenarioDefinition } from '../../types/wargame';
 import { emitActionFeedback } from '../actionFeedbackBus';
@@ -271,6 +272,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       }),
     clearPendingStrikeWaypoints: () => set({ pendingStrikeWaypoints: [] }),
     pendingSpawnConfig: null,
+    pendingForcePackageConfig: null,
     mapLayers: {
       showRadarRings: true,
       showWeaponRings: true,
@@ -295,7 +297,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           seed: boot.seed, rngState: boot.rngState, tick: 0, pendingSimSeconds: 0,
           commandSequence: 0, commandHistory: [], replaySnapshots: [], objectiveProgress: {}, objectiveHoldProgress: {}, battleResult: undefined,
           creditedDamage: {}, detectedMissileIds: [], aar: boot.aar, pendingRiskEngagement: null,
-          pendingSpawnConfig: null, pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [],
+          pendingSpawnConfig: null, pendingForcePackageConfig: null,
+          pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [],
           currentScenario: boot.scenario,
           availableScenarios: exists
             ? state.availableScenarios
@@ -716,6 +719,19 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       set({
         interactionMode: 'spawn_unit',
         pendingSpawnConfig: config,
+        pendingForcePackageConfig: null,
+        activeModal: 'none',
+      });
+    },
+    startForcePackageSpawnOnMap: (config: NonNullable<WargameStoreState['pendingForcePackageConfig']>) => {
+      const state = get();
+      const group = state.groups.find((candidate) => candidate.id === config.parentGroupId);
+      if (state.playMode !== 'sandbox' || state.battleResult ||
+          !FORCE_PACKAGES[config.forcePackageId] || !group || group.side !== config.side) return;
+      set({
+        interactionMode: 'spawn_unit',
+        pendingSpawnConfig: null,
+        pendingForcePackageConfig: config,
         activeModal: 'none',
       });
     },

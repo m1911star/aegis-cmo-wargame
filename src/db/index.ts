@@ -5,13 +5,23 @@ import type {
   SensorSpec,
   WeaponSpec,
 } from '../types/wargame';
-import { MODULAR_SENSORS } from './sensors/allSensors';
-import { MODULAR_WEAPONS } from './weapons/allWeapons';
-import { MODULAR_LOADOUTS } from './loadouts/allLoadouts';
+import { MODULAR_SENSORS as BASE_SENSORS } from './sensors/allSensors';
+import { MODULAR_WEAPONS as BASE_WEAPONS } from './weapons/allWeapons';
+import { MODULAR_LOADOUTS as BASE_LOADOUTS } from './loadouts/allLoadouts';
 import { RED_FORCE_PLATFORMS } from './platforms/redForcePlatforms';
 import { BLUE_FORCE_PLATFORMS } from './platforms/blueForcePlatforms';
+import { REGIONAL_PLATFORMS } from './platforms/regionalPlatforms';
 import { assertCatalogShape } from '../validation/wargameSchemas';
+import { FORCE_PACKAGES as BASE_FORCE_PACKAGES, validateForcePackageIntegrity } from './forcePackages';
+import {
+  EXPANSION_FORCE_PACKAGES,
+  EXPANSION_LOADOUTS,
+  EXPANSION_PLATFORMS,
+  EXPANSION_SENSORS,
+  EXPANSION_WEAPONS,
+} from './expansion/catalogExpansion';
 export { resolveUnitConfiguration } from './unitConfiguration';
+export { createForcePackagePlacements, validateForcePackageIntegrity } from './forcePackages';
 
 // ============================================================================
 // AEGIS-CMO // 四层模块化装备数据库汇总与引用完整性校验器
@@ -20,10 +30,28 @@ export { resolveUnitConfiguration } from './unitConfiguration';
 export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = {
   ...RED_FORCE_PLATFORMS,
   ...BLUE_FORCE_PLATFORMS,
+  ...REGIONAL_PLATFORMS,
+  ...EXPANSION_PLATFORMS,
+};
+export const MODULAR_SENSORS: Record<string, SensorSpec> = {
+  ...BASE_SENSORS,
+  ...EXPANSION_SENSORS,
+};
+export const MODULAR_WEAPONS: Record<string, WeaponSpec> = {
+  ...BASE_WEAPONS,
+  ...EXPANSION_WEAPONS,
+};
+export const MODULAR_LOADOUTS: Record<string, LoadoutSpec> = {
+  ...BASE_LOADOUTS,
+  ...EXPANSION_LOADOUTS,
+};
+export const FORCE_PACKAGES = {
+  ...BASE_FORCE_PACKAGES,
+  ...EXPANSION_FORCE_PACKAGES,
 };
 
 export const MASTER_EQUIPMENT_CATALOG: EquipmentCatalog = {
-  version: '2026.12-CONTENT-EXPANSION-2',
+  version: '2026.12-CONTENT-EXPANSION-4',
   sensors: MODULAR_SENSORS,
   weapons: MODULAR_WEAPONS,
   loadouts: MODULAR_LOADOUTS,
@@ -200,6 +228,8 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
       if (slot.readyAirframes > slot.totalAirframes) errors.push(`platforms.${pId}.${slot.slotId}: ready airframes exceed total inventory`);
     }
   }
+
+  errors.push(...validateForcePackageIntegrity(FORCE_PACKAGES, catalog).errors);
 
   return {
     valid: errors.length === 0,
