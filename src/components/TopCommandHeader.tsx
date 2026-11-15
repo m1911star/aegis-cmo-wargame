@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database,
-  FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler, Shuffle, History,
+  FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler, Shuffle, History, Swords,
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import type { ActivePerspective, TimeScale } from '../types/wargame';
@@ -125,6 +125,13 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
                 ? `战役 ${campaignState.currentStageIndex + 1}/${campaignState.totalStages}`
                 : '战役模式'}
             </span>
+          </button>
+          <button
+            onClick={() => setActiveModal('skirmish')}
+            className="toolbar-button text-cyan-300"
+            title="选择战区模板、双方军队配置与气象一键生成自由遭遇战"
+          >
+            <Swords /><span>遭遇战</span>
           </button>
         </div>
         <div className="utility-controls">

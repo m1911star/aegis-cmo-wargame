@@ -248,3 +248,13 @@ test('browses force packages in catalog and deploys a force package on the map i
   await page.mouse.click(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5);
   await expect(page.getByText(/军队配置已部署：红方水面护航分队/)).toBeVisible();
 });
+
+test('generates and launches a custom skirmish battle from theater and force package presets', async ({ page }) => {
+  await page.getByRole('button', { name: '遭遇战' }).click();
+  await expect(page.getByText('QUICK SKIRMISH // 自由遭遇战生成器')).toBeVisible();
+  await page.getByLabel('作战战区模板').selectOption('coastal_strait');
+  await page.getByLabel('红方主力军队配置').selectOption('india_air_patrol');
+  await page.getByLabel('蓝方主力军队配置').selectOption('japan_maritime_task_group');
+  await page.getByRole('button', { name: '生成遭遇战并开局' }).click();
+  await expect(page.getByText(/战役想定已载入: 自由遭遇战 \/\/ 海峡浅海封锁区/)).toBeVisible();
+});

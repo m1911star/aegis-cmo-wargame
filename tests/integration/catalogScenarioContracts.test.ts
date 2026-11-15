@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { ALL_SKIRMISH_FORCE_PACKAGES, SKIRMISH_THEATER_PRESETS, buildSkirmishScenario } from '../../src/scenarios/skirmishGenerator';
 import {
   createForcePackagePlacements, FORCE_PACKAGES, MASTER_EQUIPMENT_CATALOG as catalog, resolveEquipmentCatalog,
   validateCatalogIntegrity, validateForcePackageIntegrity,
@@ -276,6 +277,26 @@ describe('Scenario input boundary', () => {
       idPrefix: 'package_test', side: 'RED', parentGroupId: 'red_test_group',
       position: [0, 0], heading: 0,
     }, catalog)).toThrow('Unknown force package');
+  });
+
+  test('skirmish generator compiles valid scenarios across all theaters and expansion force packages', () => {
+    const theaters = Object.keys(SKIRMISH_THEATER_PRESETS) as Array<keyof typeof SKIRMISH_THEATER_PRESETS>;
+    for (const theaterId of theaters) {
+      const redPkg = theaterId === 'inland_highland' ? 'germany_ground_group' : 'india_carrier_group';
+      const bluePkg = theaterId === 'inland_highland' ? 'france_ground_group' : 'japan_maritime_task_group';
+      const scenario = buildSkirmishScenario({
+        theaterId,
+        redPackageIds: [redPkg],
+        bluePackageIds: [bluePkg],
+        durationSec: 1800,
+        weatherCondition: 'overcast',
+        seaState: 3,
+      });
+      expect(scenario.units.length).toBeGreaterThanOrEqual(4);
+      expect(scenario.objectives?.length).toBe(4);
+      expect(compileScenario(scenario).scenario.id).toBe(scenario.id);
+    }
+    expect(Object.keys(ALL_SKIRMISH_FORCE_PACKAGES).length).toBe(30);
   });
 
   test('every loadout resolves compatible kinematics, endurance, RCS and finite ammunition', () => {

@@ -6,6 +6,7 @@ import { CatalogViewerModal } from './modals/CatalogViewerModal';
 import { ScenarioBuilderModal } from './modals/ScenarioBuilderModal';
 import { ScenarioIoModal } from './modals/ScenarioIoModal';
 import { UnitSpawnerModal } from './modals/UnitSpawnerModal';
+import { SkirmishModal } from './modals/SkirmishModal';
 
 export const TacticalModals: React.FC = () => {
   const activeModal = useWargameStore((s) => s.activeModal);
@@ -51,6 +52,7 @@ export const TacticalModals: React.FC = () => {
       {activeModal === 'builder' && <ScenarioBuilderModal />}
       {activeModal === 'aar' && <AarDebriefModal />}
       {activeModal === 'scenario_io' && <ScenarioIoModal />}
+      {activeModal === 'skirmish' && <SkirmishModal />}
     </div>
   );
 };

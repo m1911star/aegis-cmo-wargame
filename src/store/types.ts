@@ -197,7 +197,8 @@ export interface WargameStoreState {
     | 'aar'
     | 'builder'
     | 'catalog_viewer'
-    | 'unit_spawner';
+    | 'unit_spawner'
+    | 'skirmish';
 
   // --- Actions ---
   loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number) => void;
