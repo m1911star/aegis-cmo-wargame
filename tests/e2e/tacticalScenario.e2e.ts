@@ -230,3 +230,21 @@ test('displays v3 guidance channels, submarine baffle-clearing switch, and airbo
   await page.getByRole('button', { name: '投掷入水' }).first().click();
   await expect(page.locator('#inspector-panel').getByText(/BUOY-/)).toBeVisible();
 });
+
+test('browses force packages in catalog and deploys a force package on the map in sandbox builder', async ({ page }) => {
+  await page.getByRole('button', { name: '装备库' }).click();
+  await page.getByRole('button', { name: /军队配置 \(/ }).click();
+  await expect(page.getByRole('dialog').getByText('红方水面护航分队')).toBeVisible();
+  await page.getByLabel('关闭装备库').click();
+
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
+  await page.getByRole('button', { name: '指挥模式' }).click();
+  await page.getByRole('button', { name: '想定编辑' }).click();
+  await page.getByLabel('部署军队配置').selectOption('red_surface_group');
+  await page.getByRole('button', { name: '选择后点击地图部署' }).click();
+  const canvas = page.locator('.maplibregl-canvas');
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5);
+  await expect(page.getByText(/军队配置已部署：红方水面护航分队/)).toBeVisible();
+});

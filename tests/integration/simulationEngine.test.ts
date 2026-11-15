@@ -21,6 +21,8 @@ import {
   validateAndParseScenarioJson,
   exportCurrentStateAsScenarioJson,
 } from '../../src/scenarios/builtinScenarios';
+import { useWargameStore } from '../../src/store/useWargameStore';
+import { canonicalBattleState, captureBattleRecording, replayBattleRecording } from '../../src/store/battleRecording';
 
 describe('AEGIS-CMO // 物理公式与传感器视距测试 (Physics & Horizon Formulas)', () => {
   test('地球曲率雷达视距公式：水面舰艇对掠海导弹视距受限，高空预警机大幅扩展视距', () => {
@@ -392,5 +394,27 @@ describe('AEGIS-CMO // 半实时推演闭环测试 (Kinematics, Fog of War, Miss
     expect(validateAndParseScenarioJson(
       exportCurrentStateAsScenarioJson(afterPackage.currentScenario, afterPackage.units)
     ).valid).toBe(true);
+  });
+
+  test('sandbox force-package deployment records and replays deterministically via Recording v2', () => {
+    useWargameStore.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 31337);
+    const store = useWargameStore.getState();
+    store.setPlayMode('sandbox');
+    const blueGroup = useWargameStore.getState().groups.find((group) => group.side === 'BLUE');
+    expect(blueGroup).toBeDefined();
+    store.startForcePackageSpawnOnMap({
+      forcePackageId: 'blue_carrier_group',
+      side: 'BLUE',
+      parentGroupId: blueGroup!.id,
+    });
+    store.spawnUnitAtCoordinate([124.2, 27.1]);
+    store.stepSingleTick(2);
+
+    const expected = canonicalBattleState();
+    const recording = JSON.parse(JSON.stringify(captureBattleRecording()));
+    expect(recording.commands.some((cmd: { action: string }) => cmd.action === 'startForcePackageSpawnOnMap')).toBe(true);
+    for (const batch of [1, 5, 15, 60]) {
+      expect(replayBattleRecording(recording, batch)).toEqual(expected);
+    }
   });
 });
