@@ -88,6 +88,14 @@ export function resolveWithdrawalAreas(
       unit.missionState = 'recovering';
       unit.airRefuelState = undefined;
       unit.evasionState = undefined;
+      if (unit.hostCarrierId) {
+        const host = units[unit.hostCarrierId];
+        for (const slot of host?.hangar ?? []) {
+          if (slot.activeSortieIds.includes(unit.id)) {
+            slot.activeSortieIds = slot.activeSortieIds.filter((id) => id !== unit.id);
+          }
+        }
+      }
       logs.push({
         id: `withdraw_${objective.id}_${unit.id}_${simTime}`,
         simTime,

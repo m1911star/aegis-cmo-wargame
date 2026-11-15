@@ -1,5 +1,5 @@
 import type { EquipmentCatalog, RuntimeUnit } from '../types/wargame';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { resolveUnitConfiguration } from './unitConfiguration';
 
 export function isActiveUnit(unit: RuntimeUnit): boolean {
   return unit.hp > 0 && unit.status !== 'destroyed' && unit.status !== 'recovered';

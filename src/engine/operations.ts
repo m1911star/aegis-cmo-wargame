@@ -1,6 +1,6 @@
 import * as turf from '@turf/turf';
 import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScenarioEnvironment, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { resolveUnitConfiguration } from './unitConfiguration';
 import { getCompiledPolygon, isRouteAllowed, pointInBbox } from './environment';
 import { guidanceProfile } from './fireControl';
 import { getBearingDeg, getDistanceKm } from './geometry';
@@ -94,8 +94,26 @@ export function updateUnitOperations(
 
   // Submarine periodic S-turn baffle-clearing maneuver (clears stern ±30° sonar baffles every 180s for 20s)
   if (unit.domain === 'subsurface' && isActiveUnit(unit)) {
+    const syncExternalBaffleRoute = () => {
+      const state = unit.baffleClearState;
+      if (!state || state.untilSimTime <= 0) return;
+      const managed = state.managedWaypointPosition;
+      const external = unit.waypoints
+        .filter(
+          (w) =>
+            !managed ||
+            Math.abs(w.position[0] - managed[0]) > 1e-7 ||
+            Math.abs(w.position[1] - managed[1]) > 1e-7
+        )
+        .map((w) => ({ ...w, position: [...w.position] as [number, number] }));
+      if (external.length > 0) {
+        state.savedWaypoints = external;
+        state.savedHeading = getBearingDeg(unit.position, external[0].position);
+      }
+    };
     if (!unitEffDoctrine.baffleClearPeriodic || unit.status === 'evading' || unit.missionTargetId) {
       if (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0) {
+        syncExternalBaffleRoute();
         unit.heading = unit.baffleClearState.savedHeading;
         unit.waypoints = unit.baffleClearState.savedWaypoints.map((w) => ({ ...w, position: [...w.position] as [number, number] }));
         unit.baffleClearState = {
@@ -113,11 +131,13 @@ export function updateUnitOperations(
         nextAtSimTime: simTime + 180_000,
       };
       if (unit.baffleClearState.untilSimTime > 0) {
+        syncExternalBaffleRoute();
         if (simTime >= unit.baffleClearState.untilSimTime) {
           unit.heading = unit.baffleClearState.savedHeading;
           unit.waypoints = unit.baffleClearState.savedWaypoints.map((w) => ({ ...w, position: [...w.position] as [number, number] }));
           unit.baffleClearState.untilSimTime = 0;
           unit.baffleClearState.savedWaypoints = [];
+          unit.baffleClearState.managedWaypointPosition = undefined;
           unit.baffleClearState.nextAtSimTime = simTime + 180_000;
         }
       } else if (simTime >= unit.baffleClearState.nextAtSimTime) {
@@ -129,6 +149,7 @@ export function updateUnitOperations(
           unit.baffleClearState = {
             savedHeading: unit.heading,
             savedWaypoints: unit.waypoints.map((w) => ({ ...w, position: [...w.position] as [number, number] })),
+            managedWaypointPosition: [...clearDest],
             untilSimTime: simTime + 20_000,
             nextAtSimTime: simTime + 200_000,
           };

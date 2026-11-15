@@ -1,11 +1,10 @@
 import * as turf from '@turf/turf';
-import { resolveUnitConfiguration } from '../../db/unitConfiguration';
 import type {
   EquipmentCatalog,
   InitialUnitPlacement,
   RuntimeUnit,
 } from '../../types/wargame';
-import { createRuntimeWeaponMounts } from '../unitConfiguration';
+import { createRuntimeWeaponMounts, resolveUnitConfiguration } from '../unitConfiguration';
 
 /** Instantiate one scenario placement without mutating its input. */
 export function createRuntimeUnitFromPlacement(

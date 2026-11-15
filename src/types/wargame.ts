@@ -288,6 +288,7 @@ export interface CountermeasureInventory {
 export interface EvasionState {
   threatContactId: string;
   untilSimTime: number;
+  managedWaypointPosition?: [number, number];
   resumeStatus: 'operational' | 'engaged';
   resumeNavigationMode?: RuntimeUnit['navigationMode'];
   resumeWaypoints: RouteLeg[];
@@ -300,6 +301,8 @@ export interface EvasionState {
 export interface AirRefuelState {
   tankerId: string;
   phase: 'rendezvous' | 'refueling';
+  transferredFuelSec?: number;
+  managedWaypointPosition?: [number, number];
   resumeNavigationMode?: RuntimeUnit['navigationMode'];
   resumeWaypoints: RouteLeg[];
   resumeMissionTargetId?: string;
@@ -359,6 +362,7 @@ export interface RuntimeUnit {
   baffleClearState?: {
     savedHeading: number;
     savedWaypoints: RouteLeg[];
+    managedWaypointPosition?: [number, number];
     untilSimTime: number;
     nextAtSimTime: number;
   };

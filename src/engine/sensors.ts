@@ -1,6 +1,6 @@
 import * as turf from '@turf/turf';
 import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { resolveUnitConfiguration } from './unitConfiguration';
 import {
   acousticRangeFactor,
   evaluateWeatherModifiers,

@@ -133,8 +133,8 @@ export function advanceWeaponPhysics({
       );
       if (distanceToEntryKm <= stepKm + 1e-9) {
         missile.position = [...missile.aimPosition];
-        missile.altitudeM = weapon.waterEntryAltitudeM!;
-        missile.speedKts = weapon.waterEntrySpeedKts!;
+        missile.altitudeM = weapon.waterEntryAltitudeM ?? -45;
+        missile.speedKts = weapon.waterEntrySpeedKts ?? weapon.speedKts;
         missile.maxRangeKm = weapon.maxRangeKm;
         missile.traveledKm = 0;
         missile.distanceRemainingKm = weapon.maxRangeKm;

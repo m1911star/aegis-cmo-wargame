@@ -120,6 +120,8 @@ export function launchCarrierSortie(
   return launched;
 }
 
+export const MAX_FAILED_SORTIE_ORDERS = 32;
+
 export function processPendingSortieOrders(
   orders: PendingSortieOrder[],
   units: Record<string, RuntimeUnit>,
@@ -196,7 +198,14 @@ export function processPendingSortieOrders(
       aarType: 'sortie',
     });
   }
-  return remaining;
+  const failedCount = remaining.filter((order) => order.status === 'failed').length;
+  if (failedCount <= MAX_FAILED_SORTIE_ORDERS) return remaining;
+  let excessFailed = failedCount - MAX_FAILED_SORTIE_ORDERS;
+  return remaining.filter((order) => {
+    if (order.status !== 'failed' || excessFailed <= 0) return true;
+    excessFailed -= 1;
+    return false;
+  });
 }
 
 export interface DeployCarriedResult {

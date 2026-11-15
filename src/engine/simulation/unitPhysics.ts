@@ -1,5 +1,5 @@
 import * as turf from '@turf/turf';
-import { resolveUnitConfiguration } from '../../db/unitConfiguration';
+import { resolveUnitConfiguration } from '../unitConfiguration';
 import type {
   CombatLogEntry,
   EquipmentCatalog,
@@ -57,13 +57,20 @@ export function advanceUnitPhysics({
   for (const unit of Object.values(units)) {
     const unitActive = isActiveUnit(unit);
     for (const slot of unit.hangar || []) {
-      const survivingSorties = slot.activeSortieIds.filter((sortieId) => {
+      const stillAirborne: string[] = [];
+      let lostSorties = 0;
+      for (const sortieId of slot.activeSortieIds) {
         const sortie = units[sortieId];
-        return !!sortie && sortie.hp > 0 && sortie.status !== 'destroyed';
-      });
-      const lostSorties = slot.activeSortieIds.length - survivingSorties.length;
+        if (!sortie || sortie.hp <= 0 || sortie.status === 'destroyed') {
+          lostSorties += 1;
+        } else if (sortie.status !== 'recovered') {
+          stillAirborne.push(sortieId);
+        }
+      }
+      if (stillAirborne.length !== slot.activeSortieIds.length) {
+        slot.activeSortieIds = stillAirborne;
+      }
       if (lostSorties > 0) {
-        slot.activeSortieIds = survivingSorties;
         slot.totalAirframes = Math.max(0, slot.totalAirframes - lostSorties);
       }
 
@@ -191,6 +198,38 @@ export function advanceUnitPhysics({
         unit.waypoints = [];
       }
     }
+    const assignedMission = unit.assignedMissionId
+      ? missions.find((candidate) => candidate.id === unit.assignedMissionId && candidate.isActive)
+      : undefined;
+    if (unit.waypoints.length === 0 && assignedMission &&
+        unit.navigationMode !== 'manual' && unit.status !== 'returning') {
+      if (assignedMission.type === 'aew_support' || assignedMission.type === 'tanker_support') {
+        const routeIndex = (unit.missionRouteIndex ?? 0) % assignedMission.areaPolygon.length;
+        unit.waypoints.push({ position: [...assignedMission.areaPolygon[routeIndex]] });
+        unit.missionRouteIndex = (routeIndex + 1) % assignedMission.areaPolygon.length;
+        if (unit.missionState !== 'on_station') unit.missionState = 'ingress';
+      } else if (assignedMission.type !== 'escort') {
+        unit.waypoints.push({
+          position: turf.pointOnFeature(
+            getCompiledPolygon(assignedMission.areaPolygon).feature
+          ).geometry.coordinates as [number, number],
+        });
+      }
+    }
+
+    if (unit.waypoints.length > 0) {
+      const targetWaypoint = unit.waypoints[0];
+      if (targetWaypoint.speedKts !== undefined) {
+        unit.targetSpeedKts = Math.max(0, Math.min(speedLimit, targetWaypoint.speedKts));
+      }
+      if (targetWaypoint.altitudeM !== undefined) {
+        unit.targetAltitudeM = Math.max(
+          configuration.platform.minAltitudeM,
+          Math.min(configuration.platform.maxAltitudeM, targetWaypoint.altitudeM)
+        );
+      }
+    }
+
     unit.targetSpeedKts = Math.max(
       0,
       Math.min(speedLimit, unit.targetSpeedKts)
@@ -212,37 +251,11 @@ export function advanceUnitPhysics({
         Math.sign(diff) * Math.min(Math.abs(diff), accelKtsPerSec * dtSec);
     }
 
-    const assignedMission = unit.assignedMissionId
-      ? missions.find((candidate) => candidate.id === unit.assignedMissionId && candidate.isActive)
-      : undefined;
-    if (unit.waypoints.length === 0 && assignedMission &&
-        unit.navigationMode !== 'manual' && unit.status !== 'returning') {
-      if (assignedMission.type === 'aew_support' || assignedMission.type === 'tanker_support') {
-        const routeIndex = (unit.missionRouteIndex ?? 0) % assignedMission.areaPolygon.length;
-        unit.waypoints.push({ position: [...assignedMission.areaPolygon[routeIndex]] });
-        unit.missionRouteIndex = (routeIndex + 1) % assignedMission.areaPolygon.length;
-        if (unit.missionState !== 'on_station') unit.missionState = 'ingress';
-      } else if (assignedMission.type !== 'escort') {
-        unit.waypoints.push({
-          position: turf.pointOnFeature(
-            getCompiledPolygon(assignedMission.areaPolygon).feature
-          ).geometry.coordinates as [number, number],
-        });
-      }
-    }
-
     if (unit.speedKts <= 0.1) continue;
     const stepDistKm = (unit.speedKts * KTS_TO_KMPH * dtSec) / 3600;
 
     if (unit.waypoints.length > 0) {
       const targetWaypoint = unit.waypoints[0];
-      if (targetWaypoint.speedKts !== undefined) {
-        unit.targetSpeedKts = Math.max(0, Math.min(speedLimit, targetWaypoint.speedKts));
-      }
-      if (targetWaypoint.altitudeM !== undefined) {
-        unit.targetAltitudeM = Math.max(configuration.platform.minAltitudeM,
-          Math.min(configuration.platform.maxAltitudeM, targetWaypoint.altitudeM));
-      }
       const distanceToWaypointKm = getDistanceKm(
         unit.position,
         targetWaypoint.position

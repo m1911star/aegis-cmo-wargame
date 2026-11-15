@@ -1,4 +1,3 @@
-import { resolveUnitConfiguration } from '../../db/unitConfiguration';
 import { deployCarriedUnitFromLauncher, evaluateCarrierSortieAvailability, launchCarrierSortie } from '../../engine/carrierOperations';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
 import { findShootAndScootDestination, isRouteAllowed } from '../../engine/environment';
@@ -7,7 +6,11 @@ import { launchGuidance } from '../../engine/guidance';
 import { effectiveDoctrine } from '../../engine/operations';
 import { createRuntimeUnitFromPlacement, getBearingDeg } from '../../engine/simulationEngine';
 import { getUnitCapabilities } from '../../engine/unitCapabilities';
-import { createRuntimeWeaponMounts, recordWeaponLaunch } from '../../engine/unitConfiguration';
+import {
+  createRuntimeWeaponMounts,
+  recordWeaponLaunch,
+  resolveUnitConfiguration,
+} from '../../engine/unitConfiguration';
 import { emitActionFeedback } from '../actionFeedbackBus';
 import type {
   CombatLogEntry,
@@ -34,6 +37,76 @@ function routeLegsAllowed(unit: RuntimeUnit, waypoints: RouteLeg[], environment:
   return true;
 }
 
+function getPlannedWaypoints(unit: RuntimeUnit): RouteLeg[] {
+  if (unit.airRefuelState) return unit.airRefuelState.resumeWaypoints;
+  if (unit.evasionState) return unit.evasionState.resumeWaypoints;
+  if (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0) {
+    return unit.baffleClearState.savedWaypoints;
+  }
+  return unit.waypoints;
+}
+
+function applyManualWaypointsToUnit(
+  unit: RuntimeUnit,
+  plannedWaypoints: RouteLeg[],
+  nextHeading?: number,
+  nextSpeed?: number
+): RuntimeUnit {
+  const cloned = plannedWaypoints.map((w) => ({
+    ...w,
+    position: [...w.position] as [number, number],
+  }));
+  if (unit.airRefuelState) {
+    return {
+      ...unit,
+      airRefuelState: {
+        ...unit.airRefuelState,
+        resumeNavigationMode: 'manual',
+        resumeWaypoints: cloned,
+        resumeMissionTargetId: undefined,
+      },
+    };
+  }
+  if (unit.evasionState) {
+    return {
+      ...unit,
+      evasionState: {
+        ...unit.evasionState,
+        resumeNavigationMode: 'manual',
+        resumeWaypoints: cloned,
+        resumeMissionTargetId: undefined,
+        resumeFormationLeaderId: undefined,
+        resumeFormationOffset: undefined,
+      },
+    };
+  }
+  const clearedBaffle =
+    unit.baffleClearState && unit.baffleClearState.untilSimTime > 0
+      ? {
+          ...unit.baffleClearState,
+          savedWaypoints: [],
+          managedWaypointPosition: undefined,
+          untilSimTime: 0,
+        }
+      : unit.baffleClearState;
+  return {
+    ...unit,
+    waypoints: cloned,
+    navigationMode: 'manual',
+    missionTargetId: undefined,
+    formationLeaderId: undefined,
+    formationOffset: undefined,
+    baffleClearState: clearedBaffle,
+    ...(nextHeading !== undefined ? { heading: nextHeading } : {}),
+    ...(nextSpeed !== undefined
+      ? {
+          speedKts: nextSpeed,
+          targetSpeedKts: Math.max(unit.targetSpeedKts, nextSpeed),
+        }
+      : {}),
+  };
+}
+
 export function createCommandSlice(set: StoreSet) {
   return {
     appendUnitWaypoint: (
@@ -53,7 +126,8 @@ export function createCommandSlice(set: StoreSet) {
             altitudeM !== undefined && (!Number.isFinite(altitudeM) || altitudeM < configuration.platform.minAltitudeM ||
               altitudeM > configuration.platform.maxAltitudeM)) return s;
         const leg: RouteLeg = { position: [...coord], speedKts, altitudeM };
-        const nextWaypoints = replaceAll ? [leg] : [...unit.waypoints, leg];
+        const baseWaypoints = getPlannedWaypoints(unit);
+        const nextWaypoints = replaceAll ? [leg] : [...baseWaypoints, leg];
         if (!routeLegsAllowed(unit, nextWaypoints, s.environment)) {
           emitActionFeedback('warning', `${unit.callsign} 航路被海陆地形边界阻挡，未添加航点`);
           return s;
@@ -79,15 +153,7 @@ export function createCommandSlice(set: StoreSet) {
         return {
           units: {
             ...s.units,
-            [unitId]: {
-              ...unit,
-              waypoints: nextWaypoints,
-              navigationMode: 'manual', missionTargetId: undefined,
-              formationLeaderId: undefined, formationOffset: undefined,
-              heading: nextHeading,
-              speedKts: nextSpeed,
-              targetSpeedKts: Math.max(unit.targetSpeedKts, nextSpeed),
-            },
+            [unitId]: applyManualWaypointsToUnit(unit, nextWaypoints, nextHeading, nextSpeed),
           },
           logs: [newLog, ...s.logs].slice(0, 250),
         };
@@ -95,37 +161,46 @@ export function createCommandSlice(set: StoreSet) {
 
     updateUnitWaypoint: (unitId: string, index: number, patch: Partial<RouteLeg>) => set((s) => {
       const unit = s.units[unitId];
-      if (!canCommandUnit(s, unit) || !Number.isSafeInteger(index) || index < 0 || index >= unit.waypoints.length) return s;
+      const baseWaypoints = unit ? getPlannedWaypoints(unit) : [];
+      if (!canCommandUnit(s, unit) || !Number.isSafeInteger(index) || index < 0 || index >= baseWaypoints.length) return s;
       const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
-      const current = unit.waypoints[index];
+      const current = baseWaypoints[index];
       const position = patch.position ?? current.position;
-      const speedKts = patch.speedKts ?? current.speedKts;
-      const altitudeM = patch.altitudeM ?? current.altitudeM;
+      const speedKts = Object.hasOwn(patch, 'speedKts') ? patch.speedKts : current.speedKts;
+      const altitudeM = Object.hasOwn(patch, 'altitudeM') ? patch.altitudeM : current.altitudeM;
       if (!Array.isArray(position) || position.length !== 2 || !Number.isFinite(position[0]) || Math.abs(position[0]) > 180 ||
           !Number.isFinite(position[1]) || Math.abs(position[1]) > 90 ||
           speedKts !== undefined && (!Number.isFinite(speedKts) || speedKts < 0 || speedKts > configuration.maxSpeedKts) ||
           altitudeM !== undefined && (!Number.isFinite(altitudeM) || altitudeM < configuration.platform.minAltitudeM ||
             altitudeM > configuration.platform.maxAltitudeM)) return s;
-      const waypoints = unit.waypoints.map((waypoint, waypointIndex) => waypointIndex === index
+      const waypoints = baseWaypoints.map((waypoint, waypointIndex) => waypointIndex === index
         ? { position: [...position] as [number, number], speedKts, altitudeM }
         : waypoint);
       if (!routeLegsAllowed(unit, waypoints, s.environment)) return s;
-      return { units: { ...s.units, [unitId]: { ...unit, waypoints } } };
+      return { units: { ...s.units, [unitId]: applyManualWaypointsToUnit(unit, waypoints) } };
     }),
 
     removeUnitWaypoint: (unitId: string, index: number) => set((s) => {
       const unit = s.units[unitId];
-      if (!canCommandUnit(s, unit) || !Number.isSafeInteger(index) || index < 0 || index >= unit.waypoints.length) return s;
-      return { units: { ...s.units, [unitId]: { ...unit,
-        waypoints: unit.waypoints.filter((_, waypointIndex) => waypointIndex !== index) } } };
+      const baseWaypoints = unit ? getPlannedWaypoints(unit) : [];
+      if (!canCommandUnit(s, unit) || !Number.isSafeInteger(index) || index < 0 || index >= baseWaypoints.length) return s;
+      const nextWaypoints = baseWaypoints.filter((_, waypointIndex) => waypointIndex !== index);
+      return { units: { ...s.units, [unitId]: applyManualWaypointsToUnit(unit, nextWaypoints) } };
     }),
 
     clearUnitWaypoints: (unitId: string) =>
       set((s) => {
         const unit = s.units[unitId];
         if (!canCommandUnit(s, unit)) return s;
+        const baseWaypoints = getPlannedWaypoints(unit);
+        const inManeuver = !!(
+          unit.airRefuelState ||
+          unit.evasionState ||
+          (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0)
+        );
         if (
-          unit.waypoints.length === 0 &&
+          baseWaypoints.length === 0 &&
+          !inManeuver &&
           unit.navigationMode === 'manual' &&
           unit.missionTargetId === undefined &&
           unit.formationLeaderId === undefined &&
@@ -136,8 +211,7 @@ export function createCommandSlice(set: StoreSet) {
         return {
           units: {
             ...s.units,
-            [unitId]: { ...unit, waypoints: [], navigationMode: 'manual', missionTargetId: undefined,
-              formationLeaderId: undefined, formationOffset: undefined },
+            [unitId]: applyManualWaypointsToUnit(unit, []),
           },
         };
       }),
@@ -162,7 +236,8 @@ export function createCommandSlice(set: StoreSet) {
           if (!canCommandUnit(s, unit)) continue;
           const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
           const leg: RouteLeg = { position: [...coord] };
-          const nextWaypoints = replaceAll ? [leg] : [...unit.waypoints, leg];
+          const baseWaypoints = getPlannedWaypoints(unit);
+          const nextWaypoints = replaceAll ? [leg] : [...baseWaypoints, leg];
           if (!routeLegsAllowed(unit, nextWaypoints, s.environment)) {
             skippedCount += 1;
             continue;
@@ -171,17 +246,7 @@ export function createCommandSlice(set: StoreSet) {
             ? getBearingDeg(unit.position, nextWaypoints[0].position) : unit.heading;
           const nextSpeed = unit.speedKts < 1 && configuration.maxSpeedKts > 0
             ? configuration.cruiseSpeedKts : unit.speedKts;
-          nextUnits[id] = {
-            ...unit,
-            waypoints: nextWaypoints,
-            navigationMode: 'manual',
-            missionTargetId: undefined,
-            formationLeaderId: undefined,
-            formationOffset: undefined,
-            heading: nextHeading,
-            speedKts: nextSpeed,
-            targetSpeedKts: Math.max(unit.targetSpeedKts, nextSpeed),
-          };
+          nextUnits[id] = applyManualWaypointsToUnit(unit, nextWaypoints, nextHeading, nextSpeed);
           logSide = unit.side;
           appliedCount += 1;
         }
@@ -220,8 +285,15 @@ export function createCommandSlice(set: StoreSet) {
         for (const id of uniqueSorted) {
           const unit = s.units[id];
           if (!canCommandUnit(s, unit)) continue;
+          const baseWaypoints = getPlannedWaypoints(unit);
+          const inManeuver = !!(
+            unit.airRefuelState ||
+            unit.evasionState ||
+            (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0)
+          );
           if (
-            unit.waypoints.length === 0 &&
+            baseWaypoints.length === 0 &&
+            !inManeuver &&
             unit.navigationMode === 'manual' &&
             unit.missionTargetId === undefined &&
             unit.formationLeaderId === undefined &&
@@ -229,14 +301,7 @@ export function createCommandSlice(set: StoreSet) {
           ) {
             continue;
           }
-          nextUnits[id] = {
-            ...unit,
-            waypoints: [],
-            navigationMode: 'manual',
-            missionTargetId: undefined,
-            formationLeaderId: undefined,
-            formationOffset: undefined,
-          };
+          nextUnits[id] = applyManualWaypointsToUnit(unit, []);
           changed = true;
         }
         return changed ? { units: nextUnits } : s;

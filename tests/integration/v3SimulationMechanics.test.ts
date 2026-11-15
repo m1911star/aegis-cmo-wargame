@@ -1,12 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
-import { deployCarriedUnitFromLauncher, evaluateCarrierSortieAvailability, launchCarrierSortie } from '../../src/engine/carrierOperations';
+import {
+  MAX_FAILED_SORTIE_ORDERS,
+  deployCarriedUnitFromLauncher,
+  evaluateCarrierSortieAvailability,
+  launchCarrierSortie,
+  processPendingSortieOrders,
+} from '../../src/engine/carrierOperations';
 import { evaluateWeatherModifiers } from '../../src/engine/environment';
 import { countActiveGuidanceChannels, evaluateFireControl, resolveMaxGuidanceChannels } from '../../src/engine/fireControl';
 import { computeFlightProfileAltitudeM, launchGuidance, seekerCanObserve } from '../../src/engine/guidance';
+import { resolveWithdrawalAreas } from '../../src/engine/objectives';
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
+import { advanceAirRefueling } from '../../src/engine/simulation/airRefueling';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
+import { runEvasionAndSoftKill } from '../../src/engine/simulation/evasion';
 import { applySubsystemHitDamage, advanceWeaponPhysics } from '../../src/engine/simulation/weaponPhysics';
 import { advanceSimulation, createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
 import { getUnitCapabilities } from '../../src/engine/unitCapabilities';
@@ -922,5 +931,191 @@ describe('Code review remediation: key-order determinism, no-op command filterin
     store.getState().seekReplayPlayer(recording.untilTick);
     expect(canonicalBattleState()).toEqual(finalCanonical);
     store.getState().exitReplayPlayer();
+  });
+
+  test('sortie withdrawal cleans activeSortieIds without airframe loss, failed sortie orders are bounded, and zero-speed waypoint wakes immediately', () => {
+    const carrier = createRuntimeUnitFromPlacement(
+      placement('red_carrier', {
+        platformId: 'cv18_fujian_carrier',
+        position: [0, 0],
+      }),
+      catalog
+    );
+    const slotId = carrier.hangar![0].slotId;
+    const initialTotal = carrier.hangar![0].totalAirframes;
+    const units: Record<string, typeof carrier> = { red_carrier: carrier };
+    const sortie = launchCarrierSortie(units, catalog, 'red_carrier', slotId);
+    expect(sortie).toBeDefined();
+    expect(carrier.hangar![0].activeSortieIds).toContain(sortie!.id);
+
+    const logs: CombatLogEntry[] = [];
+    resolveWithdrawalAreas(
+      [
+        {
+          id: 'withdraw_air',
+          title: '转场撤离',
+          side: 'RED',
+          type: 'withdraw',
+          required: true,
+          points: 50,
+          unitIds: [sortie!.id],
+          withdrawAreaPolygon: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
+        },
+      ],
+      units,
+      1000,
+      logs
+    );
+    expect(sortie!.status).toBe('recovered');
+    expect(carrier.hangar![0].activeSortieIds).toEqual([]);
+    expect(carrier.hangar![0].totalAirframes).toBe(initialTotal);
+
+    // Bounded failed sortie orders retain failureReason without growing unboundedly
+    const manyOrders = Array.from({ length: 45 }, (_, idx) => ({
+      orderId: `bad_order_${String(idx).padStart(2, '0')}`,
+      eventId: 'evt_bad',
+      carrierUnitId: 'missing_carrier',
+      hangarSlotId: 'j35_slot',
+      earliestLaunchTime: idx * 100,
+      attempts: 0,
+      status: 'pending' as const,
+    }));
+    const bounded = processPendingSortieOrders(manyOrders, units, [], catalog, 10_000, emptyScore(), logs);
+    expect(bounded.length).toBe(MAX_FAILED_SORTIE_ORDERS);
+    expect(bounded.every((o) => o.status === 'failed' && !!o.failureReason)).toBe(true);
+
+    // Stationary unit given a waypoint with speedKts > 0 wakes up on tick 1 without 1-tick lag
+    const stationaryShip = createRuntimeUnitFromPlacement(
+      placement('stationary_ddg', { position: [0, 0], speedKts: 0 }),
+      catalog
+    );
+    stationaryShip.waypoints = [{ position: [0.5, 0], speedKts: 24 }];
+    const stepped = advanceSimulation(
+      {
+        startTime: 0,
+        simTime: 0,
+        tick: 0,
+        rngState: 42,
+        units: { stationary_ddg: stationaryShip },
+        contacts: {},
+        weaponsInFlight: {},
+        explosions: [],
+        missions: [],
+        score: emptyScore(),
+      },
+      catalog,
+      1,
+      { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false },
+      'RED'
+    ).nextState;
+    expect(stepped.units.stationary_ddg.targetSpeedKts).toBe(24);
+    expect(stepped.units.stationary_ddg.speedKts).toBeGreaterThan(0);
+  });
+
+  test('player-commanded waypoints during air refueling, missile evasion, and sub baffle-clearing are preserved and cumulative fuel transfer is logged', () => {
+    // 1. Air refueling cumulative fuel log + post-refuel waypoint preservation
+    const tanker = createRuntimeUnitFromPlacement(
+      placement('red_tanker', {
+        platformId: 'y20u_tanker',
+        position: [0, 0],
+        altitudeM: 8000,
+        speedKts: 420,
+      }),
+      catalog
+    );
+    const fighter = createRuntimeUnitFromPlacement(
+      placement('red_j20', {
+        platformId: 'j20_mighty_dragon',
+        position: [0.002, 0],
+        altitudeM: 8000,
+        speedKts: 420,
+      }),
+      catalog
+    );
+    const maxFuel = fighter.fuelRemainingSec;
+    fighter.fuelRemainingSec = maxFuel - 120;
+    tanker.aarQueue = [fighter.id];
+    fighter.airRefuelState = {
+      tankerId: tanker.id,
+      phase: 'refueling',
+      resumeNavigationMode: 'manual',
+      resumeWaypoints: [{ position: [-1, -1] }],
+    };
+    const aarUnits = { red_tanker: tanker, red_j20: fighter };
+    const aarLogs: CombatLogEntry[] = [];
+    advanceAirRefueling(aarUnits, catalog, 250, 0.25, aarLogs);
+    expect(fighter.airRefuelState).toBeDefined();
+    // Player commands a new post-refueling route mid-refueling!
+    fighter.waypoints = [{ position: [2.5, 1.5], speedKts: 520 }];
+    for (let step = 2; step <= 40 && fighter.airRefuelState; step++) {
+      advanceAirRefueling(aarUnits, catalog, step * 250, 0.25, aarLogs);
+    }
+    expect(fighter.airRefuelState).toBeUndefined();
+    expect(fighter.waypoints).toEqual([{ position: [2.5, 1.5], speedKts: 520 }]);
+    const completeLog = aarLogs.find((l) => l.title.includes('空中加油结束'));
+    expect(completeLog?.message).toContain('转移 120.0 秒燃油预算');
+
+    // 2. Evasion route preservation
+    const evader = createRuntimeUnitFromPlacement(
+      placement('red_evader', {
+        platformId: 'j10c_multirole',
+        position: [0, 0],
+        altitudeM: 7000,
+        speedKts: 480,
+        doctrine: { autoEvade: true, emconRadar: true },
+      }),
+      catalog
+    );
+    evader.waypoints = [{ position: [-2, 0] }];
+    const inbound: WeaponInFlight = {
+      id: 'in_aim120',
+      weaponId: 'aim120d',
+      name: 'AIM-120D',
+      side: 'BLUE',
+      shooterId: 'blue_f35',
+      shooterName: 'F-35A',
+      targetId: evader.id,
+      targetType: 'unit',
+      position: [0.15, 0],
+      launchPosition: [0.5, 0],
+      altitudeM: 7000,
+      heading: 270,
+      speedKts: 2200,
+      traveledKm: 0,
+      maxRangeKm: 160,
+      distanceRemainingKm: 16,
+      basePk: 0.85,
+      warheadDamage: 80,
+      trail: [[0.15, 0]],
+      seekerState: 'terminal_locked',
+    };
+    const evadeUnits = { red_evader: evader };
+    const evadeLogs: CombatLogEntry[] = [];
+    runEvasionAndSoftKill({ units: evadeUnits, weaponsInFlight: { in_aim120: inbound }, catalog, nextSimTime: 1000, logs: evadeLogs });
+    expect(evader.evasionState).toBeDefined();
+    // Player sets a new post-evasion route while evading
+    evader.waypoints = [{ position: [1.2, 0.8] }];
+    runEvasionAndSoftKill({ units: evadeUnits, weaponsInFlight: {}, catalog, nextSimTime: 15_000, logs: evadeLogs });
+    expect(evader.evasionState).toBeUndefined();
+    expect(evader.waypoints).toEqual([{ position: [1.2, 0.8] }]);
+
+    // 3. Submarine baffle-clear route preservation
+    const sub = createRuntimeUnitFromPlacement(
+      placement('red_sub_bc', {
+        platformId: 'type093b_ssn',
+        position: [0, 0],
+        altitudeM: -120,
+        speedKts: 8,
+        doctrine: { baffleClearPeriodic: true },
+      }),
+      catalog
+    );
+    sub.waypoints = [{ position: [-1, 0] }];
+    updateUnitOperations(sub, { red_sub_bc: sub }, {}, [], catalog, 1000, 1, emptyScore(), []);
+    updateUnitOperations(sub, { red_sub_bc: sub }, {}, [], catalog, 182_000, 1, emptyScore(), []);
+    expect(sub.baffleClearState?.untilSimTime).toBeGreaterThan(182_000);
+    sub.waypoints = [{ position: [0.9, 0.4] }];
+    updateUnitOperations(sub, { red_sub_bc: sub }, {}, [], catalog, 205_000, 1, emptyScore(), []);
+    expect(sub.waypoints).toEqual([{ position: [0.9, 0.4] }]);
   });
 });

@@ -1,6 +1,6 @@
 import * as turf from '@turf/turf';
 import type { CombatLogEntry, EquipmentCatalog, RuntimeUnit, WeaponInFlight } from '../../types/wargame';
-import { resolveUnitConfiguration } from '../../db/unitConfiguration';
+import { resolveUnitConfiguration } from '../unitConfiguration';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { observeMissile } from '../sensors';
 import { isActiveUnit } from '../unitCapabilities';
@@ -11,9 +11,34 @@ function angularDifference(a: number, b: number): number {
   return Math.abs(((a - b + 540) % 360) - 180);
 }
 
+function syncExternalEvasionRoute(unit: RuntimeUnit): void {
+  const state = unit.evasionState;
+  if (!state) return;
+  const managed = state.managedWaypointPosition;
+  const external = unit.waypoints
+    .filter(
+      (waypoint) =>
+        !managed ||
+        Math.abs(waypoint.position[0] - managed[0]) > 1e-7 ||
+        Math.abs(waypoint.position[1] - managed[1]) > 1e-7
+    )
+    .map((waypoint) => ({
+      ...waypoint,
+      position: [...waypoint.position] as [number, number],
+    }));
+  if (external.length > 0) {
+    state.resumeNavigationMode = 'manual';
+    state.resumeWaypoints = external;
+    state.resumeMissionTargetId = undefined;
+    state.resumeFormationLeaderId = undefined;
+    state.resumeFormationOffset = undefined;
+  }
+}
+
 function restoreEvasion(unit: RuntimeUnit): void {
   const state = unit.evasionState;
   if (!state) return;
+  syncExternalEvasionRoute(unit);
   unit.status = state.resumeStatus;
   unit.navigationMode = state.resumeNavigationMode;
   unit.waypoints = state.resumeWaypoints.map((waypoint) => ({
@@ -99,6 +124,7 @@ export function runEvasionAndSoftKill({
         unitId: unit.id,
       });
     } else {
+      syncExternalEvasionRoute(unit);
       unit.evasionState.threatContactId = threat.observed.id;
       unit.evasionState.untilSimTime = nextSimTime + EVASION_MEMORY_MS;
     }
@@ -155,6 +181,7 @@ export function runEvasionAndSoftKill({
     unit.formationOffset = undefined;
     unit.missionTargetId = undefined;
     unit.targetSpeedKts = Math.max(unit.targetSpeedKts, configuration.cruiseSpeedKts);
+    unit.evasionState.managedWaypointPosition = [...evadePoint];
     unit.waypoints = [{ position: evadePoint, speedKts: Math.min(configuration.maxSpeedKts, configuration.cruiseSpeedKts * 1.15) }];
   }
 }

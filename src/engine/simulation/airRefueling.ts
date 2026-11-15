@@ -1,11 +1,41 @@
-import type { CombatLogEntry, EquipmentCatalog, RuntimeUnit } from '../../types/wargame';
-import { resolveUnitConfiguration } from '../../db/unitConfiguration';
+import type { CombatLogEntry, EquipmentCatalog, RouteLeg, RuntimeUnit } from '../../types/wargame';
+import { resolveUnitConfiguration } from '../unitConfiguration';
 import { getDistanceKm } from '../geometry';
 import { isActiveUnit } from '../unitCapabilities';
+
+function extractExternalWaypoints(
+  waypoints: RouteLeg[],
+  managedPosition?: [number, number]
+): RouteLeg[] {
+  if (!waypoints.length) return [];
+  return waypoints
+    .filter(
+      (waypoint) =>
+        !managedPosition ||
+        Math.abs(waypoint.position[0] - managedPosition[0]) > 1e-7 ||
+        Math.abs(waypoint.position[1] - managedPosition[1]) > 1e-7
+    )
+    .map((waypoint) => ({
+      ...waypoint,
+      position: [...waypoint.position] as [number, number],
+    }));
+}
+
+function syncExternalRefuelRoute(receiver: RuntimeUnit): void {
+  const state = receiver.airRefuelState;
+  if (!state) return;
+  const external = extractExternalWaypoints(receiver.waypoints, state.managedWaypointPosition);
+  if (external.length > 0) {
+    state.resumeNavigationMode = 'manual';
+    state.resumeWaypoints = external;
+    state.resumeMissionTargetId = undefined;
+  }
+}
 
 function restoreReceiver(receiver: RuntimeUnit): void {
   const state = receiver.airRefuelState;
   if (!state) return;
+  syncExternalRefuelRoute(receiver);
   if (receiver.status !== 'returning') {
     receiver.navigationMode = state.resumeNavigationMode;
     receiver.waypoints = state.resumeWaypoints.map((waypoint) => ({
@@ -49,14 +79,17 @@ export function advanceAirRefueling(
 
     const receiver = units[tanker.aarQueue[0]];
     if (!receiver?.airRefuelState) continue;
+    syncExternalRefuelRoute(receiver);
     const distanceKm = getDistanceKm(receiver.position, tanker.position);
     const altitudeDeltaM = Math.abs(receiver.altitudeM - tanker.altitudeM);
     const speedDeltaKts = Math.abs(receiver.speedKts - tanker.speedKts);
     if (distanceKm > 1.5 || altitudeDeltaM > 300 || speedDeltaKts > 60) {
+      const managedPos: [number, number] = [...tanker.position];
       receiver.airRefuelState.phase = 'rendezvous';
+      receiver.airRefuelState.managedWaypointPosition = managedPos;
       receiver.navigationMode = 'manual';
       receiver.waypoints = [{
-        position: [...tanker.position],
+        position: managedPos,
         speedKts: tanker.targetSpeedKts,
         altitudeM: tanker.targetAltitudeM,
       }];
@@ -64,6 +97,7 @@ export function advanceAirRefueling(
     }
 
     receiver.airRefuelState.phase = 'refueling';
+    receiver.airRefuelState.managedWaypointPosition = undefined;
     receiver.navigationMode = 'manual';
     receiver.waypoints = [];
     receiver.targetSpeedKts = tanker.targetSpeedKts;
@@ -77,7 +111,10 @@ export function advanceAirRefueling(
     );
     receiver.fuelRemainingSec += transfer;
     tanker.aarFuelRemainingSec -= transfer;
+    receiver.airRefuelState.transferredFuelSec =
+      (receiver.airRefuelState.transferredFuelSec ?? 0) + transfer;
     if (deficit - transfer <= 1e-6 || tanker.aarFuelRemainingSec <= 1e-6) {
+      const totalTransferred = receiver.airRefuelState.transferredFuelSec;
       tanker.aarQueue.shift();
       restoreReceiver(receiver);
       logs.push({
@@ -87,7 +124,7 @@ export function advanceAirRefueling(
         category: 'EVENT',
         severity: 'info',
         title: `${receiver.callsign} 空中加油结束`,
-        message: `转移 ${transfer.toFixed(1)} 秒燃油预算；${tanker.callsign} 剩余可转移燃油 ${tanker.aarFuelRemainingSec.toFixed(1)} 秒。`,
+        message: `转移 ${totalTransferred.toFixed(1)} 秒燃油预算；${tanker.callsign} 剩余可转移燃油 ${tanker.aarFuelRemainingSec.toFixed(1)} 秒。`,
         unitId: receiver.id,
       });
     }
