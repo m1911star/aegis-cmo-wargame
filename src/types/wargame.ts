@@ -708,9 +708,25 @@ export interface AcousticZone extends EnvironmentPolygon {
   sonarRangeFactor: number;
 }
 
+export type SeaStateLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface ScenarioWeather {
+  condition: 'clear' | 'overcast' | 'rain_storm' | 'typhoon_edge';
+  seaState: SeaStateLevel;
+  cloudFloorM: number;
+  cloudCeilingM: number;
+}
+
+export interface WeatherZone extends EnvironmentPolygon {
+  condition: 'rain_storm' | 'heavy_fog';
+  seaStateOverride?: SeaStateLevel;
+}
+
 export interface ScenarioEnvironment {
   landPolygons: EnvironmentPolygon[];
   acousticZones: AcousticZone[];
+  weather?: ScenarioWeather;
+  weatherZones?: WeatherZone[];
 }
 
 export interface ScenarioDefinition {

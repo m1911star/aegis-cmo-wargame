@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
-import { deployCarriedUnitFromLauncher } from '../../src/engine/carrierOperations';
+import { deployCarriedUnitFromLauncher, evaluateCarrierSortieAvailability, launchCarrierSortie } from '../../src/engine/carrierOperations';
+import { evaluateWeatherModifiers } from '../../src/engine/environment';
 import { countActiveGuidanceChannels, evaluateFireControl, resolveMaxGuidanceChannels } from '../../src/engine/fireControl';
-import { computeFlightProfileAltitudeM, launchGuidance } from '../../src/engine/guidance';
+import { computeFlightProfileAltitudeM, launchGuidance, seekerCanObserve } from '../../src/engine/guidance';
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
@@ -552,5 +553,90 @@ describe('Module 4: Missile dogleg waypoints & multi-unit synchronized TOT strik
     for (const batch of [1, 15, 60]) {
       expect(replayBattleRecording(recording, batch)).toEqual(expected);
     }
+  });
+});
+
+describe('Module 5: Cloud layers, rainstorm weather zones & sea-state sensor/deck modifiers', () => {
+  test('cloud decks and rainstorm fronts attenuate IRST/IR seekers while radar remains all-weather, and Sea State 6 suspends frigate helo deck ops', () => {
+    const stormEnv = {
+      landPolygons: [],
+      acousticZones: [],
+      weather: {
+        condition: 'rain_storm' as const,
+        seaState: 5 as const,
+        cloudFloorM: 1200,
+        cloudCeilingM: 6000,
+      },
+      weatherZones: [
+        {
+          id: 'typhoon_squall',
+          name: 'Typhoon Squall',
+          condition: 'rain_storm' as const,
+          seaStateOverride: 6 as const,
+          areaPolygon: [[-0.2, -0.2], [0.8, -0.2], [0.8, 0.2], [-0.2, 0.2]] as [number, number][],
+        },
+      ],
+    };
+
+    // Observer at 9,000m above cloud deck looking down at target at 500m below cloud deck inside squall -> strong optical attenuation!
+    const mods = evaluateWeatherModifiers([0, 0], 9000, [0.45, 0], 500, stormEnv);
+    expect(mods.opticalFactor).toBeLessThan(0.25);
+    expect(mods.localSeaState).toBe(6);
+    expect(mods.passiveSonarFactor).toBeLessThan(0.75);
+
+    const irOnlyCatalog = structuredClone(catalog);
+    irOnlyCatalog.platforms.j20_mighty_dragon.sensorIds = ['eots_irst'];
+    const j20Ir = createRuntimeUnitFromPlacement(
+      placement('j20_ir', { platformId: 'j20_mighty_dragon', position: [0, 0], altitudeM: 9000, doctrine: { roe: 'hold', emconRadar: false } }),
+      irOnlyCatalog
+    );
+    const lowBogey = createRuntimeUnitFromPlacement(
+      placement('low_bogey', { side: 'BLUE', platformId: 'fa18ef_super_hornet', position: [0.45, 0], altitudeM: 500 }),
+      irOnlyCatalog
+    );
+    // Clear sky (no weather): EOTS 110km easily detects bogey at ~50km
+    expect(computeContactsOnly({ j20_ir: j20Ir, low_bogey: lowBogey }, irOnlyCatalog, {}, 0, 0).contacts.RED_CONTACT_low_bogey).toBeDefined();
+    // Across rain_storm cloud deck: EOTS is blocked (< 20km effective range), while active X-band AESA radar penetrates clouds!
+    expect(computeContactsOnly({ j20_ir: j20Ir, low_bogey: lowBogey }, irOnlyCatalog, {}, 0, 0, stormEnv).contacts.RED_CONTACT_low_bogey).toBeUndefined();
+    const j20Radar = createRuntimeUnitFromPlacement(
+      placement('j20_radar', { platformId: 'j20_mighty_dragon', position: [0, 0], altitudeM: 9000, heading: 90, doctrine: { roe: 'hold', emconRadar: true } }),
+      catalog
+    );
+    expect(computeContactsOnly({ j20_radar: j20Radar, low_bogey: lowBogey }, catalog, {}, 0, 0, stormEnv).contacts.RED_CONTACT_low_bogey).toBeDefined();
+
+    // IR missile seeker range also shrinks across cloud/storm front
+    const irMissile: WeaponInFlight = {
+      id: 'ir_m',
+      weaponId: 'pl10_wvr',
+      name: 'PL-10E',
+      side: 'RED',
+      shooterId: j20Radar.id,
+      shooterName: j20Radar.callsign,
+      targetId: lowBogey.id,
+      targetType: 'unit',
+      position: [0.37, 0], // ~8.9 km from [0.45, 0] (inside clear 12km IR seeker, outside storm-attenuated seeker)
+      launchPosition: [0.3, 0],
+      trail: [],
+      altitudeM: 6500,
+      heading: 90,
+      speedKts: 2100,
+      distanceRemainingKm: 8.9,
+      maxRangeKm: 30,
+      traveledKm: 8,
+      basePk: 0.68,
+      warheadDamage: 36,
+    };
+    expect(seekerCanObserve(irMissile, catalog.weapons.pl10_wvr, lowBogey, catalog, false)).toBe(true);
+    expect(seekerCanObserve(irMissile, catalog.weapons.pl10_wvr, lowBogey, catalog, false, stormEnv)).toBe(false);
+
+    // Sea State 6 suspends small-deck frigate ASW helo launches while large-deck carrier stays operational
+    const ffg = createRuntimeUnitFromPlacement(placement('ffg_storm', { platformId: 'type054b_frigate', position: [0.1, 0] }), catalog);
+    const cv = createRuntimeUnitFromPlacement(placement('cv_storm', { platformId: 'cv18_fujian_carrier', position: [0.1, 0] }), catalog);
+    const stormUnits = { ffg_storm: ffg, cv_storm: cv };
+    expect(
+      evaluateCarrierSortieAvailability(stormUnits, catalog, 'ffg_storm', 'hangar_z20f_ffg', undefined, stormEnv).status
+    ).toBe('temporary');
+    expect(launchCarrierSortie(stormUnits, catalog, 'ffg_storm', 'hangar_z20f_ffg', undefined, stormEnv)).toBeUndefined();
+    expect(launchCarrierSortie(stormUnits, catalog, 'cv_storm', 'hangar_j35_vf1', undefined, stormEnv)).toBeDefined();
   });
 });

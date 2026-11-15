@@ -12,6 +12,7 @@ import {
   findAmphibiousLandingPoint,
   isPointOnLand,
   isRouteAllowed,
+  localSeaStateAt,
   MAX_AMPHIBIOUS_STANDOFF_KM,
 } from './environment';
 import { getBearingDeg } from './geometry';
@@ -25,12 +26,17 @@ export function evaluateCarrierSortieAvailability(
   catalog: EquipmentCatalog,
   carrierUnitId: string,
   hangarSlotId: string,
-  requestedLoadoutId?: string
+  requestedLoadoutId?: string,
+  environment?: ScenarioEnvironment
 ): SortieAvailability {
   const carrier = units[carrierUnitId];
   if (!carrier) return { status: 'permanent', reason: '母舰不存在' };
   if (!isActiveUnit(carrier) || !getUnitCapabilities(carrier).canFire) {
     return { status: 'permanent', reason: '母舰已失能，无法执行出动' };
+  }
+  const seaState = localSeaStateAt(carrier.position, environment);
+  if (seaState >= 6 && carrier.domain === 'surface' && carrier.category !== 'carrier') {
+    return { status: 'temporary', reason: '6级恶劣海况甲板横摇超限，护卫舰暂停直升机起降' };
   }
   const slot = carrier.hangar.find((candidate) => candidate.slotId === hangarSlotId);
   if (!slot) return { status: 'permanent', reason: '机库槽位不存在' };
@@ -58,10 +64,13 @@ export function launchCarrierSortie(
   catalog: EquipmentCatalog,
   carrierUnitId: string,
   hangarSlotId: string,
-  requestedLoadoutId?: string
+  requestedLoadoutId?: string,
+  environment?: ScenarioEnvironment
 ): RuntimeUnit | undefined {
   const carrier = units[carrierUnitId];
   if (!carrier || !isActiveUnit(carrier) || !getUnitCapabilities(carrier).canFire) return undefined;
+  const seaState = localSeaStateAt(carrier.position, environment);
+  if (seaState >= 6 && carrier.domain === 'surface' && carrier.category !== 'carrier') return undefined;
   const slot = carrier.hangar.find((candidate) => candidate.slotId === hangarSlotId);
   if (!slot || slot.readyAirframes <= 0 || slot.cooldownRemainingSec > 0) return undefined;
   const airSpec = catalog.platforms[slot.platformId];
@@ -99,7 +108,8 @@ export function launchCarrierSortie(
 
   slot.selectedLoadoutId = loadoutId;
   slot.readyAirframes -= 1;
-  slot.cooldownRemainingSec = slot.launchCooldownSec;
+  const deckSeaMultiplier = seaState >= 5 && carrier.domain === 'surface' ? 1.5 : 1;
+  slot.cooldownRemainingSec = Math.round(slot.launchCooldownSec * deckSeaMultiplier);
   slot.activeSortieIds.push(sortieId);
   slot.nextSortieNumber += 1;
   units[sortieId] = launched;
@@ -113,7 +123,8 @@ export function processPendingSortieOrders(
   catalog: EquipmentCatalog,
   nextSimTime: number,
   score: ScoreLedger,
-  logs: CombatLogEntry[]
+  logs: CombatLogEntry[],
+  environment?: ScenarioEnvironment
 ): PendingSortieOrder[] {
   const remaining: PendingSortieOrder[] = [];
   for (const order of [...orders].sort((a, b) =>
@@ -136,7 +147,7 @@ export function processPendingSortieOrders(
       }
     }
     const availability = evaluateCarrierSortieAvailability(
-      units, catalog, order.carrierUnitId, order.hangarSlotId, order.loadoutId
+      units, catalog, order.carrierUnitId, order.hangarSlotId, order.loadoutId, environment
     );
     order.attempts += 1;
     if (availability.status === 'temporary') {
@@ -155,7 +166,7 @@ export function processPendingSortieOrders(
       continue;
     }
     const launched = launchCarrierSortie(
-      units, catalog, order.carrierUnitId, order.hangarSlotId, order.loadoutId
+      units, catalog, order.carrierUnitId, order.hangarSlotId, order.loadoutId, environment
     );
     if (!launched) {
       order.earliestLaunchTime = nextSimTime + 1000;

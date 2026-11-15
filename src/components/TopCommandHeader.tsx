@@ -47,6 +47,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
+  const weather = useWargameStore((s) => s.environment.weather);
   const battleResult = useWargameStore((s) => s.battleResult);
   const campaignState = useWargameStore((s) => s.campaignState);
   const startCampaign = useWargameStore((s) => s.startCampaign);
@@ -198,6 +199,21 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             <span>{utc.slice(0, 10)} · UTC</span>
             <time dateTime={utc}>{utc.slice(11, 19)}</time>
           </div>
+          {weather && (
+            <span
+              className="px-2 py-0.5 rounded border border-sky-500/35 bg-sky-500/10 text-[10px] text-sky-200 font-mono whitespace-nowrap"
+              title={`云底 ${weather.cloudFloorM}m ~ 云顶 ${weather.cloudCeilingM}m（穿云衰减光电/红外探测）`}
+            >
+              {weather.condition === 'clear'
+                ? '晴空'
+                : weather.condition === 'overcast'
+                  ? '阴云层'
+                  : weather.condition === 'rain_storm'
+                    ? '雷暴锋面'
+                    : '台风外围'}{' '}
+              · {weather.seaState}级海况
+            </span>
+          )}
           <div className="playback-controls">
             <button
               onClick={() => setTimeScale(timeScale === 0 ? 5 : 0)}

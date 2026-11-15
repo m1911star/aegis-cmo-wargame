@@ -33,7 +33,18 @@ export function compileScenario(
   scenario.environment = cloneEnvironment(scenario.environment);
   index(scenario.environment.landPolygons, 'scenario.environment.landPolygons');
   index(scenario.environment.acousticZones, 'scenario.environment.acousticZones');
-  for (const polygon of [...scenario.environment.landPolygons, ...scenario.environment.acousticZones]) {
+  index(scenario.environment.weatherZones ?? [], 'scenario.environment.weatherZones');
+  if (
+    scenario.environment.weather &&
+    scenario.environment.weather.cloudFloorM > scenario.environment.weather.cloudCeilingM
+  ) {
+    invalid('scenario.environment.weather', 'cloudFloorM cannot exceed cloudCeilingM');
+  }
+  for (const polygon of [
+    ...scenario.environment.landPolygons,
+    ...scenario.environment.acousticZones,
+    ...(scenario.environment.weatherZones ?? []),
+  ]) {
     const feature = turf.polygon([[...polygon.areaPolygon, polygon.areaPolygon[0]]]);
     if (turf.area(feature) <= 1 || turf.kinks(feature).features.length > 0) {
       invalid(`scenario.environment.${polygon.id}`, 'environment polygon must be non-degenerate and non-self-intersecting');

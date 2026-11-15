@@ -1,7 +1,7 @@
 import * as turf from '@turf/turf';
 import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
-import { acousticRangeFactor, hasRadarLineOfSight } from './environment';
+import { acousticRangeFactor, evaluateWeatherModifiers, hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
 import {
@@ -324,6 +324,13 @@ export function computeContactsOnly(
           target.altitudeM,
           environment
         ));
+        const weatherMods = evaluateWeatherModifiers(
+          observer.position,
+          observer.altitudeM,
+          target.position,
+          target.altitudeM,
+          environment
+        );
 
         // 计算目标相对该观察者雷达视线的姿态等效 RCS (正前/侧向/尾向 + 外挂惩罚)
         const aspectRcsM2 = calculateAspectEffectiveRcsM2(
@@ -349,7 +356,7 @@ export function computeContactsOnly(
             if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) continue;
             if (sensor.type === 'radar_air_surface' && !hasLineOfSight()) continue;
 
-            const effRangeKm = calculateEffectiveRadarRangeKm(
+            const baseEffRangeKm = calculateEffectiveRadarRangeKm(
               { ...sensor, maxRangeKm: sensor.maxRangeKm * getUnitCapabilities(observer).radarFactor },
               aspectRcsM2,
               observer.altitudeM,
@@ -357,6 +364,10 @@ export function computeContactsOnly(
               target.altitudeM,
               targetEcmSuppression
             );
+            const effRangeKm =
+              sensor.type === 'radar_air_surface' && target.altitudeM < LOW_ALTITUDE_THRESHOLD && !sensor.lookDownCapable
+                ? baseEffRangeKm * weatherMods.radarClutterPenalty
+                : baseEffRangeKm;
 
             if (distKm <= effRangeKm) {
               hasNonEsmDetection = true;
@@ -416,14 +427,14 @@ export function computeContactsOnly(
             }
           }
 
-          // C. 光电/红外被动搜索 (IRST/EOTS) —— 不受射频电子干扰影响！
+          // C. 光电/红外被动搜索 (IRST/EOTS) —— 不受射频电子干扰影响，但受云层与暴雨强衰减！
           else if (sensor.type === 'irst_optical') {
             const horizonKm = calculateRadarHorizonKm(
               observer.altitudeM,
               obsSpec.radarAntennaHeightM,
               target.altitudeM
             );
-            const effRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
+            const effRangeKm = Math.min(sensor.maxRangeKm * weatherMods.opticalFactor, horizonKm);
             if (distKm <= effRangeKm && hasLineOfSight()) {
               hasNonEsmDetection = true;
               detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
@@ -461,7 +472,8 @@ export function computeContactsOnly(
               targetSpec.acousticSignatureDb,
               target.speedKts,
               target.doctrine.emconSonar
-            ) * acousticRangeFactor(observer.position, target.position, environment);
+            ) * acousticRangeFactor(observer.position, target.position, environment) *
+              (sensor.type === 'sonar_passive' ? weatherMods.passiveSonarFactor : 1);
 
             if (distKm <= sonarRangeKm) {
               hasNonEsmDetection = true;

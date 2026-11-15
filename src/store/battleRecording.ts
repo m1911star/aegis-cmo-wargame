@@ -7,7 +7,7 @@ import { useWargameStore, type WargameStoreState } from './useWargameStore';
 export const BATTLE_RECORDING_VERSION = 2 as const;
 export const BATTLE_SAVE_VERSION = 1 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
-export const RULESET_VERSION = '2026.12-ruleset-26';
+export const RULESET_VERSION = '2026.12-ruleset-27';
 export const SCENARIO_SCHEMA_VERSION = 12;
 export const AUTOSAVE_STORAGE_KEY = 'aegis_cmo_autosave_v1';
 export const SAVE_SLOTS_STORAGE_KEY = 'aegis_cmo_save_slots_v1';

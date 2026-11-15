@@ -284,19 +284,19 @@
       },
       "losses": {
         "red": 2,
-        "blue": 2
+        "blue": 3
       },
       "missilesFired": {
-        "red": 128,
-        "blue": 88
+        "red": 88,
+        "blue": 70
       },
       "interceptions": {
-        "red": 42,
-        "blue": 7
+        "red": 23,
+        "blue": 6
       },
       "score": {
-        "red": 300,
-        "blue": 1034
+        "red": 450,
+        "blue": 759
       },
       "sortiesLaunched": 3,
       "events": [
@@ -331,7 +331,7 @@
         "joint_blue_hold_beach": "achieved",
         "joint_blue_preserve_airbase": "achieved"
       },
-      "aarEvents": 179,
+      "aarEvents": 125,
       "finiteState": true
     },
     {

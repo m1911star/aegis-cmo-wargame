@@ -16,6 +16,7 @@ export function installTacticalLayers(map: TacticalLayerHost) {
     features: [],
   };
   addSource('terrain-source', { type: 'geojson', data: emptyFC });
+  addSource('weather-zones-source', { type: 'geojson', data: emptyFC });
   addSource('control-zones-source', { type: 'geojson', data: emptyFC });
   addSource('missions-source', { type: 'geojson', data: emptyFC });
   addSource('envelopes-source', { type: 'geojson', data: emptyFC });
@@ -47,6 +48,40 @@ export function installTacticalLayers(map: TacticalLayerHost) {
       'line-color': 'rgba(217, 119, 6, 0.45)',
       'line-width': 1.2,
       'line-dasharray': [2, 2],
+    },
+  });
+  addLayer({
+    id: 'weather-zones-fill-layer',
+    type: 'fill',
+    source: 'weather-zones-source',
+    paint: {
+      'fill-color': 'rgba(56, 189, 248, 0.08)',
+    },
+  });
+  addLayer({
+    id: 'weather-zones-line-layer',
+    type: 'line',
+    source: 'weather-zones-source',
+    paint: {
+      'line-color': 'rgba(125, 211, 252, 0.45)',
+      'line-width': 1.3,
+      'line-dasharray': [4, 4],
+    },
+  });
+  addLayer({
+    id: 'weather-zones-label-layer',
+    type: 'symbol',
+    source: 'weather-zones-source',
+    layout: {
+      'text-font': ['Noto Sans Regular'],
+      'text-field': ['get', 'label'],
+      'text-size': 10,
+      'text-allow-overlap': false,
+    },
+    paint: {
+      'text-color': '#bae6fd',
+      'text-halo-color': '#020617',
+      'text-halo-width': 1.8,
     },
   });
   addLayer({

@@ -11,7 +11,7 @@ import type {
   VictoryConditionRule,
   WeaponInFlight,
 } from '../../types/wargame';
-import { resolveMissileTerrainInteraction } from '../environment';
+import { evaluateWeatherModifiers, resolveMissileTerrainInteraction } from '../environment';
 import { advanceGuidance, computeMissileEnergyFactor, seekerCanObserve } from '../guidance';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { creditDamage } from '../objectives';
@@ -304,7 +304,18 @@ export function advanceWeaponPhysics({
       } else {
         effectivePk *= 0.45;
       }
-    } else if (weapon.guidance !== 'infrared' && targetEcm > 0) {
+    } else if (weapon.guidance === 'infrared') {
+      const weatherMods = evaluateWeatherModifiers(
+        missile.position,
+        missile.altitudeM,
+        targetUnit.position,
+        targetUnit.altitudeM,
+        environment
+      );
+      if (weatherMods.opticalFactor < 0.85) {
+        effectivePk *= 0.78;
+      }
+    } else if (targetEcm > 0) {
       effectivePk *= Math.max(0.45, 1 - targetEcm * 0.42);
     }
 

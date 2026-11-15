@@ -137,6 +137,7 @@ const action = taggedUnion({
   }),
   AWARD_SCORE: object({ side, points: number(), reason: text }),
 });
+const seaState = number(0, 6, true);
 const environmentPolygon = object({
   id, name: text, areaPolygon: array(coordinate, 3), elevationM: optional(number(0, 9000)),
 });
@@ -160,6 +161,17 @@ const scenario = object({
       id, name: text, areaPolygon: array(coordinate, 3), kind: oneOf(['shallow', 'deep']),
       sonarRangeFactor: number(0.1, 2),
     })),
+    weather: optional(object({
+      condition: oneOf(['clear', 'overcast', 'rain_storm', 'typhoon_edge']),
+      seaState,
+      cloudFloorM: number(0, 20000),
+      cloudCeilingM: number(0, 25000),
+    })),
+    weatherZones: optional(array(object({
+      id, name: text, areaPolygon: array(coordinate, 3),
+      condition: oneOf(['rain_storm', 'heavy_fog']),
+      seaStateOverride: optional(seaState),
+    }))),
   })),
   events: optional(array(object({
     ...metadata, repeatable: optional(boolean), repeatIntervalSec: optional(number(1)), trigger, actions: array(action),

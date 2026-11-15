@@ -203,7 +203,7 @@ function stepWorkingWorldInPlace(
   });
 
   pendingSortieOrders = processPendingSortieOrders(
-    pendingSortieOrders, units, missions, catalog, nextSimTime, score, logs
+    pendingSortieOrders, units, missions, catalog, nextSimTime, score, logs, world.environment
   );
   advanceAirRefueling(units, catalog, nextSimTime, dtSec, logs);
 

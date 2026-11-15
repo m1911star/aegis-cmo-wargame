@@ -277,6 +277,9 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       (map.getSource('terrain-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.terrainRidges,
       });
+      (map.getSource('weather-zones-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection', features: projection.weatherZones,
+      });
       (map.getSource('control-zones-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.controlZones,
       });

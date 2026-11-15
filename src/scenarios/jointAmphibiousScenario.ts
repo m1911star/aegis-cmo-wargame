@@ -50,6 +50,21 @@ export const SCENARIO_JOINT_AMPHIBIOUS_ASSAULT: ScenarioDefinition = {
         areaPolygon: [[119.65, 23.0], [120.48, 23.0], [120.48, 24.6], [119.65, 24.6]],
       },
     ],
+    weather: {
+      condition: 'overcast',
+      seaState: 4,
+      cloudFloorM: 1500,
+      cloudCeilingM: 5200,
+    },
+    weatherZones: [
+      {
+        id: 'joint_strait_squall',
+        name: '海峡北口强降雨锋面带',
+        condition: 'rain_storm',
+        seaStateOverride: 5,
+        areaPolygon: [[119.75, 24.08], [120.42, 24.08], [120.42, 24.52], [119.75, 24.52]],
+      },
+    ],
   },
   groups: [
     {

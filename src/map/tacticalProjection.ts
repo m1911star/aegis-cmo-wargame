@@ -51,6 +51,7 @@ export type TacticalProjectionInput = {
 
 export type TacticalProjection = {
   terrainRidges: GeoJSON.Feature[];
+  weatherZones: GeoJSON.Feature[];
   controlZones: GeoJSON.Feature[];
   missions: GeoJSON.Feature[];
   envelopes: GeoJSON.Feature[];
@@ -131,6 +132,21 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       geometry: {
         type: 'Polygon',
         coordinates: [[...polygon.areaPolygon, polygon.areaPolygon[0]]],
+      },
+    }));
+
+  const weatherZones: GeoJSON.Feature[] = (environment?.weatherZones ?? [])
+    .filter((zone) => zone.areaPolygon.length >= 3)
+    .map((zone) => ({
+      type: 'Feature',
+      properties: {
+        id: zone.id,
+        condition: zone.condition,
+        label: `${zone.name} (${zone.condition === 'rain_storm' ? '暴雨锋面' : '海雾低能见'}${zone.seaStateOverride ? ` · ${zone.seaStateOverride}级海况` : ''})`,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[...zone.areaPolygon, zone.areaPolygon[0]]],
       },
     }));
 
@@ -430,6 +446,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
 
   return {
     terrainRidges,
+    weatherZones,
     controlZones,
     missions: missionFeatures,
     envelopes: envelopeFeatures,

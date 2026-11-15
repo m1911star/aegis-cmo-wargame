@@ -1,5 +1,5 @@
 import { resolveUnitConfiguration } from '../../db/unitConfiguration';
-import { deployCarriedUnitFromLauncher, launchCarrierSortie } from '../../engine/carrierOperations';
+import { deployCarriedUnitFromLauncher, evaluateCarrierSortieAvailability, launchCarrierSortie } from '../../engine/carrierOperations';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
 import { findShootAndScootDestination, isRouteAllowed } from '../../engine/environment';
 import { evaluateFireControl } from '../../engine/fireControl';
@@ -623,8 +623,12 @@ export function createCommandSlice(set: StoreSet) {
           })),
         };
         const units = { ...s.units, [carrier.id]: carrierClone };
-        const launchedUnit = launchCarrierSortie(units, s.catalog, carrierUnitId, hangarSlotId, customLoadoutId);
-        if (!launchedUnit) return s;
+        const availability = evaluateCarrierSortieAvailability(units, s.catalog, carrierUnitId, hangarSlotId, customLoadoutId, s.environment);
+        const launchedUnit = launchCarrierSortie(units, s.catalog, carrierUnitId, hangarSlotId, customLoadoutId, s.environment);
+        if (!launchedUnit) {
+          if (availability.status !== 'ready') emitActionFeedback('warning', availability.reason);
+          return s;
+        }
         const loadoutId = launchedUnit.activeLoadoutId!;
         const launchLog: CombatLogEntry = {
           id: `log_sortie_${s.tick}_${s.commandSequence}_${launchedUnit.id}`,

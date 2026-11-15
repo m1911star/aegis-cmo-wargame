@@ -19,6 +19,13 @@ export function cloneEnvironment(environment?: ScenarioEnvironment): ScenarioEnv
       ...zone,
       areaPolygon: zone.areaPolygon.map((point) => [...point] as [number, number]),
     })),
+    weather: environment?.weather ? { ...environment.weather } : undefined,
+    weatherZones: environment?.weatherZones
+      ? environment.weatherZones.map((zone) => ({
+          ...zone,
+          areaPolygon: zone.areaPolygon.map((point) => [...point] as [number, number]),
+        }))
+      : undefined,
   };
 }
 
@@ -350,4 +357,103 @@ export function acousticRangeFactor(
     }
   }
   return 1;
+}
+
+export function localSeaStateAt(
+  position: [number, number],
+  environment?: ScenarioEnvironment
+): number {
+  let seaState: number = environment?.weather?.seaState ?? 2;
+  const zones = environment?.weatherZones;
+  if (zones?.length) {
+    for (let i = 0; i < zones.length; i++) {
+      const override = zones[i].seaStateOverride;
+      if (override !== undefined && override > seaState && isPointInCompiledPolygon(position, zones[i].areaPolygon)) {
+        seaState = override;
+      }
+    }
+  }
+  return seaState;
+}
+
+export interface WeatherModifiers {
+  opticalFactor: number;
+  radarClutterPenalty: number;
+  passiveSonarFactor: number;
+  localSeaState: number;
+  inStormZone: boolean;
+}
+
+const NEUTRAL_WEATHER_MODS: WeatherModifiers = {
+  opticalFactor: 1,
+  radarClutterPenalty: 1,
+  passiveSonarFactor: 1,
+  localSeaState: 2,
+  inStormZone: false,
+};
+
+export function evaluateWeatherModifiers(
+  observerPos: [number, number],
+  observerAltM: number,
+  targetPos: [number, number],
+  targetAltM: number,
+  environment?: ScenarioEnvironment
+): WeatherModifiers {
+  const weather = environment?.weather;
+  const zones = environment?.weatherZones;
+  if (!weather && (!zones || zones.length === 0)) {
+    return NEUTRAL_WEATHER_MODS;
+  }
+
+  let opticalFactor = 1;
+  let inStormZone = false;
+  let localSeaState: number = weather?.seaState ?? 2;
+
+  if (weather && weather.condition !== 'clear') {
+    const minAlt = Math.min(observerAltM, targetAltM);
+    const maxAlt = Math.max(observerAltM, targetAltM);
+    const crossesCloudLayer =
+      minAlt < weather.cloudCeilingM && maxAlt > weather.cloudFloorM;
+    if (crossesCloudLayer) {
+      opticalFactor *= weather.condition === 'overcast' ? 0.42 : 0.28;
+    } else if (weather.condition === 'rain_storm' || weather.condition === 'typhoon_edge') {
+      if (maxAlt <= weather.cloudFloorM) {
+        opticalFactor *= 0.55;
+      }
+    }
+  }
+
+  if (zones && zones.length > 0) {
+    const midpoint: [number, number] = [
+      (observerPos[0] + targetPos[0]) * 0.5,
+      (observerPos[1] + targetPos[1]) * 0.5,
+    ];
+    for (let i = 0; i < zones.length; i++) {
+      const zone = zones[i];
+      const hit =
+        isPointInCompiledPolygon(observerPos, zone.areaPolygon) ||
+        isPointInCompiledPolygon(targetPos, zone.areaPolygon) ||
+        isPointInCompiledPolygon(midpoint, zone.areaPolygon);
+      if (hit) {
+        inStormZone = true;
+        opticalFactor *= zone.condition === 'rain_storm' ? 0.32 : 0.25;
+        if (zone.seaStateOverride !== undefined && zone.seaStateOverride > localSeaState) {
+          localSeaState = zone.seaStateOverride;
+        }
+      }
+    }
+  }
+
+  const radarClutterPenalty =
+    localSeaState >= 4 ? Math.max(0.55, 1 - (localSeaState - 3) * 0.12) : 1;
+  const passiveSonarFactor =
+    localSeaState >= 4 ? Math.max(0.55, 1 - (localSeaState - 3) * 0.12) : 1;
+
+  return {
+    opticalFactor: Math.max(0.15, Number(opticalFactor.toFixed(3))),
+    radarClutterPenalty: Number(radarClutterPenalty.toFixed(3)),
+    passiveSonarFactor: Number(passiveSonarFactor.toFixed(3)),
+    localSeaState,
+    inStormZone,
+  };
 }

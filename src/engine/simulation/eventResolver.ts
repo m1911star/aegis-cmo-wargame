@@ -137,7 +137,7 @@ export function resolveEventsAndObjectives({
           }
         } else if (action.type === 'LAUNCH_SORTIE') {
           const availability = evaluateCarrierSortieAvailability(
-            units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId
+            units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId, environment
           );
           const delayed = (action.launchDelaySec ?? 0) > 0;
           if (delayed || availability.status !== 'ready') {
@@ -169,7 +169,7 @@ export function resolveEventsAndObjectives({
             }
           } else {
             const launched = launchCarrierSortie(
-              units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId
+              units, catalog, action.carrierUnitId, action.hangarSlotId, action.loadoutId, environment
             );
             if (launched) {
               if (action.assignedMissionId && missions.some((mission) =>

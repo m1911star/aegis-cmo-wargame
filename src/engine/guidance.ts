@@ -1,6 +1,6 @@
 import * as turf from '@turf/turf';
 import type { EquipmentCatalog, RuntimeUnit, ScenarioEnvironment, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
-import { hasRadarLineOfSight } from './environment';
+import { evaluateWeatherModifiers, hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { computeStrikeRouteDistanceKm, guidanceProfile, trackSupport } from './fireControl';
 import { isRadioEmitting, isActiveUnit } from './unitCapabilities';
@@ -82,6 +82,15 @@ export function seekerCanObserve(
   }
   if (weapon.guidance === 'anti_radiation') {
     if (!isUnit || !isRadioEmitting(target, catalog)) return false;
+  } else if (weapon.guidance === 'infrared') {
+    const weatherMods = evaluateWeatherModifiers(
+      missile.position,
+      missile.altitudeM,
+      target.position,
+      target.altitudeM,
+      environment
+    );
+    range *= weatherMods.opticalFactor;
   } else if (['active_radar', 'semi_active_radar', 'hypersonic_glide'].includes(weapon.guidance)) {
     const rcs = isUnit ? catalog.platforms[target.platformId]?.rcsM2 ?? 5 : 0.1;
     range *= Math.min(1, Math.pow(Math.max(0.001, rcs) / 5, 0.25));
