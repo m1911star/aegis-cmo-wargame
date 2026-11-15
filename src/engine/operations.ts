@@ -71,6 +71,27 @@ export function updateUnitOperations(
   const mission = missions.find((m) => m.id === unit.assignedMissionId && m.isActive);
   const unitEffDoctrine = effectiveDoctrine(unit, missions);
 
+  // Seawater battery life countdown for expendable ASW sonobuoys (never counts as a platform loss)
+  if (unit.category === 'sonobuoy') {
+    unit.fuelRemainingSec = Math.max(0, unit.fuelRemainingSec - dtSec);
+    if (unit.fuelRemainingSec <= 0) {
+      unit.hp = 0;
+      unit.status = 'destroyed';
+      logs.push({
+        id: `buoy_expire_${unit.id}_${simTime}`,
+        simTime,
+        side: unit.side,
+        category: 'EVENT',
+        severity: 'info',
+        title: `${unit.callsign} 声呐浮标海水电池耗尽自沉`,
+        message: '浮标已完成预定监听周期并自动沉没，不计入战损。',
+        position: [...unit.position],
+        unitId: unit.id,
+      });
+    }
+    return;
+  }
+
   // Submarine periodic S-turn baffle-clearing maneuver (clears stern ±30° sonar baffles every 180s for 20s)
   if (unit.domain === 'subsurface' && isActiveUnit(unit)) {
     if (!unitEffDoctrine.baffleClearPeriodic || unit.status === 'evading' || unit.missionTargetId) {

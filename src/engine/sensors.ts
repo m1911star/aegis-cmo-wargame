@@ -450,6 +450,10 @@ export function computeContactsOnly(
             ) {
               continue;
             }
+            // Silent drifting passive DIFAR sonobuoys have no machinery noise to detect on passive sonar
+            if (target.category === 'sonobuoy' && !target.doctrine.emconSonar) {
+              continue;
+            }
             const sonarRangeKm = calculateSonarDetectionRangeKm(
               sensor,
               observer.altitudeM,
@@ -463,7 +467,7 @@ export function computeContactsOnly(
               hasNonEsmDetection = true;
               detectingSources.push(
                 `${observer.callsign} (${
-                  sensor.type === 'sonar_active' ? '主动声呐回波' : '被动拖曳阵监听'
+                  sensor.type === 'sonar_active' ? '主动声呐回波' : '被动声学监听'
                 })`
               );
               const sonarUncertainty =
@@ -474,6 +478,7 @@ export function computeContactsOnly(
                 bestUncertaintyKm = sonarUncertainty;
               }
               if (
+                target.category === 'sonobuoy' ||
                 sensor.type === 'sonar_active' ||
                 distKm < sonarRangeKm * 0.55
               ) {
@@ -563,10 +568,13 @@ export function computeContactsOnly(
               }]`
             : `${prefix}-${shortNum} [不明接触]`;
 
-        const threatLevel: TacticalContact['threatLevel'] = bestClassification !== 'identified'
-          ? target.domain === 'subsurface' ? 'critical' : target.domain === 'air' ? 'high' : 'high'
-          : target.category === 'decoy' || target.category === 'tanker'
+        const threatLevel: TacticalContact['threatLevel'] =
+          target.category === 'sonobuoy'
             ? 'low'
+            : bestClassification !== 'identified'
+              ? target.domain === 'subsurface' ? 'critical' : target.domain === 'air' ? 'high' : 'high'
+              : target.category === 'decoy' || target.category === 'tanker'
+                ? 'low'
             : target.category === 'stealth_fighter' || target.category === 'destroyer' ||
               target.category === 'ssn' || target.category === 'sam_battery' || target.category === 'airbase'
               ? 'critical'

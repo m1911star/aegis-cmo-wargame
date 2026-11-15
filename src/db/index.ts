@@ -23,7 +23,7 @@ export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = {
 };
 
 export const MASTER_EQUIPMENT_CATALOG: EquipmentCatalog = {
-  version: '2026.12-CONTENT-EXPANSION-1',
+  version: '2026.12-CONTENT-EXPANSION-2',
   sensors: MODULAR_SENSORS,
   weapons: MODULAR_WEAPONS,
   loadouts: MODULAR_LOADOUTS,
@@ -151,13 +151,18 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
       const target = catalog.platforms[deployable.platformId];
       const validAirDeployable =
         !!target && target.domain === 'air' && ['decoy', 'mpa_uav'].includes(target.category);
+      const validSonobuoyDeployable =
+        !!target &&
+        target.domain === 'subsurface' &&
+        target.category === 'sonobuoy' &&
+        platform.domain === 'air';
       const validAmphibiousEmbark =
         !!target &&
         target.domain === 'land' &&
         target.category === 'ground_force' &&
         platform.domain === 'surface' &&
         ['carrier', 'amphibious'].includes(platform.category);
-      if (!validAirDeployable && !validAmphibiousEmbark) {
+      if (!validAirDeployable && !validSonobuoyDeployable && !validAmphibiousEmbark) {
         errors.push(`platforms.${pId}: invalid deployable platform ${deployable.platformId}`);
       }
     }

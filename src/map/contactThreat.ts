@@ -17,6 +17,7 @@ const IDENTIFIED_CATEGORY_RANGE_KM: Partial<Record<UnitCategory, number>> = {
   ground_force: 45,
   airbase: 220,
   radar_site: 0,
+  sonobuoy: 0,
 };
 
 /** Estimated envelope from observed classification only; never accepts a runtime unit or catalog. */

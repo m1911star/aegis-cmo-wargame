@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../src/db';
+import { deployCarriedUnitFromLauncher } from '../../src/engine/carrierOperations';
+import { evaluateFireControl } from '../../src/engine/fireControl';
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
 import { createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
@@ -129,5 +131,127 @@ describe('Module 1: Sensor azimuth arcs, sonar rear baffles & submarine baffle-c
     // After 20s window (t=203_000 ms), submarine automatically restores original base heading 90°
     updateUnitOperations(sub, { red_ssk: sub }, {}, [], catalog, 203_000, 1, emptyScore(), logs);
     expect(sub.heading).toBe(90);
+  });
+});
+
+describe('Module 2: Deployable DIFAR/DICASS sonobuoys & networked airborne ASW', () => {
+  test('MPA blocks sonobuoy drop over land, drops DIFAR/DICASS in water, shares datalink track for Mk-54, and expires without loss penalty', () => {
+    const landEnv = {
+      landPolygons: [
+        {
+          id: 'island',
+          name: 'Island',
+          areaPolygon: [[0.9, -0.2], [1.2, -0.2], [1.2, 0.2], [0.9, 0.2]] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    const p8OverLand = createRuntimeUnitFromPlacement(
+      placement('p8_land', {
+        side: 'BLUE',
+        platformId: 'p8a_poseidon',
+        position: [1.0, 0],
+        altitudeM: 1800,
+      }),
+      catalog
+    );
+    expect(
+      deployCarriedUnitFromLauncher(
+        { p8_land: p8OverLand },
+        p8OverLand,
+        'ssq53_difar_buoy',
+        catalog,
+        landEnv,
+        0,
+        't0',
+        1
+      ).deployed
+    ).toBeUndefined();
+
+    // Move P-8A out to sea (distant from sub, drops DICASS active buoy right above quiet AIP SSK)
+    const p8Sea = createRuntimeUnitFromPlacement(
+      placement('p8_sea', {
+        side: 'BLUE',
+        platformId: 'p8a_poseidon',
+        position: [0, 0],
+        altitudeM: 2200,
+        doctrine: { roe: 'free', emconRadar: false },
+      }),
+      catalog
+    );
+    const quietSub = createRuntimeUnitFromPlacement(
+      placement('red_quiet_ssk', {
+        side: 'RED',
+        platformId: 'type039c_ssk',
+        position: [0.16, 0], // ~17.8 km East
+        altitudeM: -70,
+        heading: 270, // Approaching Westward so buoy at [0.14, 0] is on bow, not in stern baffles
+        speedKts: 3,
+      }),
+      catalog
+    );
+
+    const dropDifar = deployCarriedUnitFromLauncher(
+      { p8_sea: p8Sea, red_quiet_ssk: quietSub },
+      p8Sea,
+      'ssq53_difar_buoy',
+      catalog,
+      landEnv,
+      1000,
+      'difar_1',
+      1,
+      [0.12, 0]
+    );
+    const dropDicass = deployCarriedUnitFromLauncher(
+      { p8_sea: p8Sea, red_quiet_ssk: quietSub },
+      p8Sea,
+      'ssq62_dicass_buoy',
+      catalog,
+      landEnv,
+      1000,
+      'dicass_1',
+      2,
+      [0.14, 0]
+    );
+    expect(dropDifar.deployed).toBeDefined();
+    expect(dropDicass.deployed).toBeDefined();
+    expect(dropDifar.deployed!.doctrine.emconSonar).toBe(false);
+    expect(dropDicass.deployed!.doctrine.emconSonar).toBe(true);
+
+    const units = {
+      p8_sea: p8Sea,
+      red_quiet_ssk: quietSub,
+      [dropDifar.deployed!.id]: dropDifar.deployed!,
+      [dropDicass.deployed!.id]: dropDicass.deployed!,
+    };
+    const sensed = computeContactsOnly(units, catalog, {}, 2000, 1, landEnv).contacts;
+
+    // 1. BLUE receives identified submarine contact via sonobuoy datalink, enabling P-8A Mk-54 drop
+    const subTrack = sensed.BLUE_CONTACT_red_quiet_ssk;
+    expect(subTrack).toBeDefined();
+    expect(subTrack.classification).toBe('identified');
+    const mk54Mount = p8Sea.mounts.find((m) => m.weaponId === 'mk54_lwt')!;
+    expect(
+      evaluateFireControl(p8Sea, subTrack, mk54Mount, catalog.weapons.mk54_lwt, catalog, units, 2000, 'manual').status
+    ).toBe('executable');
+
+    // 2. RED submarine does NOT hear silent passive DIFAR buoy, and hears active DICASS buoy only as low-threat non-targetable sonobuoy
+    expect(sensed[`RED_CONTACT_${dropDifar.deployed!.id}`]).toBeUndefined();
+    const dicassTrack = sensed[`RED_CONTACT_${dropDicass.deployed!.id}`];
+    expect(dicassTrack).toBeDefined();
+    expect(dicassTrack.identifiedCategory).toBe('sonobuoy');
+    expect(dicassTrack.threatLevel).toBe('low');
+    const yu6Mount = quietSub.mounts.find((m) => m.weaponId === 'yu6_torpedo')!;
+    expect(
+      evaluateFireControl(quietSub, dicassTrack, yu6Mount, catalog.weapons.yu6_torpedo, catalog, units, 2000, 'automatic').status
+    ).toBe('blocked');
+
+    // 3. Battery depletion scuttles sonobuoy cleanly with zero loss penalty
+    const score = emptyScore();
+    const logs: CombatLogEntry[] = [];
+    dropDicass.deployed!.fuelRemainingSec = 0.5;
+    updateUnitOperations(dropDicass.deployed!, units, {}, [], catalog, 3000, 1, score, logs);
+    expect(dropDicass.deployed!.status).toBe('destroyed');
+    expect(score.blueLosses).toBe(0);
   });
 });

@@ -8,7 +8,12 @@ import type {
   ScoreLedger,
   TacticalMission,
 } from '../types/wargame';
-import { findAmphibiousLandingPoint, isRouteAllowed, MAX_AMPHIBIOUS_STANDOFF_KM } from './environment';
+import {
+  findAmphibiousLandingPoint,
+  isPointOnLand,
+  isRouteAllowed,
+  MAX_AMPHIBIOUS_STANDOFF_KM,
+} from './environment';
 import { getBearingDeg } from './geometry';
 import { createRuntimeUnitFromPlacement } from './simulation/unitFactory';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
@@ -310,6 +315,55 @@ export function deployCarriedUnitFromLauncher(
         position: [...landingPos],
         unitId: deployed.id,
         aarType: 'sortie',
+      },
+    };
+  }
+
+  // Branch C: Airborne ASW sonobuoy drop into open water
+  if (
+    deployableSpec.domain === 'subsurface' &&
+    deployableSpec.category === 'sonobuoy' &&
+    launcher.domain === 'air'
+  ) {
+    const dropPos: [number, number] = targetWaypoint ? [...targetWaypoint] : [...launcher.position];
+    if (isPointOnLand(dropPos, environment)) {
+      return { errorReason: '声呐浮标只能投放在海域，当前坐标位于陆地上空' };
+    }
+    const hasActivePing = deployableSpec.sensorIds.some(
+      (sId) => catalog.sensors[sId]?.type === 'sonar_active'
+    );
+    const deployed = createRuntimeUnitFromPlacement({
+      id,
+      name: `${deployableSpec.name} #${remaining}`,
+      callsign: `BUOY-${callsignSeq}`,
+      side: launcher.side,
+      platformId,
+      parentGroupId: launcher.parentGroupId,
+      position: dropPos,
+      altitudeM: deployableSpec.defaultAltitudeM,
+      heading: 0,
+      speedKts: 0,
+      doctrine: {
+        roe: 'hold',
+        emconRadar: false,
+        emconSonar: hasActivePing,
+        emconJamming: false,
+        autoEvade: false,
+      },
+    }, catalog);
+    deployed.deployedByUnitId = launcher.id;
+    return {
+      deployed,
+      log: {
+        id: `sonobuoy_drop_${id}`,
+        simTime,
+        side: launcher.side,
+        category: 'EVENT',
+        severity: 'info',
+        title: `${launcher.callsign} 投掷 ${deployableSpec.name}`,
+        message: `浮标入水悬停 (${deployableSpec.defaultAltitudeM}m · ${hasActivePing ? '主动Ping开启' : '被动静默监听'})，剩余库存 ${remaining - 1} 枚。`,
+        position: [...dropPos],
+        unitId: deployed.id,
       },
     };
   }

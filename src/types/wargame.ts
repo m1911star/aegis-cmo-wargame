@@ -31,6 +31,7 @@ export type UnitCategory =
   | 'bomber'          // 远程战略/战术轰炸机
   | 'mpa_uav'         // 反潜巡逻机 / 长航时高空侦察无人机
   | 'decoy'           // 空射诱饵/高仿真假目标
+  | 'sonobuoy'        // 航空投掷主/被动声呐浮标 (DIFAR/DICASS)
   | 'carrier'         // 航空母舰 / 两栖攻击舰 (具备 Hangar 母舰放飞能力)
   | 'amphibious'      // 两栖登陆舰 / 船坞登陆舰
   | 'destroyer'       // 大型防空/多用途驱逐舰

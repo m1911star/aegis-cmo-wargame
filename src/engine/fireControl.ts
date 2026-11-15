@@ -140,6 +140,9 @@ export function evaluateFireControl(
   if (mode === 'automatic' && (!attacker.doctrine.engageOpportunityTargets || attacker.status === 'returning')) {
     hardBlockReasons.push('未获自动进攻授权');
   }
+  if (mode === 'automatic' && contact?.identifiedCategory === 'sonobuoy') {
+    hardBlockReasons.push('声呐浮标不作为自动火力打击目标');
+  }
   if (mode === 'automatic' && attacker.doctrine.requireIdentifiedForAutoFire && contact && contact.classification !== 'identified') {
     hardBlockReasons.push('条令要求识别目标后方可自动开火');
   }
