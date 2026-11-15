@@ -57,7 +57,8 @@ export function runEvasionAndSoftKill({
       : unit.domain === 'surface' ? 30 : unit.domain === 'subsurface' ? 15 : 8;
     const observedThreats = Object.values(weaponsInFlight).flatMap((missile) => {
       if (missile.side === unit.side || missile.targetType === 'missile') return [];
-      const observed = observeMissile(unit.side, missile, units, catalog, nextSimTime);
+      // Passive 360° MAWS (IRST/DAS) warns aircrews of tail-aspect rocket plumes, while ships/ground still require radar/sonar track
+      const observed = observeMissile(unit.side, missile, units, catalog, nextSimTime, undefined, undefined, unit.domain === 'air');
       if (!observed) return [];
       const distanceKm = getDistanceKm(unit.position, observed.estimatedPosition);
       const bearingToUnit = getBearingDeg(observed.estimatedPosition, unit.position);

@@ -31,6 +31,7 @@ const doctrine = object({
   requireIdentifiedForAutoFire: optional(boolean),
   shootAndScoot: optional(boolean),
   bvrTactics: optional(oneOf(['standard', 'crank_pump'])),
+  baffleClearPeriodic: optional(boolean),
 });
 const mount = object({ mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0) });
 const sensor = object({
@@ -38,6 +39,7 @@ const sensor = object({
   type: oneOf(['radar_air_surface', 'radar_oth', 'esm', 'ecm_jammer', 'sonar_passive', 'sonar_active', 'irst_optical']),
   maxRangeKm: number(0), isActiveEmitter: boolean, lookDownCapable: boolean,
   detectDomains: array(domain), frequencyBand: text, jammingPowerKw: optional(number(0)),
+  coverageArcDeg: optional(number(10, 360)), blindArcRearDeg: optional(number(0, 180)),
 });
 const weapon = object({
   ...metadata, codeName: text,

@@ -87,6 +87,16 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
       if (key !== spec.id) errors.push(`${section}.${key}: key must match id ${spec.id}`);
     }
   }
+  for (const [sId, sensor] of Object.entries(catalog.sensors)) {
+    const cov = sensor.coverageArcDeg ?? 360;
+    const blind = sensor.blindArcRearDeg ?? 0;
+    if (cov + blind <= 0 || 360 - blind < 20 || cov < 10) {
+      errors.push(`sensors.${sId}: invalid sensor arc/baffle geometry`);
+    }
+    if (cov < 360 && blind > 0 && cov / 2 > 180 - blind / 2) {
+      errors.push(`sensors.${sId}: coverageArcDeg overlaps blindArcRearDeg`);
+    }
+  }
   for (const [id, weapon] of Object.entries(catalog.weapons)) {
     if (weapon.minRangeKm > weapon.maxRangeKm) errors.push(`weapons.${id}: minRangeKm exceeds maxRangeKm`);
     if (weapon.launchMedium === 'air_drop') {

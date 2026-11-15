@@ -12,7 +12,8 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
     lookDownCapable: true,
     detectDomains: ['air', 'surface', 'land'],
     frequencyBand: 'X-Band GaN AESA',
-    description: '五代重型隐身战机机载大孔径氮化镓有源相控阵雷达，具备低截获概率(LPI)与超远距多目标跟踪能力。',
+    coverageArcDeg: 140,
+    description: '五代重型隐身战机机载大孔径氮化镓有源相控阵雷达（前向 ±70° 倾斜阵面视界），具备低截获概率(LPI)与超远距多目标跟踪能力。',
   },
   apg81_aesa: {
     id: 'apg81_aesa',
@@ -24,7 +25,8 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
     lookDownCapable: true,
     detectDomains: ['air', 'surface', 'land'],
     frequencyBand: 'X-Band AESA',
-    description: 'F-35系列核心有源相控阵雷达，具备合成孔径对海成像与防空火控能力。',
+    coverageArcDeg: 130,
+    description: 'F-35系列核心机头有源相控阵雷达（前向 ±65° 电子扫描视界），具备合成孔径对海成像与防空火控能力。',
   },
   apy10_maritime_radar: {
     id: 'apy10_maritime_radar',
@@ -209,7 +211,8 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
     lookDownCapable: true,
     detectDomains: ['subsurface', 'surface'],
     frequencyBand: 'VLF Acoustic Passive',
-    description: '通过超长拖曳水听器阵列跨温跃层监听远距潜艇与鱼雷螺旋桨噪声。',
+    blindArcRearDeg: 40,
+    description: '通过超长拖曳水听器阵列跨温跃层监听远距潜艇与鱼雷螺旋桨噪声（存在轴向端射/尾流窄盲区）。',
   },
   z20f_dipping_sonar: {
     id: 'z20f_dipping_sonar',
@@ -245,7 +248,8 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
     lookDownCapable: true,
     detectDomains: ['subsurface', 'surface'],
     frequencyBand: 'LF Passive Flank Array',
-    description: '针对浅海低速伏击优化的长基线被动阵列，平台高速机动时收益显著下降。',
+    blindArcRearDeg: 60,
+    description: '针对浅海低速伏击优化的长基线被动阵列，艇尾 ±30° 存在推进器挡音盲区（Baffles）。',
   },
   blue_aip_flank_array: {
     id: 'blue_aip_flank_array',
@@ -257,7 +261,8 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
     lookDownCapable: true,
     detectDomains: ['subsurface', 'surface'],
     frequencyBand: 'LF Passive Flank Array',
-    description: '大鲸级浅海守峡用被动阵列，强调低速静音监听而非高速追击。',
+    blindArcRearDeg: 60,
+    description: '大鲸级浅海守峡用被动阵列，艇尾 ±30° 存在挡音盲区，需定期转向清盲区。',
   },
   hull_active_sonar: {
     id: 'hull_active_sonar',
@@ -269,7 +274,8 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
     lookDownCapable: true,
     detectDomains: ['subsurface', 'surface'],
     frequencyBand: 'LF Active Ping',
-    description: '发射强声脉冲精确定位静音潜艇，但会暴露自身水下坐标。',
+    blindArcRearDeg: 60,
+    description: '发射强声脉冲精确定位静音潜艇，舰尾 ±30° 受船体与螺旋桨空泡遮蔽形成盲区。',
   },
 
   // --- 陆基远程防空与战略预警雷达 ---

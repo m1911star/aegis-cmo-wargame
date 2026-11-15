@@ -74,6 +74,8 @@ export interface SensorSpec {
   detectDomains: Domain[];      // 可探测的目标域
   frequencyBand: string;        // 频段描述
   jammingPowerKw?: number;      // 若为电子战系统/AESA副瓣干扰，具备有源压制功率 (kW)
+  coverageArcDeg?: number;      // 前向覆盖扇角 (10°~360°，默认 360° 全向)
+  blindArcRearDeg?: number;     // 尾后推进器/挡音盲区角 (0°~180°，默认 0°)
   description: string;
 }
 
@@ -227,6 +229,7 @@ export interface UnitDoctrine {
   requireIdentifiedForAutoFire?: boolean;
   shootAndScoot?: boolean;
   bvrTactics?: 'standard' | 'crank_pump';
+  baffleClearPeriodic?: boolean;
 }
 
 export interface RuntimeWeaponMount extends PlatformMountTemplate {
@@ -333,6 +336,12 @@ export interface RuntimeUnit {
   countermeasures: CountermeasureInventory;
   countermeasureEffect?: { chaff: boolean; flares: boolean; acoustic: boolean; expiresAtSimTime: number };
   evasionState?: EvasionState;
+  baffleClearState?: {
+    savedHeading: number;
+    savedWaypoints: RouteLeg[];
+    untilSimTime: number;
+    nextAtSimTime: number;
+  };
   aarFuelRemainingSec: number;
   aarQueue: string[];
   airRefuelState?: AirRefuelState;

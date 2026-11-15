@@ -1,7 +1,7 @@
 import * as turf from '@turf/turf';
-import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
+import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScenarioEnvironment, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
-import { getCompiledPolygon, pointInBbox } from './environment';
+import { getCompiledPolygon, isRouteAllowed, pointInBbox } from './environment';
 import { guidanceProfile } from './fireControl';
 import { getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
@@ -65,9 +65,71 @@ function enqueueRecoveredSortie(
 export function updateUnitOperations(
   unit: RuntimeUnit, units: Record<string, RuntimeUnit>, contacts: Record<string, TacticalContact>,
   missions: MissionDefinition[], catalog: EquipmentCatalog, simTime: number, dtSec: number,
-  score: ScoreLedger, logs: CombatLogEntry[], weaponsInFlight: Record<string, WeaponInFlight> = {}
+  score: ScoreLedger, logs: CombatLogEntry[], weaponsInFlight: Record<string, WeaponInFlight> = {},
+  environment?: ScenarioEnvironment
 ) {
   const mission = missions.find((m) => m.id === unit.assignedMissionId && m.isActive);
+  const unitEffDoctrine = effectiveDoctrine(unit, missions);
+
+  // Submarine periodic S-turn baffle-clearing maneuver (clears stern ±30° sonar baffles every 180s for 20s)
+  if (unit.domain === 'subsurface' && isActiveUnit(unit)) {
+    if (!unitEffDoctrine.baffleClearPeriodic || unit.status === 'evading' || unit.missionTargetId) {
+      if (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0) {
+        unit.heading = unit.baffleClearState.savedHeading;
+        unit.waypoints = unit.baffleClearState.savedWaypoints.map((w) => ({ ...w, position: [...w.position] as [number, number] }));
+        unit.baffleClearState = {
+          savedHeading: unit.heading,
+          savedWaypoints: [],
+          untilSimTime: 0,
+          nextAtSimTime: simTime + 180_000,
+        };
+      }
+    } else {
+      unit.baffleClearState ??= {
+        savedHeading: unit.heading,
+        savedWaypoints: [],
+        untilSimTime: 0,
+        nextAtSimTime: simTime + 180_000,
+      };
+      if (unit.baffleClearState.untilSimTime > 0) {
+        if (simTime >= unit.baffleClearState.untilSimTime) {
+          unit.heading = unit.baffleClearState.savedHeading;
+          unit.waypoints = unit.baffleClearState.savedWaypoints.map((w) => ({ ...w, position: [...w.position] as [number, number] }));
+          unit.baffleClearState.untilSimTime = 0;
+          unit.baffleClearState.savedWaypoints = [];
+          unit.baffleClearState.nextAtSimTime = simTime + 180_000;
+        }
+      } else if (simTime >= unit.baffleClearState.nextAtSimTime) {
+        const turnSign = Math.floor(simTime / 180_000) % 2 === 0 ? 1 : -1;
+        const clearBearing = (unit.heading + turnSign * 38 + 360) % 360;
+        const clearDest = turf.destination(unit.position, 2.5, clearBearing, { units: 'kilometers' })
+          .geometry.coordinates as [number, number];
+        if (isRouteAllowed('subsurface', unit.position, clearDest, environment)) {
+          unit.baffleClearState = {
+            savedHeading: unit.heading,
+            savedWaypoints: unit.waypoints.map((w) => ({ ...w, position: [...w.position] as [number, number] })),
+            untilSimTime: simTime + 20_000,
+            nextAtSimTime: simTime + 200_000,
+          };
+          unit.heading = clearBearing;
+          unit.waypoints = [{ position: clearDest, speedKts: Math.min(8, Math.max(4, unit.targetSpeedKts || 5)) }];
+          logs.push({
+            id: `baffle_clear_${unit.id}_${simTime}`,
+            simTime,
+            side: unit.side,
+            category: 'DOCTRINE',
+            severity: 'info',
+            title: `${unit.callsign} 执行转向清声呐尾流盲区 (Baffle Clear)`,
+            message: `偏航 ${Math.round(clearBearing)}° 持续 20 秒，监听艇尾螺旋桨遮蔽扇区。`,
+            position: [...unit.position],
+            unitId: unit.id,
+          });
+        } else {
+          unit.baffleClearState.nextAtSimTime = simTime + 60_000;
+        }
+      }
+    }
+  }
   const targetDomains: RuntimeUnit['domain'][] = mission?.type === 'aaw_patrol' ? ['air']
     : mission?.type === 'asuw_patrol' ? ['surface']
     : mission?.type === 'asw_patrol' ? ['subsurface']

@@ -64,6 +64,51 @@ export type TacticalProjection = {
   fireControlLinks: GeoJSON.Feature[];
 };
 
+export function buildSensorEnvelopeFeature(
+  center: [number, number],
+  radiusKm: number,
+  headingDeg: number,
+  coverageArcDeg = 360,
+  blindArcRearDeg = 0,
+  steps = 56,
+  properties: Record<string, unknown> = {}
+): GeoJSON.Feature {
+  if (coverageArcDeg >= 360 && blindArcRearDeg <= 0) {
+    return turf.circle(center, radiusKm, { steps, units: 'kilometers', properties });
+  }
+  // Compute visible clockwise sweep [startOffset, endOffset] relative to headingDeg
+  let startOffset = -180;
+  let endOffset = 180;
+  if (coverageArcDeg < 360) {
+    startOffset = -coverageArcDeg * 0.5;
+    endOffset = coverageArcDeg * 0.5;
+  }
+  if (blindArcRearDeg > 0) {
+    const maxNonBlind = 180 - blindArcRearDeg * 0.5;
+    startOffset = Math.max(startOffset, -maxNonBlind);
+    endOffset = Math.min(endOffset, maxNonBlind);
+  }
+  const span = Math.max(10, endOffset - startOffset);
+  const segs = Math.max(12, Math.round((span / 360) * steps));
+  const ring: [number, number][] = [[...center]];
+  for (let i = 0; i <= segs; i++) {
+    const offset = startOffset + (span * i) / segs;
+    const bearing = (headingDeg + offset + 360) % 360;
+    const pt = turf.destination(center, radiusKm, bearing, { units: 'kilometers' })
+      .geometry.coordinates as [number, number];
+    ring.push(pt);
+  }
+  ring.push([...center]);
+  return {
+    type: 'Feature',
+    properties,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [ring],
+    },
+  };
+}
+
 export function projectTacticalState(input: TacticalProjectionInput): TacticalProjection {
   const {
     units, contacts, weaponsInFlight, explosions, missions, referencePoints,
@@ -134,10 +179,23 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       for (const sensorId of configuration.sensorIds) {
         const sensor = catalog.sensors[sensorId];
         if (!sensor || (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth')) continue;
-        envelopeFeatures.push(turf.circle(unit.position, sensor.maxRangeKm * getUnitCapabilities(unit).radarFactor, {
-          steps: 64, units: 'kilometers', properties: { ringKind: 'radar', side: unit.side, isSelected,
-            label: `${unit.callsign} 雷达包线 (${sensor.maxRangeKm}km)` },
-        }));
+        envelopeFeatures.push(
+          buildSensorEnvelopeFeature(
+            unit.position,
+            sensor.maxRangeKm * getUnitCapabilities(unit).radarFactor,
+            unit.heading,
+            sensor.coverageArcDeg,
+            sensor.blindArcRearDeg,
+            64,
+            {
+              ringKind: 'radar',
+              side: unit.side,
+              isSelected,
+              isSector: (sensor.coverageArcDeg ?? 360) < 360,
+              label: `${unit.callsign} 雷达包线 (${sensor.maxRangeKm}km${sensor.coverageArcDeg && sensor.coverageArcDeg < 360 ? ` · ${sensor.coverageArcDeg}°` : ''})`,
+            }
+          )
+        );
         if (isSelected && unit.domain === 'surface') {
           const horizonKm = calculateRadarHorizonKm(unit.altitudeM, spec.radarAntennaHeightM, 12);
           envelopeFeatures.push(turf.circle(unit.position, horizonKm, {
@@ -175,10 +233,24 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
     if ((mapLayers.showSonarRings || isSelected) && (unit.domain === 'subsurface' || unit.domain === 'surface')) {
       for (const sensorId of configuration.sensorIds) {
         const sensor = catalog.sensors[sensorId];
-        if (sensor?.type === 'sonar_passive') envelopeFeatures.push(turf.circle(
-          unit.position, sensor.maxRangeKm * getUnitCapabilities(unit).radarFactor,
-          { steps: 48, units: 'kilometers', properties: { ringKind: 'sonar', side: unit.side, isSelected } }
-        ));
+        if (sensor?.type === 'sonar_passive') {
+          envelopeFeatures.push(
+            buildSensorEnvelopeFeature(
+              unit.position,
+              sensor.maxRangeKm * getUnitCapabilities(unit).radarFactor,
+              unit.heading,
+              sensor.coverageArcDeg,
+              sensor.blindArcRearDeg,
+              48,
+              {
+                ringKind: 'sonar',
+                side: unit.side,
+                isSelected,
+                hasBaffle: (sensor.blindArcRearDeg ?? 0) > 0,
+              }
+            )
+          );
+        }
       }
     }
   }

@@ -175,6 +175,19 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
             />
           </div>
         )}
+        {unit.domain === 'subsurface' && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+            <span className="text-foreground">定期转向清盲区 (Baffles)</span>
+            <Switch
+              aria-label="定期转向清声呐盲区"
+              disabled={unitDead}
+              checked={!!unit.doctrine.baffleClearPeriodic}
+              onCheckedChange={(checked) =>
+                updateUnitDoctrine(unit.id, { baffleClearPeriodic: checked })
+              }
+            />
+          </div>
+        )}
       </div>
 
       {platformSpec.availableLoadoutIds && platformSpec.availableLoadoutIds.length > 0 && (

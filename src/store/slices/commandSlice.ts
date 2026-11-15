@@ -445,6 +445,7 @@ export function createCommandSlice(set: StoreSet) {
             patch.minimumWeaponReserve !== undefined && (!Number.isSafeInteger(patch.minimumWeaponReserve) || patch.minimumWeaponReserve < 0) ||
             patch.minimumAutomaticThreat !== undefined && !THREAT_LEVELS.includes(patch.minimumAutomaticThreat) ||
             patch.bvrTactics !== undefined && !['standard', 'crank_pump'].includes(patch.bvrTactics) ||
+            patch.baffleClearPeriodic !== undefined && typeof patch.baffleClearPeriodic !== 'boolean' ||
             patch.automaticTargetDomains !== undefined && (!Array.isArray(patch.automaticTargetDomains) ||
               new Set(patch.automaticTargetDomains).size !== patch.automaticTargetDomains.length ||
               patch.automaticTargetDomains.some((domain) => !TARGET_DOMAINS.includes(domain)))) return s;
@@ -488,6 +489,7 @@ export function createCommandSlice(set: StoreSet) {
             patch.minimumWeaponReserve !== undefined && (!Number.isSafeInteger(patch.minimumWeaponReserve) || patch.minimumWeaponReserve < 0) ||
             patch.minimumAutomaticThreat !== undefined && !THREAT_LEVELS.includes(patch.minimumAutomaticThreat) ||
             patch.bvrTactics !== undefined && !['standard', 'crank_pump'].includes(patch.bvrTactics) ||
+            patch.baffleClearPeriodic !== undefined && typeof patch.baffleClearPeriodic !== 'boolean' ||
             patch.automaticTargetDomains !== undefined && (!Array.isArray(patch.automaticTargetDomains) ||
               new Set(patch.automaticTargetDomains).size !== patch.automaticTargetDomains.length ||
               patch.automaticTargetDomains.some((domain) => !TARGET_DOMAINS.includes(domain)))) return s;

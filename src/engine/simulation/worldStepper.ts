@@ -65,6 +65,15 @@ function cloneUnitForStepping(unit: RuntimeUnit): RuntimeUnit {
             : undefined,
         }
       : undefined,
+    baffleClearState: unit.baffleClearState
+      ? {
+          ...unit.baffleClearState,
+          savedWaypoints: unit.baffleClearState.savedWaypoints.map((waypoint) => ({
+            ...waypoint,
+            position: [...waypoint.position] as [number, number],
+          })),
+        }
+      : undefined,
     mounts: unit.mounts.map((mount) => ({ ...mount })),
     hangar: (unit.hangar || []).map((slot) => ({
       ...slot,

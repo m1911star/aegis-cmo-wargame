@@ -17,6 +17,33 @@ import {
 } from './constants';
 
 /**
+ * 1. ★ 传感器方位视界与尾流挡音盲区几何判定 (Sensor Azimuth Arc & Sonar Rear Baffles)
+ * - coverageArcDeg < 360: 仅机头/舰首正前 ±(coverageArcDeg/2) 扇区内有效
+ * - blindArcRearDeg > 0: 正尾向 ±(blindArcRearDeg/2) 为螺旋桨空泡/挡音盲区 (Baffles)
+ */
+export function isTargetWithinSensorArc(
+  observerHeadingDeg: number,
+  observerPosition: [number, number],
+  targetPosition: [number, number],
+  sensor: Pick<SensorSpec, 'coverageArcDeg' | 'blindArcRearDeg'>
+): boolean {
+  const coverage = sensor.coverageArcDeg ?? 360;
+  const blindRear = sensor.blindArcRearDeg ?? 0;
+  if (coverage >= 360 && blindRear <= 0) return true;
+  if (getDistanceKm(observerPosition, targetPosition) <= 0.05) return true;
+
+  const bearingToTarget = getBearingDeg(observerPosition, targetPosition);
+  const offNoseDeg = Math.abs(((bearingToTarget - observerHeadingDeg + 540) % 360) - 180);
+  if (coverage < 360 && offNoseDeg > coverage * 0.5) {
+    return false;
+  }
+  if (blindRear > 0 && 180 - offNoseDeg <= blindRear * 0.5) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * 2. ★ 计算考虑目标姿态角 (Aspect Angle) 与挂载方案 (Loadout) 后的瞬时等效 RCS (m²)
  * - 正前方 (0° ~ 35°): frontalM2 (五代机隐身最优区)
  * - 正侧向 (35° ~ 135°): beamM2 (侧翼进气道与垂尾强反射，RCS 暴增 15~35 倍)
@@ -312,6 +339,7 @@ export function computeContactsOnly(
           const sensor = catalog.sensors[sensorId];
           if (!sensor) continue;
           if (!sensor.detectDomains.includes(target.domain)) continue;
+          if (!isTargetWithinSensorArc(observer.heading, observer.position, target.position, sensor)) continue;
 
           // A. 主动雷达探测 (受姿态 RCS 与敌方 OECM 压制影响)
           if (
@@ -628,7 +656,8 @@ export function computeContactsOnly(
 
 export function observeMissile(
   side: SideId, missile: WeaponInFlight, units: Record<string, RuntimeUnit>,
-  catalog: EquipmentCatalog, simTime: number, receiver?: RuntimeUnit, environment?: ScenarioEnvironment
+  catalog: EquipmentCatalog, simTime: number, receiver?: RuntimeUnit, environment?: ScenarioEnvironment,
+  allowPassiveWarning = false
 ): TacticalContact | undefined {
   const sources: RuntimeUnit[] = [];
   for (const observer of Object.values(units)) {
@@ -641,11 +670,22 @@ export function observeMissile(
     const detected = config.sensorIds.some((id) => {
       const sensor = catalog.sensors[id];
       if (!sensor?.detectDomains.includes(missileDomain)) return false;
+      if (!isTargetWithinSensorArc(observer.heading, observer.position, missile.position, sensor)) return false;
       if (missileDomain === 'subsurface') {
         if (sensor.type !== 'sonar_active' && sensor.type !== 'sonar_passive') return false;
         if (sensor.type === 'sonar_active' && !observer.doctrine.emconSonar) return false;
         const torpedoNoiseRangeKm = sensor.maxRangeKm * (sensor.type === 'sonar_active' ? 1 : 0.65);
         return distance <= torpedoNoiseRangeKm;
+      }
+      if (allowPassiveWarning && observer.doctrine.emconRadar && sensor.type === 'irst_optical') {
+        const horizonKm = calculateRadarHorizonKm(
+          observer.altitudeM, config.platform.radarAntennaHeightM, missile.altitudeM
+        );
+        return distance <= Math.min(sensor.maxRangeKm * 0.45, horizonKm) &&
+          hasRadarLineOfSight(
+            observer.position, observer.altitudeM, config.platform.radarAntennaHeightM,
+            missile.position, missile.altitudeM, environment
+          );
       }
       if (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth') return false;
       if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) return false;

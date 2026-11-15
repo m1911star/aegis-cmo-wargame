@@ -139,7 +139,8 @@ export function advanceUnitPhysics({
       dtSec,
       score,
       logs,
-      weaponsInFlight
+      weaponsInFlight,
+      environment
     );
     if (!isActiveUnit(unit)) continue;
 
