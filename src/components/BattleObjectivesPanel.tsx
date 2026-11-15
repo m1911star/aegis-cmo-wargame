@@ -138,7 +138,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
               </p>
               {campaignState && !campaignState.finished && (
                 <button
-                  onClick={advanceCampaignStage}
+                  onClick={() => advanceCampaignStage('balanced')}
                   className="toolbar-button text-cyan-300"
                 >
                   {campaignState.currentStageIndex + 1 < campaignState.totalStages

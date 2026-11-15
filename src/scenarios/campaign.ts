@@ -43,6 +43,8 @@ export interface CampaignDefinition {
   stages: CampaignStageDefinition[];
 }
 
+export type CampaignResupplyChoice = 'balanced' | 'munitions' | 'airframes' | 'hull_repair';
+
 export interface CampaignCarryover {
   completedStages: number;
   cumulativeScore: number;
@@ -54,6 +56,7 @@ export interface CampaignCarryover {
   platformDamageDebt: Record<string, number>;
   scarceAmmoDebt: Record<string, number>;
   lastOutcome?: BattleResult['outcomes']['RED'];
+  lastResupplyChoice?: CampaignResupplyChoice;
   notes: string[];
 }
 
@@ -367,4 +370,46 @@ export function applyCampaignRuntimeCarryover(
   }
 
   return nextUnits;
+}
+
+export function applyCampaignResupplyChoice(
+  carryover: CampaignCarryover,
+  choice: CampaignResupplyChoice
+): CampaignCarryover {
+  const next: CampaignCarryover = {
+    ...carryover,
+    platformDamageDebt: { ...carryover.platformDamageDebt },
+    scarceAmmoDebt: { ...carryover.scarceAmmoDebt },
+    lastResupplyChoice: choice,
+    notes: [...carryover.notes],
+  };
+
+  if (choice === 'hull_repair') {
+    for (const [k, v] of Object.entries(next.platformDamageDebt)) {
+      next.platformDamageDebt[k] = Number(Math.max(0, v * 0.35).toFixed(3));
+    }
+    next.readinessMultiplier = Math.min(1, Number((next.readinessMultiplier + 0.08).toFixed(2)));
+    next.notes.push('战间整备：优先船厂抢修（大幅恢复舰体战损）');
+  } else if (choice === 'airframes') {
+    next.airframeAttritionDebt = Math.max(0, Math.floor(next.airframeAttritionDebt * 0.3));
+    next.readinessMultiplier = Math.min(1, Number((next.readinessMultiplier + 0.05).toFixed(2)));
+    next.notes.push('战间整备：优先补充舰载/岸基航空兵架数');
+  } else if (choice === 'munitions') {
+    for (const [k, v] of Object.entries(next.scarceAmmoDebt)) {
+      next.scarceAmmoDebt[k] = Math.max(0, Math.floor(v * 0.25));
+    }
+    next.notes.push('战间整备：优先前线垂发/远程防区外弹药补给');
+  } else {
+    for (const [k, v] of Object.entries(next.platformDamageDebt)) {
+      next.platformDamageDebt[k] = Number(Math.max(0, v * 0.7).toFixed(3));
+    }
+    next.airframeAttritionDebt = Math.max(0, Math.floor(next.airframeAttritionDebt * 0.65));
+    for (const [k, v] of Object.entries(next.scarceAmmoDebt)) {
+      next.scarceAmmoDebt[k] = Math.max(0, Math.floor(v * 0.65));
+    }
+    next.readinessMultiplier = Math.min(1, Number((next.readinessMultiplier + 0.03).toFixed(2)));
+    next.notes.push('战间整备：均衡后勤补给（战损、机库与弹药适度恢复）');
+  }
+
+  return next;
 }

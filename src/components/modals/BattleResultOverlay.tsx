@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import type { CampaignResupplyChoice } from '../../scenarios/campaign';
 import { Award, ChartColumn, RotateCcw } from 'lucide-react';
 import { evaluateBattleAssessment } from '../../engine/simulation/battleAssessment';
 import { useWargameStore } from '../../store/useWargameStore';
@@ -27,6 +28,7 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const resetScenario = useWargameStore((s) => s.resetScenario);
   const advanceCampaignStage = useWargameStore((s) => s.advanceCampaignStage);
+  const [resupplyChoice, setResupplyChoice] = useState<CampaignResupplyChoice>('balanced');
 
   if (!battleResult) return null;
 
@@ -104,6 +106,35 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
                 此前累计战役积分 {campaignState.carryover.cumulativeScore} · 当前战备系数{' '}
                 {Math.round(campaignState.carryover.readinessMultiplier * 100)}% · 本阶段主力战损、机库架数与稀缺防区外弹药消耗将计入下一阶段后勤账本。
               </div>
+              {!campaignState.finished && campaignState.currentStageIndex + 1 < campaignState.totalStages && (
+                <div className="pt-1.5 border-t border-cyan-500/20 space-y-1">
+                  <div className="text-cyan-200 font-medium">战间有限后勤整备取舍（仅可优先强化一项）：</div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        ['balanced', '均衡补给', '战损/机库/弹药适度恢复'],
+                        ['munitions', '弹药优先', '大幅补充垂发与防区外弹药'],
+                        ['airframes', '航空兵优先', '优先补充舰载/岸基战机架数'],
+                        ['hull_repair', '抢修优先', '大幅修复主力舰体战损'],
+                      ] as const
+                    ).map(([key, title, desc]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setResupplyChoice(key)}
+                        className={`text-left px-2 py-1 rounded border text-[10px] transition ${
+                          resupplyChoice === key
+                            ? 'border-cyan-400 bg-cyan-500/20 text-cyan-100'
+                            : 'border-border/50 bg-background/40 text-muted-foreground hover:border-cyan-500/40'
+                        }`}
+                      >
+                        <div className="font-semibold">{title}</div>
+                        <div className="opacity-80">{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -133,7 +164,7 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
             <Button
               onClick={() => {
                 onDismiss();
-                advanceCampaignStage();
+                advanceCampaignStage(resupplyChoice);
               }}
             >
               {campaignState.currentStageIndex + 1 < campaignState.totalStages

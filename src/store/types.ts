@@ -3,7 +3,7 @@ import type { RecordedCommand } from '../engine/determinism';
 import type { FireControlSolution } from '../engine/fireControl';
 import type { SimulationStepResult } from '../engine/simulationEngine';
 import type { BasemapMode } from '../map/basemaps';
-import type { CampaignState } from '../scenarios/campaign';
+import type { CampaignResupplyChoice, CampaignState } from '../scenarios/campaign';
 import type {
   ActivePerspective,
   AutoPauseSettings,
@@ -204,7 +204,7 @@ export interface WargameStoreState {
   loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number) => void;
   resetScenario: (randomizeSpawns?: boolean) => void;
   startCampaign: (side?: 'RED' | 'BLUE') => void;
-  advanceCampaignStage: () => void;
+  advanceCampaignStage: (resupplyChoice?: CampaignResupplyChoice) => void;
   exitCampaign: () => void;
   setTimeScale: (scale: TimeScale) => void;
   stepSingleTick: (dtSec?: number) => void;

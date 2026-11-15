@@ -15,10 +15,12 @@ import {
 import { INFORMATION_EXERCISE } from '../../scenarios/informationExercise';
 import {
   BUILTIN_CAMPAIGN_WESTPAC,
+  applyCampaignResupplyChoice,
   applyCampaignRuntimeCarryover,
   buildCampaignStageScenario,
   computeNextCampaignCarryover,
   createInitialCampaignState,
+  type CampaignResupplyChoice,
   type CampaignState,
 } from '../../scenarios/campaign';
 import { FORCE_PACKAGES } from '../../db';
@@ -370,13 +372,13 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       });
     },
 
-    advanceCampaignStage: () => {
+    advanceCampaignStage: (resupplyChoice: CampaignResupplyChoice = 'balanced') => {
       const state = get();
       const campaign = state.campaignState;
       if (!campaign || !state.battleResult || campaign.finished) return;
       const sideScore = campaign.playerSide === 'RED' ? state.score.redScore : state.score.blueScore;
       const ownLosses = campaign.playerSide === 'RED' ? state.score.redLosses : state.score.blueLosses;
-      const nextCarryover = computeNextCampaignCarryover(
+      const rawCarryover = computeNextCampaignCarryover(
         campaign.carryover,
         state.battleResult,
         campaign.playerSide,
@@ -384,6 +386,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         ownLosses,
         state.units
       );
+      const nextCarryover = applyCampaignResupplyChoice(rawCarryover, resupplyChoice);
       const nextIndex = campaign.currentStageIndex + 1;
       if (nextIndex >= BUILTIN_CAMPAIGN_WESTPAC.stages.length) {
         set({
