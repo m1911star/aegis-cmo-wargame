@@ -203,10 +203,30 @@ test('filters equipment catalog and triggers manual countermeasure from inspecto
 test('loads sea-land-air amphibious and pure inland air-land scenarios and launches from airbase', async ({ page }) => {
   await page.getByLabel('选择战役想定').selectOption('op_joint_amphibious_assault_2027');
   await expect(page.getByLabel('选择战役想定')).toHaveValue('op_joint_amphibious_assault_2027');
+  await expect(page.getByText(/阴云层 · 4级海况/)).toBeVisible();
 
   await page.getByLabel('选择战役想定').selectOption('op_inland_mountain_strike_2027');
   await expect(page.getByLabel('选择战役想定')).toHaveValue('op_inland_mountain_strike_2027');
   await page.locator('#order-panel').getByText('INLAND-AB-W', { exact: true }).click();
   await page.getByRole('button', { name: '弹射升空' }).first().click();
   await expect(page.locator('#inspector-panel').getByText(/基地歼-20A 航空兵大队 #1波次/)).toBeVisible();
+});
+
+test('displays v3 guidance channels, submarine baffle-clearing switch, and airborne ASW sonobuoy drop', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
+  await expect(page.locator('#inspector-panel').getByText('火控/制导通道占用')).toBeVisible();
+
+  // Select submarine in ORBAT and toggle periodic baffle-clearing
+  await page.locator('#order-panel').getByText('SSK-039C-1', { exact: true }).click();
+  const baffleSwitch = page.getByLabel('定期转向清声呐盲区');
+  await expect(baffleSwitch).toBeVisible();
+  await baffleSwitch.click();
+  await expect(baffleSwitch).toHaveAttribute('aria-checked', 'true');
+
+  // Launch Z-20F ASW helicopter from 054B frigate and drop DIFAR sonobuoy into water
+  await page.locator('#order-panel').getByText('PLANS-FFG01', { exact: true }).click();
+  await page.getByRole('button', { name: '弹射升空' }).click();
+  await expect(page.locator('#inspector-panel').getByText('航空声呐浮标舱 (Sonobuoys)')).toBeVisible();
+  await page.getByRole('button', { name: '投掷入水' }).first().click();
+  await expect(page.locator('#inspector-panel').getByText(/BUOY-/)).toBeVisible();
 });
