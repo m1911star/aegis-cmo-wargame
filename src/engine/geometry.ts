@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from './turfGeo';
 import { EARTH_CURVATURE_COEFFICIENT } from './constants';
 
 export function calculateRadarHorizonKm(

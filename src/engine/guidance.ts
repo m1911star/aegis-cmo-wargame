@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from './turfGeo';
 import type { EquipmentCatalog, RuntimeUnit, ScenarioEnvironment, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
 import { evaluateWeatherModifiers, hasRadarLineOfSight } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';

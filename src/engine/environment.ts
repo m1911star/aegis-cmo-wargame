@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from './turfGeo';
 import type { Domain, ScenarioEnvironment, WeaponSpec } from '../types/wargame';
 import { getDistanceKm } from './geometry';
 

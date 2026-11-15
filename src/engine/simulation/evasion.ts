@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from '../turfGeo';
 import type { CombatLogEntry, EquipmentCatalog, RuntimeUnit, SideId, TacticalContact, WeaponInFlight } from '../../types/wargame';
 import { resolveUnitConfiguration } from '../unitConfiguration';
 import { getBearingDeg, getDistanceKm } from '../geometry';

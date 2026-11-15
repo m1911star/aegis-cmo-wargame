@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from '../engine/turfGeo';
 import type { EquipmentCatalog, InitialUnitPlacement, RouteLeg, ScenarioDefinition } from '../types/wargame';
 import { cloneEnvironment, isPointOnLand, isRouteAllowed } from '../engine/environment';
 import { getDistanceKm } from '../engine/geometry';

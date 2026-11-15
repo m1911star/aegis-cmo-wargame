@@ -6,7 +6,7 @@ import { useWargameStore } from '../store/useWargameStore';
 import { projectTacticalState } from './tacticalProjection';
 import { createOfflineBasemap } from './offlineBasemap';
 import { installTacticalLayers } from './tacticalLayers';
-import { BasemapLoader, BASEMAP_PRESETS, initialBasemapState, basemapFallbackImage, type BasemapMode, type BasemapState } from './basemaps';
+import { BasemapLoader, BASEMAP_PRESETS, initialBasemapState, basemapFallbackImage, type BasemapState } from './basemaps';
 import { getBearingDeg, getDistanceKm } from '../engine/simulationEngine';
 import { evaluateFireControl } from '../engine/fireControl';
 import { sanitizeSidc } from '../validation/wargameSchemas';
@@ -27,7 +27,6 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const basemapLoaderRef = useRef<BasemapLoader | null>(null);
   const basemapMode = useWargameStore((s) => s.basemapMode);
-  const setBasemapMode = useWargameStore((s) => s.setBasemapMode);
   const [basemapState, setBasemapState] = useState<BasemapState>(() => initialBasemapState(basemapMode));
   const cursorReadoutRef = useRef<HTMLSpanElement | null>(null);
   const cursorPendingRef = useRef<[number, number]>([124.2, 26.2]);

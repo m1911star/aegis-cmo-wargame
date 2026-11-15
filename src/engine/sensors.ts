@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from './turfGeo';
 import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from './unitConfiguration';
 import {

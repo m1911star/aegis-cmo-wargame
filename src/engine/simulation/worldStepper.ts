@@ -10,7 +10,6 @@ import type {
   EquipmentCatalog,
   RuntimeScenarioEvent,
   RuntimeUnit,
-  ScoreLedger,
   SideId,
   WeaponInFlight,
 } from '../../types/wargame';

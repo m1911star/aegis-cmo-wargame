@@ -9,13 +9,24 @@ export default defineConfig({
     host: true,
   },
   build: {
-    chunkSizeWarningLimit: 1600,
+    chunkSizeWarningLimit: 1100,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-maplibre': ['maplibre-gl'],
-          'vendor-turf-milsymbol': ['@turf/turf', 'milsymbol'],
-          'vendor-react': ['react', 'react-dom', 'zustand'],
+        manualChunks(id) {
+          if (id.includes('node_modules/maplibre-gl')) return 'vendor-maplibre';
+          if (id.includes('node_modules/milsymbol')) return 'vendor-milsymbol';
+          if (id.includes('node_modules/@turf')) return 'vendor-turf';
+          if (
+            id.includes('node_modules/react') ||
+            id.includes('node_modules/zustand') ||
+            id.includes('node_modules/lucide-react')
+          ) {
+            return 'vendor-react';
+          }
+          if (id.includes('/src/scenarios/') || id.includes('/src/db/')) {
+            return 'wargame-data';
+          }
+          return undefined;
         },
       },
     },

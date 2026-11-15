@@ -103,7 +103,7 @@
         "blue": 7
       },
       "missilesFired": {
-        "red": 100,
+        "red": 104,
         "blue": 138
       },
       "interceptions": {
@@ -154,7 +154,7 @@
         "deep_blue_preserve_cvn": "failed",
         "deep_blue_disable_wolfpack": "pending"
       },
-      "aarEvents": 199,
+      "aarEvents": 201,
       "finiteState": true
     },
     {
@@ -283,20 +283,20 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 2,
-        "blue": 3
+        "red": 1,
+        "blue": 4
       },
       "missilesFired": {
-        "red": 84,
-        "blue": 68
+        "red": 62,
+        "blue": 66
       },
       "interceptions": {
-        "red": 22,
+        "red": 17,
         "blue": 6
       },
       "score": {
-        "red": 450,
-        "blue": 759
+        "red": 600,
+        "blue": 530
       },
       "sortiesLaunched": 3,
       "events": [
@@ -331,7 +331,7 @@
         "joint_blue_hold_beach": "achieved",
         "joint_blue_preserve_airbase": "achieved"
       },
-      "aarEvents": 120,
+      "aarEvents": 100,
       "finiteState": true
     },
     {
@@ -351,12 +351,12 @@
         "blue": 1
       },
       "missilesFired": {
-        "red": 44,
+        "red": 46,
         "blue": 38
       },
       "interceptions": {
         "red": 12,
-        "blue": 5
+        "blue": 3
       },
       "score": {
         "red": 150,

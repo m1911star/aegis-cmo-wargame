@@ -6,7 +6,7 @@ import { getBearingDeg } from '../../src/engine/geometry';
 import { evaluateAreaControlStatus, evaluateObjectives } from '../../src/engine/objectives';
 import { recoverySolution, updateUnitOperations } from '../../src/engine/operations';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
-import { createRuntimeUnitFromPlacement, stepSimulationWorld } from '../../src/engine/simulationEngine';
+import { createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
 import { SCENARIO_INLAND_AIR_LAND } from '../../src/scenarios/inlandAirLandScenario';
 import { SCENARIO_JOINT_AMPHIBIOUS_ASSAULT } from '../../src/scenarios/jointAmphibiousScenario';
 import { compileScenario } from '../../src/scenarios/compileScenario';

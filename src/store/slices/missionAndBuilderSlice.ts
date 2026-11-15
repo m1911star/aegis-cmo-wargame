@@ -1,4 +1,4 @@
-import * as turf from '@turf/turf';
+import * as turf from '../../engine/turfGeo';
 import { canCommandUnit } from '../../engine/commandPolicy';
 import { isRouteAllowed } from '../../engine/environment';
 import { deriveMissionAssignments } from '../../engine/missions';

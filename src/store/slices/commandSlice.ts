@@ -4,7 +4,7 @@ import { findShootAndScootDestination, isRouteAllowed } from '../../engine/envir
 import { evaluateFireControl } from '../../engine/fireControl';
 import { launchGuidance } from '../../engine/guidance';
 import { effectiveDoctrine } from '../../engine/operations';
-import { createRuntimeUnitFromPlacement, getBearingDeg } from '../../engine/simulationEngine';
+import { getBearingDeg } from '../../engine/simulationEngine';
 import { getUnitCapabilities } from '../../engine/unitCapabilities';
 import {
   createRuntimeWeaponMounts,
@@ -23,7 +23,7 @@ import type {
   ThreatLevel,
   UnitDoctrine,
 } from '../../types/wargame';
-import type { StoreSet, WargameStoreState } from '../types';
+import type { StoreSet } from '../types';
 
 const TARGET_DOMAINS: readonly Domain[] = ['air', 'surface', 'subsurface', 'land'];
 const THREAT_LEVELS: readonly ThreatLevel[] = ['low', 'medium', 'high', 'critical'];

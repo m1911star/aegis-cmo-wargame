@@ -81,5 +81,18 @@ const report = {
   },
   summaries,
 };
-await Bun.write('docs/SCENARIO_SMOKE_RESULTS.json', `${JSON.stringify(report, null, 2)}\n`);
+const serialized = `${JSON.stringify(report, null, 2)}\n`;
+const checkOnly = process.argv.includes('--check');
+const reportPath = 'docs/SCENARIO_SMOKE_RESULTS.json';
+
+if (checkOnly) {
+  const existing = await Bun.file(reportPath).text();
+  if (existing !== serialized) {
+    throw new Error(
+      `${reportPath} is out of sync with deterministic smoke output. Run \`bun run smoke:scenarios\` to refresh.`
+    );
+  }
+} else {
+  await Bun.write(reportPath, serialized);
+}
 console.log(JSON.stringify(report, null, 2));

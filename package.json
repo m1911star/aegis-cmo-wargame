@@ -14,7 +14,8 @@
     "test:coverage": "bun test tests/unit tests/integration --coverage --coverage-reporter=text --coverage-reporter=lcov && bun run scripts/checkEngineCoverage.ts",
     "test:e2e": "playwright test",
     "validate:db": "bun run scripts/validateDb.ts",
-    "smoke:scenarios": "bun run scripts/smokeScenarios.ts"
+    "smoke:scenarios": "bun run scripts/smokeScenarios.ts",
+    "smoke:scenarios:check": "bun run scripts/smokeScenarios.ts --check"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",
@@ -32,7 +33,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
-    "@types/bun": "latest",
+    "@types/bun": "^1.4.4",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
