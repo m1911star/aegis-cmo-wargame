@@ -36,6 +36,7 @@ export function getUnitCapabilities(unit: RuntimeUnit) {
   const baseRadar = disabled || sensorsInt <= 0.2 ? 0 : fraction <= 0.6 ? 0.75 : 1;
   const sensorMod = sensorsInt <= 0.2 ? 0 : sensorsInt < 0.65 ? sensorsInt / 0.65 : 1;
   const radarFactor = Number((baseRadar * sensorMod).toFixed(3));
+  const sonarFactor = disabled || sensorsInt <= 0.2 ? 0 : Number(sensorMod.toFixed(3));
 
   const baseSpeed = !isActiveUnit(unit) ? 0 : disabled ? 0.4 : fraction <= 0.6 ? 0.75 : 1;
   const propMod =
@@ -59,6 +60,7 @@ export function getUnitCapabilities(unit: RuntimeUnit) {
     canFire,
     canLaunchAircraft,
     radarFactor,
+    sonarFactor,
     speedFactor,
     reloadFactor,
   };

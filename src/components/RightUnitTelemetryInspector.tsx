@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, Crosshair, Navigation } from 'lucide-react';
 import ms from 'milsymbol';
+import { useShallow } from 'zustand/react/shallow';
 import { resolveUnitConfiguration } from '../engine/unitConfiguration';
 import { sanitizeMilsymbolSvg, sanitizeSidc } from '../validation/wargameSchemas';
 import { findAmphibiousLandingPoint, isPointOnLand, MAX_AMPHIBIOUS_STANDOFF_KM } from '../engine/environment';
@@ -44,13 +45,69 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const launchCarrierAircraft = useWargameStore((s) => s.launchCarrierAircraft);
   const [selectedTankerId, setSelectedTankerId] = useState('');
 
-  const units = useWargameStore((s) => s.units);
-  const weaponsInFlight = useWargameStore((s) => s.weaponsInFlight);
   const environment = useWargameStore((s) => s.environment);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
   const selectedUnit = rawUnit && (rawUnit.side === playerSide || playMode === 'sandbox') ? rawUnit : null;
   const selectedContact = rawContact && (rawContact.observerSide === playerSide || playMode === 'sandbox') ? rawContact : null;
+  const selectedUnitIdForDerived = selectedUnit?.id ?? null;
+  const selectedUnitSide = selectedUnit?.side ?? null;
+  const selectedUnitDomain = selectedUnit?.domain ?? null;
+  const selectedUnitCategory = selectedUnit?.category ?? null;
+  const selectedUnitGroupId = selectedUnit?.parentGroupId ?? null;
+  const selectedUnitHasMounts = (selectedUnit?.mounts.length ?? 0) > 0;
+
+  const usedGuidanceChannels = useWargameStore((s) =>
+    selectedUnitIdForDerived && selectedUnitHasMounts
+      ? countActiveGuidanceChannels(selectedUnitIdForDerived, s.weaponsInFlight, s.catalog)
+      : 0
+  );
+
+  const selectedBatchCallsigns = useWargameStore(
+    useShallow((s) =>
+      s.selectedUnitIds.length > 1
+        ? s.selectedUnitIds.flatMap((uid) => {
+            const u = s.units[uid];
+            return u ? [`${uid}::${u.callsign}`] : [];
+          })
+        : []
+    )
+  );
+
+  const availableTankerRows = useWargameStore(
+    useShallow((s) => {
+      if (!selectedUnitSide || selectedUnitDomain !== 'air' || selectedUnitCategory === 'tanker') {
+        return [] as string[];
+      }
+      return Object.values(s.units)
+        .filter(
+          (unit) =>
+            unit.side === selectedUnitSide &&
+            unit.category === 'tanker' &&
+            unit.hp > 0 &&
+            unit.status !== 'destroyed' &&
+            unit.status !== 'recovered' &&
+            unit.aarFuelRemainingSec > 0
+        )
+        .map((unit) => `${unit.id}::${unit.callsign}::${Math.round(unit.aarFuelRemainingSec)}`);
+    })
+  );
+
+  const groupUnitCount = useWargameStore((s) => {
+    if (!selectedUnitGroupId) return 0;
+    let count = 0;
+    for (const unit of Object.values(s.units)) {
+      if (
+        unit.parentGroupId === selectedUnitGroupId &&
+        unit.hp > 0 &&
+        unit.status !== 'destroyed' &&
+        unit.status !== 'recovered'
+      ) {
+        count += 1;
+      }
+    }
+    return count;
+  });
 
   const platformSpec = selectedUnit ? catalog.platforms[selectedUnit.platformId] : null;
   const platformId = selectedUnit?.platformId;
@@ -88,31 +145,14 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   }, [selectedUnit?.altitudeM, platformSpec?.radarAntennaHeightM]);
 
   const availableTankers = useMemo(
-    () => selectedUnit
-      ? Object.values(units).filter((unit) =>
-          unit.side === selectedUnit.side &&
-          unit.category === 'tanker' &&
-          unit.hp > 0 &&
-          unit.status !== 'destroyed' &&
-          unit.status !== 'recovered' &&
-          unit.aarFuelRemainingSec > 0
-        )
-      : [],
-    [units, selectedUnit?.side]
+    () =>
+      availableTankerRows.map((row) => {
+        const [id, callsign, fuelStr] = row.split('::');
+        return { id, callsign, aarFuelSec: Number(fuelStr) };
+      }),
+    [availableTankerRows]
   );
   const selectedTanker = availableTankers.find((unit) => unit.id === selectedTankerId) ?? availableTankers[0];
-
-  const groupUnits = useMemo(
-    () => selectedUnit
-      ? Object.values(units).filter((unit) =>
-          unit.parentGroupId === selectedUnit.parentGroupId &&
-          unit.hp > 0 &&
-          unit.status !== 'destroyed' &&
-          unit.status !== 'recovered'
-        )
-      : [],
-    [units, selectedUnit?.parentGroupId]
-  );
 
   const eligibleMissions = useMemo(
     () => (selectedUnit ? missions.filter((mission) => mission.side === selectedUnit.side) : []),
@@ -217,9 +257,8 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
               </button>
             </div>
             <div className="flex flex-wrap gap-1">
-              {selectedUnitIds.map((uid) => {
-                const u = units[uid];
-                if (!u) return null;
+              {selectedBatchCallsigns.map((entry) => {
+                const [uid, callsign] = entry.split('::');
                 return (
                   <button
                     key={uid}
@@ -231,7 +270,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
                         : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground'
                     }`}
                   >
-                    {u.callsign}
+                    {callsign}
                   </button>
                 );
               })}
@@ -309,7 +348,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           )}
           {selectedUnit.mounts.length > 0 && (() => {
             const maxCh = resolveMaxGuidanceChannels(platformSpec);
-            const usedCh = countActiveGuidanceChannels(selectedUnit.id, weaponsInFlight, catalog);
+            const usedCh = usedGuidanceChannels;
             return (
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">火控/制导通道占用</span>
@@ -387,7 +426,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
               wrapperClassName="flex-1"
               className="h-7 text-[11px] text-sky-200"
             >
-              {availableTankers.map((tanker) => <option key={tanker.id} value={tanker.id}>{tanker.callsign} · {Math.round(tanker.aarFuelRemainingSec)}秒</option>)}
+              {availableTankers.map((tanker) => <option key={tanker.id} value={tanker.id}>{tanker.callsign} · {tanker.aarFuelSec}秒</option>)}
             </Select>
             <Button
               size="sm"
@@ -497,7 +536,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
               maxSpeedKts={configuration.maxSpeedKts}
               rcsPenaltyM2={configuration.rcsPenaltyM2}
               radarHorizons={radarHorizons}
-              groupUnits={groupUnits}
+              groupUnitCount={groupUnitCount}
             />
           </div>
         </details>

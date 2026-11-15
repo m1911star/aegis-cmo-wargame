@@ -136,6 +136,24 @@ describe('Loading, failure and lifecycle', () => {
     h.loader.reportResourceError('earth'); h.loader.markReady();
     expect(h.loader.state.status).toBe('degraded'); expect(h.loader.state.active).toBe('dark');
   });
+
+  test('initialOfflineApplied avoids redundant offline style reloads on mount or initial network failure', async () => {
+    const applied: StyleSpecification[] = [];
+    const states: unknown[] = [];
+    const loader = new BasemapLoader({
+      applyStyle: (s) => applied.push(s),
+      onState: (s) => states.push(s),
+      fetcher: fakeFetch(async () => new Response('offline', { status: 503 })),
+      initialOfflineApplied: true,
+    });
+    await loader.select('offline');
+    expect(applied).toHaveLength(0);
+    await loader.select('dark');
+    expect(loader.state.status).toBe('error');
+    expect(loader.state.active).toBe('offline');
+    // Offline basemap was already applied at map creation, so fallback does not reload it a second time!
+    expect(applied).toHaveLength(0);
+  });
 });
 
 test('all tactical overlays reinstall after a style change, without duplicate registration', () => {

@@ -13,10 +13,12 @@ export const UnitSpawnerModal: React.FC = () => {
   const startSpawnUnitOnMap = useWargameStore((s) => s.startSpawnUnitOnMap);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
 
-  const [spawnSide, setSpawnSide] = useState<SideId>('RED');
-  const [spawnPlatformId, setSpawnPlatformId] = useState<string>('j20_mighty_dragon');
-  const [spawnName, setSpawnName] = useState<string>('歼-20A 增援中队');
-  const [spawnCallsign, setSpawnCallsign] = useState<string>('DRAGON-09');
+  const initialRed = Object.values(catalog.platforms).find((p) => p.origin === 'RED') ?? Object.values(catalog.platforms)[0];
+  const [spawnSide, setSpawnSide] = useState<SideId>(initialRed?.origin === 'BLUE' ? 'BLUE' : 'RED');
+  const [spawnPlatformId, setSpawnPlatformId] = useState<string>(initialRed?.id ?? '');
+  const [spawnName, setSpawnName] = useState<string>(initialRed ? `${initialRed.name} 增援编队` : '增援编队');
+  const [spawnCallsign, setSpawnCallsign] = useState<string>('REINF-01');
+  const effectivePlatformId = catalog.platforms[spawnPlatformId] ? spawnPlatformId : (initialRed?.id ?? '');
 
   return (
     <ModalShell className="max-w-lg">
@@ -63,7 +65,7 @@ export const UnitSpawnerModal: React.FC = () => {
             选择装备平台模板 (Platform Template)
           </label>
           <Select
-            value={spawnPlatformId}
+            value={effectivePlatformId}
             onChange={(e) => {
               const pid = e.target.value;
               setSpawnPlatformId(pid);
@@ -105,9 +107,10 @@ export const UnitSpawnerModal: React.FC = () => {
         </Button>
         <Button
           variant="success"
+          disabled={!effectivePlatformId}
           onClick={() =>
             startSpawnUnitOnMap({
-              platformId: spawnPlatformId,
+              platformId: effectivePlatformId,
               side: spawnSide,
               name: spawnName,
               callsign: spawnCallsign,

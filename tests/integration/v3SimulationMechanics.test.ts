@@ -1117,5 +1117,22 @@ describe('Code review remediation: key-order determinism, no-op command filterin
     sub.waypoints = [{ position: [0.9, 0.4] }];
     updateUnitOperations(sub, { red_sub_bc: sub }, {}, [], catalog, 205_000, 1, emptyScore(), []);
     expect(sub.waypoints).toEqual([{ position: [0.9, 0.4] }]);
+
+    // 4. Waypoint custom speed/altitude can be cleared back to undefined, and sonarFactor is independent of hull radar degradation
+    store.getState().loadScenario(SCENARIO_EAST_SEA_THUNDER, false, 77);
+    store.getState().appendUnitWaypoint('red_j20_alpha', [124.2, 26.1], true, 650, 9500);
+    expect(store.getState().units.red_j20_alpha.waypoints[0]).toMatchObject({ speedKts: 650, altitudeM: 9500 });
+    store.getState().updateUnitWaypoint('red_j20_alpha', 0, { speedKts: undefined, altitudeM: undefined });
+    expect(store.getState().units.red_j20_alpha.waypoints[0].speedKts).toBeUndefined();
+    expect(store.getState().units.red_j20_alpha.waypoints[0].altitudeM).toBeUndefined();
+
+    const scratchedSub = createRuntimeUnitFromPlacement(
+      placement('sub_sonar_cap', { platformId: 'type093b_ssn' }),
+      catalog
+    );
+    scratchedSub.hp = scratchedSub.maxHp * 0.55; // Hull <= 60% degrades radarFactor to 0.75, while intact sonar stays 1.0
+    const caps = getUnitCapabilities(scratchedSub);
+    expect(caps.radarFactor).toBe(0.75);
+    expect(caps.sonarFactor).toBe(1);
   });
 });

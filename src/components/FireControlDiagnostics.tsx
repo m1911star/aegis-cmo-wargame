@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWargameStore } from '../store/useWargameStore';
 import { canCommandUnit } from '../engine/commandPolicy';
 import { evaluateFireControl } from '../engine/fireControl';
@@ -22,9 +22,48 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
   const execute = useWargameStore((s) => s.executeManualEngage);
   const scheduleTotStrike = useWargameStore((s) => s.scheduleTotStrike);
   const [chosenId, setChosenId] = useState(selectedUnitId);
-  const choices = Object.values(units).filter((u) => u.side === contact.observerSide && u.mounts.length &&
-    canCommandUnit({ playerSide, playMode, battleResult }, u));
+  useEffect(() => {
+    if (selectedUnitId) setChosenId(selectedUnitId);
+  }, [selectedUnitId]);
+  const choices = useMemo(
+    () =>
+      Object.values(units).filter(
+        (u) =>
+          u.side === contact.observerSide &&
+          u.mounts.length &&
+          canCommandUnit({ playerSide, playMode, battleResult }, u)
+      ),
+    [units, contact.observerSide, playerSide, playMode, battleResult]
+  );
   const attacker = choices.find((u) => u.id === chosenId) ?? choices[0];
+  const mountEvaluations = useMemo(() => {
+    if (!attacker) return [];
+    const attackerWithDoctrine = {
+      ...attacker,
+      doctrine: effectiveDoctrine(attacker, missions),
+    };
+    return attacker.mounts.flatMap((mount) => {
+      const weapon = catalog.weapons[mount.weaponId];
+      if (!weapon) return [];
+      return [
+        {
+          mount,
+          weapon,
+          solution: evaluateFireControl(
+            attackerWithDoctrine,
+            contact,
+            mount,
+            weapon,
+            catalog,
+            units,
+            simTime,
+            'manual',
+            weaponsInFlight
+          ),
+        },
+      ];
+    });
+  }, [attacker, missions, catalog, contact, units, simTime, weaponsInFlight]);
   return <section className="bg-card/85 border border-border space-y-3" aria-label="火控诊断">
     <h3 className="text-xs font-semibold text-primary">火控诊断 · 基于本方情报</h3>
     <p className="text-xs text-muted-foreground">最后观测：{Math.max(0, (simTime - contact.lastDetectedTime) / 1000).toFixed(1)} 秒前 · 误差 ±{contact.uncertaintyRadiusKm.toFixed(1)} km</p>
@@ -44,9 +83,7 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
           </Button>
         </div>
       )}
-      {attacker.mounts.map((mount) => {
-        const weapon = catalog.weapons[mount.weaponId];
-        const solution = evaluateFireControl({ ...attacker, doctrine: effectiveDoctrine(attacker, missions) }, contact, mount, weapon, catalog, units, simTime, 'manual', weaponsInFlight);
+      {mountEvaluations.map(({ mount, weapon, solution }) => {
         const blocked = solution.status === 'blocked';
         const risky = solution.status === 'risky';
         return <article key={mount.mountId} className="border-t border-border pt-2.5 space-y-1.5 text-xs">

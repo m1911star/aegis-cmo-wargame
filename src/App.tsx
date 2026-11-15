@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { extractSimulationWorldState, useWargameStore } from './store/useWargameStore';
 import { simulationWorkerClient } from './engine/workerClient';
 import { TopCommandHeader } from './components/TopCommandHeader';
@@ -16,6 +16,10 @@ import { BattleResultOverlay } from './components/modals/BattleResultOverlay';
 export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
+  const leftOpenRef = useRef(leftOpen);
+  const rightOpenRef = useRef(rightOpen);
+  leftOpenRef.current = leftOpen;
+  rightOpenRef.current = rightOpen;
   const [debriefDismissed, setDebriefDismissed] = useState(false);
 
   const battleResult = useWargameStore((s) => s.battleResult);
@@ -74,7 +78,6 @@ export default function App() {
         if (workerBusy) return;
         const budget = Math.min(15, backlog);
         if (budget + s.pendingSimSeconds + 1e-9 < 0.25) return;
-        backlog -= budget;
         workerBusy = true;
         const expectedTick = s.tick;
         const expectedSeq = s.commandSequence;
@@ -93,12 +96,17 @@ export default function App() {
             const applied = useWargameStore
               .getState()
               .applySimulationResult(result, expectedTick, expectedSeq, expectedScenarioId);
-            if (!applied) {
+            if (applied) {
+              backlog = Math.max(0, backlog - budget);
+            } else if (useWargameStore.getState().currentScenario.id !== expectedScenarioId) {
               backlog = 0;
             }
           })
           .catch(() => {
-            if (!cancelled) stepSingleTick(budget);
+            if (!cancelled) {
+              backlog = Math.max(0, backlog - budget);
+              stepSingleTick(budget);
+            }
           })
           .finally(() => {
             workerBusy = false;
@@ -171,11 +179,9 @@ export default function App() {
         }
       } else if (e.key === 'Tab') {
         e.preventDefault();
-        setLeftOpen((prevLeft) => {
-          const next = !(prevLeft || rightOpen);
-          setRightOpen(next);
-          return next;
-        });
+        const next = !(leftOpenRef.current || rightOpenRef.current);
+        setLeftOpen(next);
+        setRightOpen(next);
       } else if (e.key === 'Escape') {
         if (state.activeModal !== 'none') {
           state.setActiveModal('none');

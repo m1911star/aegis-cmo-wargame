@@ -12,7 +12,7 @@ interface Props {
   maxSpeedKts: number;
   rcsPenaltyM2: number;
   radarHorizons: { seaSkimmer: number; highAltitude: number };
-  groupUnits: RuntimeUnit[];
+  groupUnitCount: number;
 }
 
 export const UnitKinematicsPanel: React.FC<Props> = ({
@@ -21,9 +21,11 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
   maxSpeedKts,
   rcsPenaltyM2,
   radarHorizons,
-  groupUnits,
+  groupUnitCount,
 }) => {
-  const units = useWargameStore((s) => s.units);
+  const leaderCallsign = useWargameStore((s) =>
+    unit.formationLeaderId ? s.units[unit.formationLeaderId]?.callsign : undefined
+  );
   const clearUnitWaypoints = useWargameStore((s) => s.clearUnitWaypoints);
   const updateUnitWaypoint = useWargameStore((s) => s.updateUnitWaypoint);
   const removeUnitWaypoint = useWargameStore((s) => s.removeUnitWaypoint);
@@ -110,14 +112,14 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {groupUnits.length > 1 && (
+      {groupUnitCount > 1 && (
         <div className="pt-2 border-t border-border space-y-1.5 text-[10px]">
           <div className="flex items-center justify-between text-muted-foreground">
             <span>编队协同</span>
             <span className="text-foreground">
               {unit.navigationMode === 'formation'
-                ? `跟随 ${units[unit.formationLeaderId ?? '']?.callsign ?? '领队'}`
-                : `${groupUnits.length} 个可用单位`}
+                ? `跟随 ${leaderCallsign ?? '领队'}`
+                : `${groupUnitCount} 个可用单位`}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
@@ -152,7 +154,11 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
                 max={maxSpeedKts}
                 placeholder="继承速度"
                 value={waypoint.speedKts ?? ''}
-                onChange={(event) => updateUnitWaypoint(unit.id, index, { speedKts: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateUnitWaypoint(unit.id, index, {
+                    speedKts: event.target.value.trim() === '' ? undefined : Number(event.target.value),
+                  })
+                }
                 className="h-7 px-1.5 text-[10px] font-mono tabular-nums"
               />
               <Input
@@ -162,7 +168,11 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
                 max={platformSpec.maxAltitudeM}
                 placeholder="继承高度"
                 value={waypoint.altitudeM ?? ''}
-                onChange={(event) => updateUnitWaypoint(unit.id, index, { altitudeM: Number(event.target.value) })}
+                onChange={(event) =>
+                  updateUnitWaypoint(unit.id, index, {
+                    altitudeM: event.target.value.trim() === '' ? undefined : Number(event.target.value),
+                  })
+                }
                 className="h-7 px-1.5 text-[10px] font-mono tabular-nums"
               />
               <button

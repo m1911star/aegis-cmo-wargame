@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import ms from 'milsymbol';
+import { shallow } from 'zustand/shallow';
 import { useWargameStore } from '../store/useWargameStore';
 import { projectTacticalState } from './tacticalProjection';
 import { createOfflineBasemap } from './offlineBasemap';
@@ -28,7 +29,9 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   const basemapMode = useWargameStore((s) => s.basemapMode);
   const setBasemapMode = useWargameStore((s) => s.setBasemapMode);
   const [basemapState, setBasemapState] = useState<BasemapState>(() => initialBasemapState(basemapMode));
-  const [cursorCoord, setCursorCoord] = useState<[number, number]>([124.2, 26.2]);
+  const cursorReadoutRef = useRef<HTMLSpanElement | null>(null);
+  const cursorPendingRef = useRef<[number, number]>([124.2, 26.2]);
+  const cursorRafRef = useRef<number | null>(null);
   const rulerRef = useRef<{ start?: [number, number]; end?: [number, number] }>({});
   const [rulerMeasurement, setRulerMeasurement] = useState<{ distanceKm: number; bearingDeg: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -53,7 +56,9 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    const initialScenario = useWargameStore.getState().currentScenario;
+    const initialState = useWargameStore.getState();
+    const initialScenario = initialState.currentScenario;
+    const initialBasemapMode = initialState.basemapMode;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -69,11 +74,15 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     });
 
     mapRef.current = map;
-    setCursorCoord(initialScenario.initialCamera.center);
+    cursorPendingRef.current = [...initialScenario.initialCamera.center];
+    if (cursorReadoutRef.current) {
+      cursorReadoutRef.current.textContent = `${initialScenario.initialCamera.center[1].toFixed(3)}°N, ${initialScenario.initialCamera.center[0].toFixed(3)}°E`;
+    }
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
     const basemapLoader = new BasemapLoader({
       applyStyle: (style) => { map.setStyle(style, { diff: false }); },
       onState: setBasemapState,
+      initialOfflineApplied: true,
     });
     basemapLoaderRef.current = basemapLoader;
     map.on('error', (event) => {
@@ -332,10 +341,16 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     // 地图鼠标移动与点击交互 (F3 航线标绘 / F1 手动交战 / 参考点 / 算子点选)
     // ------------------------------------------------------------------------
     map.on('mousemove', (e) => {
-      setCursorCoord([
-        Number(e.lngLat.lng.toFixed(3)),
-        Number(e.lngLat.lat.toFixed(3)),
-      ]);
+      cursorPendingRef.current = [e.lngLat.lng, e.lngLat.lat];
+      if (cursorRafRef.current === null) {
+        cursorRafRef.current = window.requestAnimationFrame(() => {
+          cursorRafRef.current = null;
+          if (cursorReadoutRef.current) {
+            const [lng, lat] = cursorPendingRef.current;
+            cursorReadoutRef.current.textContent = `${lat.toFixed(3)}°N, ${lng.toFixed(3)}°E`;
+          }
+        });
+      }
       const state = useWargameStore.getState();
       if (state.interactionMode === 'manual_engage' && map.getLayer('units-symbol-layer')) {
         const hits = map.queryRenderedFeatures(e.point, { layers: ['units-symbol-layer'] });
@@ -485,8 +500,17 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     // Shift+拖拽 或 框选模式 (box_select) 矩形框选多单元
     const containerEl = mapContainerRef.current;
     let boxStart: { x: number; y: number; additive: boolean } | null = null;
+    const cancelBoxSelect = () => {
+      if (!boxStart) return;
+      boxStart = null;
+      map.dragPan.enable();
+      setSelectionBox(null);
+    };
     const onPointerDown = (ev: MouseEvent) => {
-      if (ev.button !== 0) return;
+      if (ev.button !== 0) {
+        cancelBoxSelect();
+        return;
+      }
       const mode = useWargameStore.getState().interactionMode;
       if (!ev.shiftKey && mode !== 'box_select') return;
       const rect = containerEl.getBoundingClientRect();
@@ -498,10 +522,17 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     };
     const onPointerMove = (ev: MouseEvent) => {
       if (!boxStart) return;
+      if ((ev.buttons & 1) === 0) {
+        cancelBoxSelect();
+        return;
+      }
       const rect = containerEl.getBoundingClientRect();
       const x = Math.max(0, Math.min(rect.width, ev.clientX - rect.left));
       const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
       setSelectionBox({ x1: boxStart.x, y1: boxStart.y, x2: x, y2: y });
+    };
+    const onBoxKeyCancel = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') cancelBoxSelect();
     };
     const onPointerUp = (ev: MouseEvent) => {
       if (!boxStart) return;
@@ -545,17 +576,21 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     containerEl.addEventListener('mousedown', onPointerDown);
     window.addEventListener('mousemove', onPointerMove);
     window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('blur', cancelBoxSelect);
+    window.addEventListener('contextmenu', cancelBoxSelect);
+    window.addEventListener('keydown', onBoxKeyCancel);
 
     // 右键快速结束航线规划模式
     map.on('contextmenu', (e) => {
       e.preventDefault();
+      cancelBoxSelect();
       const state = useWargameStore.getState();
       if (state.interactionMode !== 'select') {
         state.setInteractionMode('select');
       }
     });
 
-    // 绑定 Zustand Store 瞬态更新订阅
+    // 绑定 Zustand Store 瞬态更新订阅（使用 shallow 比较阻断无关 UI 弹窗/日志触发全量 GeoJSON 重算）
     const unsubscribeData = useWargameStore.subscribe(
       (s) => ({
         simTime: s.simTime,
@@ -575,10 +610,12 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         mapLayers: s.mapLayers,
         environment: s.environment,
         objectives: s.objectives,
+        catalog: s.catalog,
       }),
       () => {
         syncStoreToLayers();
-      }
+      },
+      { equalityFn: shallow }
     );
 
     // 绑定相机跳转请求
@@ -599,16 +636,26 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       (s) => s.basemapMode,
       (mode) => { void basemapLoader.select(mode); }
     );
-    void basemapLoader.select(useWargameStore.getState().basemapMode);
+    if (initialBasemapMode !== 'offline') {
+      void basemapLoader.select(initialBasemapMode);
+    }
 
     // Panel toggles and the log dock resize the canvas without a window resize.
     const resizeObserver = new ResizeObserver(() => map.resize());
     resizeObserver.observe(mapContainerRef.current);
 
     return () => {
+      if (cursorRafRef.current !== null) {
+        window.cancelAnimationFrame(cursorRafRef.current);
+        cursorRafRef.current = null;
+      }
+      cancelBoxSelect();
       containerEl.removeEventListener('mousedown', onPointerDown);
       window.removeEventListener('mousemove', onPointerMove);
       window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('blur', cancelBoxSelect);
+      window.removeEventListener('contextmenu', cancelBoxSelect);
+      window.removeEventListener('keydown', onBoxKeyCancel);
       resizeObserver.disconnect();
       unsubscribeData();
       unsubscribeCamera();
@@ -756,8 +803,8 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
 
       {/* 底部居中精简坐标与图例条 */}
       <div className="map-status tactical-panel" style={{ zIndex: 15 }}>
-        <span className="text-cyan-400 font-semibold font-mono">
-          {cursorCoord[1].toFixed(3)}°N, {cursorCoord[0].toFixed(3)}°E
+        <span ref={cursorReadoutRef} className="text-cyan-400 font-semibold font-mono">
+          26.200°N, 124.200°E
         </span>
         {rulerMeasurement && (
           <span className="text-yellow-200 font-semibold">

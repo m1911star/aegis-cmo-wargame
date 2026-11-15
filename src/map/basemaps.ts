@@ -61,11 +61,13 @@ interface BasemapLoaderOptions {
   fetcher?: typeof fetch;
   requestTimeoutMs?: number;
   tileTimeoutMs?: number;
+  initialOfflineApplied?: boolean;
 }
 
 /** Loads display-only styles. It never advances or replaces simulation state. */
 export class BasemapLoader {
   private current = initialBasemapState('offline');
+  private appliedOffline: boolean;
   private request = 0;
   private controller?: AbortController;
   private requestTimer?: ReturnType<typeof setTimeout>;
@@ -74,7 +76,9 @@ export class BasemapLoader {
   private cache = new Map<BasemapMode, StyleSpecification>();
   baseSourceIds: string[] = [];
 
-  constructor(private options: BasemapLoaderOptions) {}
+  constructor(private options: BasemapLoaderOptions) {
+    this.appliedOffline = options.initialOfflineApplied === true;
+  }
 
   get state(): BasemapState { return this.current; }
 
@@ -96,7 +100,10 @@ export class BasemapLoader {
     this.baseSourceIds = [];
     this.update({ requested: mode, active: 'offline', status: 'error',
       message: '真实地图加载失败，当前为离线示意图。请检查网络后重试；推演仍可继续。' });
-    this.options.applyStyle(createOfflineBasemap());
+    if (!this.appliedOffline) {
+      this.appliedOffline = true;
+      this.options.applyStyle(createOfflineBasemap());
+    }
   }
 
   async select(mode: BasemapMode, retry = false): Promise<void> {
@@ -106,7 +113,10 @@ export class BasemapLoader {
     if (mode === 'offline') {
       this.baseSourceIds = [];
       this.update(initialBasemapState(mode));
-      this.options.applyStyle(createOfflineBasemap());
+      if (!this.appliedOffline || retry) {
+        this.appliedOffline = true;
+        this.options.applyStyle(createOfflineBasemap());
+      }
       return;
     }
     this.update({ requested: mode, active: this.current.active, status: 'loading' });
@@ -128,6 +138,7 @@ export class BasemapLoader {
       this.cache.set(mode, style);
       this.baseSourceIds = Object.keys(style.sources);
       this.update({ requested: mode, active: mode, status: 'loading' });
+      this.appliedOffline = false;
       this.options.applyStyle(structuredClone(style));
       this.tileTimer = setTimeout(() => {
         if (request === this.request) this.fallback(mode);

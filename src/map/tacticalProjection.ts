@@ -11,11 +11,12 @@ import type {
   TacticalMission,
   WeaponInFlight,
 } from '../types/wargame';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { evaluateWeatherModifiers } from '../engine/environment';
 import { evaluateFireControl, weaponLaunchRangeKm, weaponNoEscapeRangeKm } from '../engine/fireControl';
 import { calculateRadarHorizonKm } from '../engine/geometry';
 import { observeMissile } from '../engine/sensors';
 import { getUnitCapabilities, isActiveUnit } from '../engine/unitCapabilities';
+import { resolveUnitConfiguration } from '../engine/unitConfiguration';
 import { estimatedContactThreatRangeKm } from './contactThreat';
 
 export type ProjectionLayers = {
@@ -248,13 +249,17 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       }
     }
     if ((mapLayers.showSonarRings || isSelected) && (unit.domain === 'subsurface' || unit.domain === 'surface')) {
+      const seaAcousticFactor = environment
+        ? evaluateWeatherModifiers(unit.position, unit.altitudeM, unit.position, unit.altitudeM, environment).passiveSonarFactor
+        : 1;
+      const sonarScale = getUnitCapabilities(unit).sonarFactor * seaAcousticFactor;
       for (const sensorId of configuration.sensorIds) {
         const sensor = catalog.sensors[sensorId];
-        if (sensor?.type === 'sonar_passive') {
+        if (sensor?.type === 'sonar_passive' && sonarScale > 0) {
           envelopeFeatures.push(
             buildSensorEnvelopeFeature(
               unit.position,
-              sensor.maxRangeKm * getUnitCapabilities(unit).radarFactor,
+              sensor.maxRangeKm * sonarScale,
               unit.heading,
               sensor.coverageArcDeg,
               sensor.blindArcRearDeg,
