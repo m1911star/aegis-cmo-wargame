@@ -492,10 +492,13 @@ describe('modular simulation boundaries', () => {
 
     const hullSameLayer = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 8, false);
     const hullCrossLayer = calculateSonarDetectionRangeKm(hullSonar, -20, -180, 95, 8, false);
+    const towedSameLayer = calculateSonarDetectionRangeKm(towedSonar, 0, 0, 95, 8, false);
     const towedCrossLayer = calculateSonarDetectionRangeKm(towedSonar, 0, -180, 95, 8, false);
 
+    expect(towedSameLayer).toBeCloseTo(hullSameLayer, 5);
     expect(hullCrossLayer).toBeLessThan(hullSameLayer * 0.55);
     expect(towedCrossLayer).toBeGreaterThan(hullCrossLayer);
+    expect(towedCrossLayer).toBeLessThan(hullSameLayer);
 
     const quietCrawl = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 8, false);
     const moderateSpeed = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 16, false);

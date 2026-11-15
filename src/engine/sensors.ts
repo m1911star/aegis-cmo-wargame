@@ -153,14 +153,12 @@ export function calculateSonarDetectionRangeKm(
   const isVariableDepth = /towed|dipping|sonobuoy|dicass|difar|vds/i.test(
     `${sensor.id} ${sensor.name} ${sensor.codeName ?? ''}`
   );
-  const effectiveObserverAltM =
-    isVariableDepth && observerAltM >= 0 ? THERMOCLINE.LOWER_BOUNDARY - 10 : observerAltM;
 
   const acrossThermocline =
-    (effectiveObserverAltM > THERMOCLINE.UPPER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY) ||
-    (effectiveObserverAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM > THERMOCLINE.UPPER_BOUNDARY);
+    (observerAltM > THERMOCLINE.UPPER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY) ||
+    (observerAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM > THERMOCLINE.UPPER_BOUNDARY);
   const sameDeepLayer =
-    effectiveObserverAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY;
+    observerAltM < THERMOCLINE.LOWER_BOUNDARY && targetAltM < THERMOCLINE.LOWER_BOUNDARY;
   const thermoclineFactor = acrossThermocline
     ? (isVariableDepth
         ? THERMOCLINE.VARIABLE_DEPTH_CROSS_LAYER_FACTOR

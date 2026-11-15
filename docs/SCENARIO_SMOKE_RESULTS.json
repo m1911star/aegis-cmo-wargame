@@ -19,20 +19,20 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 5,
-        "blue": 8
+        "red": 6,
+        "blue": 7
       },
       "missilesFired": {
-        "red": 178,
-        "blue": 164
+        "red": 186,
+        "blue": 174
       },
       "interceptions": {
-        "red": 44,
-        "blue": 28
+        "red": 43,
+        "blue": 30
       },
       "score": {
-        "red": 1350,
-        "blue": 1040
+        "red": 1270,
+        "blue": 1322
       },
       "sortiesLaunched": 2,
       "events": [
@@ -76,22 +76,22 @@
         "east_red_locate_aegis": "achieved",
         "east_red_preserve_kj500": "achieved",
         "east_blue_hold_ishigaki": "achieved",
-        "east_blue_disable_h6n": "failed",
+        "east_blue_disable_h6n": "achieved",
         "east_blue_preserve_e2d": "achieved",
         "east_red_disable_taigei": "failed",
         "east_blue_disable_039c": "failed",
         "east_red_preserve_y9g": "achieved",
         "east_blue_preserve_mq4c": "achieved"
       },
-      "aarEvents": 271,
+      "aarEvents": 289,
       "finiteState": true
     },
     {
       "scenarioId": "op_deep_sea_carrier_hunt_2028",
       "title": "作战想定 02 // 《深海猎杀：福建舰与美核航母打击群大洋决战》",
       "seed": 5252,
-      "tick": 6622,
-      "elapsedSec": 1655.5,
+      "tick": 12264,
+      "elapsedSec": 3066,
       "configuredDurationSec": 5400,
       "terminalReason": "critical_objective",
       "outcomes": {
@@ -99,20 +99,20 @@
         "BLUE": "defeat"
       },
       "losses": {
-        "red": 1,
-        "blue": 7
+        "red": 3,
+        "blue": 6
       },
       "missilesFired": {
-        "red": 104,
-        "blue": 138
+        "red": 126,
+        "blue": 136
       },
       "interceptions": {
-        "red": 18,
-        "blue": 34
+        "red": 19,
+        "blue": 39
       },
       "score": {
-        "red": 1780,
-        "blue": 150
+        "red": 1735,
+        "blue": 450
       },
       "sortiesLaunched": 6,
       "events": [
@@ -138,7 +138,7 @@
         },
         {
           "id": "ev_red_csg_blink_emcon",
-          "fireCount": 55,
+          "fireCount": 102,
           "lastFiredElapsedSec": null
         }
       ],
@@ -154,7 +154,7 @@
         "deep_blue_preserve_cvn": "failed",
         "deep_blue_disable_wolfpack": "pending"
       },
-      "aarEvents": 201,
+      "aarEvents": 228,
       "finiteState": true
     },
     {
@@ -170,20 +170,20 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 3,
+        "red": 1,
         "blue": 8
       },
       "missilesFired": {
-        "red": 154,
-        "blue": 160
+        "red": 146,
+        "blue": 142
       },
       "interceptions": {
-        "red": 34,
-        "blue": 38
+        "red": 35,
+        "blue": 35
       },
       "score": {
-        "red": 1924,
-        "blue": 1000
+        "red": 1680,
+        "blue": 670
       },
       "sortiesLaunched": 5,
       "events": [
@@ -260,14 +260,14 @@
         "bashi_red_withdraw_075": "achieved",
         "bashi_red_disable_america": "failed",
         "bashi_red_disable_pac3": "failed",
-        "bashi_red_preserve_y9g": "failed",
+        "bashi_red_preserve_y9g": "achieved",
         "bashi_blue_preserve_america": "achieved",
         "bashi_blue_withdraw_america": "achieved",
         "bashi_blue_disable_075": "failed",
         "bashi_blue_disable_coastal": "failed",
         "bashi_blue_preserve_mq4c": "failed"
       },
-      "aarEvents": 261,
+      "aarEvents": 245,
       "finiteState": true
     },
     {
