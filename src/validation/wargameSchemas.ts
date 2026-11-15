@@ -172,6 +172,13 @@ const scenario = object({
       condition: oneOf(['rain_storm', 'heavy_fog']),
       seaStateOverride: optional(seaState),
     }))),
+    satellitePasses: optional(array(object({
+      id, name: text, side,
+      sensorKind: oneOf(['eo_optical', 'sar_radar', 'elint_esm']),
+      firstPassSec: number(0),
+      intervalSec: number(30),
+      swathPolygon: array(coordinate, 3),
+    }))),
   })),
   events: optional(array(object({
     ...metadata, repeatable: optional(boolean), repeatIntervalSec: optional(number(1)), trigger, actions: array(action),

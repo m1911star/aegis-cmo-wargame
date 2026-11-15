@@ -386,6 +386,8 @@ export interface BearingObservation {
   maxRangeKm: number;
 }
 
+export type ContactBdaStatus = 'intact' | 'damaged_suspected' | 'kill_unconfirmed';
+
 export interface TacticalContact {
   id: string;
   actualUnitId: string;
@@ -394,6 +396,7 @@ export interface TacticalContact {
   domain: Domain;
   classification: ContactClassification;
   identifiedCategory?: UnitCategory;
+  bdaStatus?: ContactBdaStatus;
   displayName: string;
   sidc: string;
   estimatedPosition: [number, number];
@@ -731,11 +734,22 @@ export interface WeatherZone extends EnvironmentPolygon {
   seaStateOverride?: SeaStateLevel;
 }
 
+export interface SatellitePassRule {
+  id: string;
+  name: string;
+  side: SideId;
+  sensorKind: 'eo_optical' | 'sar_radar' | 'elint_esm';
+  firstPassSec: number;
+  intervalSec: number;
+  swathPolygon: [number, number][];
+}
+
 export interface ScenarioEnvironment {
   landPolygons: EnvironmentPolygon[];
   acousticZones: AcousticZone[];
   weather?: ScenarioWeather;
   weatherZones?: WeatherZone[];
+  satellitePasses?: SatellitePassRule[];
 }
 
 export interface ScenarioDefinition {

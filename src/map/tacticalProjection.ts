@@ -332,12 +332,25 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       subLabel: `${unit.callsign} [${altitude}]`, hpPct: Math.round(unit.hp / unit.maxHp * 100),
       emconStr: unit.doctrine.emconRadar ? 'RADAR:ON' : 'EMCON' }, geometry: { type: 'Point', coordinates: unit.position } };
   });
-  const contactFeatures: GeoJSON.Feature[] = visibleContacts.map((contact) => ({
-    type: 'Feature', properties: { id: contact.id, entityType: 'contact', name: contact.displayName,
-      icon: `${contact.sidc}__${contact.id === selectedContactId ? 'SELECTED' : 'CONTACT'}`,
-      subLabel: `${contact.displayName} (${contact.uncertaintyKind === 'bearing_corridor' ? 'LOB' : `±${contact.uncertaintyRadiusKm}km`})` },
-    geometry: { type: 'Point', coordinates: contact.estimatedPosition },
-  }));
+  const contactFeatures: GeoJSON.Feature[] = visibleContacts.map((contact) => {
+    const bdaTag =
+      contact.bdaStatus === 'kill_unconfirmed'
+        ? ' [BDA?]'
+        : contact.bdaStatus === 'damaged_suspected'
+          ? ' [重创]'
+          : '';
+    return {
+      type: 'Feature',
+      properties: {
+        id: contact.id,
+        entityType: 'contact',
+        name: contact.displayName,
+        icon: `${contact.sidc}__${contact.id === selectedContactId ? 'SELECTED' : 'CONTACT'}`,
+        subLabel: `${contact.displayName}${bdaTag} (${contact.uncertaintyKind === 'bearing_corridor' ? 'LOB' : `±${contact.uncertaintyRadiusKm}km`})`,
+      },
+      geometry: { type: 'Point', coordinates: contact.estimatedPosition },
+    };
+  });
 
   const referencePointFeatures: GeoJSON.Feature[] = mapLayers.showReferencePoints ? referencePoints
     .filter((point) => activePerspective === 'GOD' || point.side === activePerspective)

@@ -202,7 +202,7 @@ export function evaluateFireControl(
     withinNez = distanceKm >= weapon.minRangeKm && distanceKm <= nezRangeKm;
     estimatedTofSec = estimateWeaponTimeOfFlightSec(distanceKm, weapon);
     if (!weapon.targetDomains.includes(contact.domain)) hardBlockReasons.push('武器与目标域不匹配');
-    if (weapon.interceptAltitudeBandM && contact.domain === 'air') {
+    if (mode === 'defense' && weapon.interceptAltitudeBandM && contact.domain === 'air') {
       const [minAlt, maxAlt] = weapon.interceptAltitudeBandM;
       if (contact.altitudeM < minAlt || contact.altitudeM > maxAlt) {
         hardBlockReasons.push(

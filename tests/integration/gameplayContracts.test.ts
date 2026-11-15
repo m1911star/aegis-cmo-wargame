@@ -1483,9 +1483,9 @@ describe('Deterministic replay and scenario contracts', () => {
       reason: 'time_limit',
       outcomes: { RED: 'costly_victory', BLUE: 'costly_victory' },
       losses: [3, 8],
-      fired: [156, 160],
+      fired: [154, 160],
       sorties: 5,
-      aar: 262,
+      aar: 261,
     });
     expect(state.pendingSortieOrders.filter((order) => order.status === 'pending')).toEqual([]);
     expect(state.pendingSortieOrders.filter((order) => order.status === 'failed')

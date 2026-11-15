@@ -7,7 +7,7 @@ import { computeFlightProfileAltitudeM, launchGuidance, seekerCanObserve } from 
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
-import { applySubsystemHitDamage } from '../../src/engine/simulation/weaponPhysics';
+import { applySubsystemHitDamage, advanceWeaponPhysics } from '../../src/engine/simulation/weaponPhysics';
 import { advanceSimulation, createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
 import { getUnitCapabilities } from '../../src/engine/unitCapabilities';
 import { buildSensorEnvelopeFeature } from '../../src/map/tacticalProjection';
@@ -693,5 +693,140 @@ describe('Module 6: Subsystem hit locations & deterministic Damage Control (DC)'
     expect(afterDc.units.cv_fire.subsystems!.fire).toBeLessThan(0.35);
     expect(getUnitCapabilities(afterDc.units.cv_fire).canLaunchAircraft).toBe(true);
     expect(launchCarrierSortie(afterDc.units, catalog, 'cv_fire', 'hangar_j35_vf1')).toBeDefined();
+  });
+});
+
+describe('Module 7: BDA fog-of-war confirmation & periodic satellite ISR passes', () => {
+  test('stand-off BVR kills remain kill_unconfirmed until a SAR/recon pass sweeps the target, and overcast clouds block EO satellites while SAR penetrates', () => {
+    const localCat = structuredClone(catalog);
+    localCat.platforms.constellation_ffg.ciwsDefenseProb = 0;
+
+    const shooter = createRuntimeUnitFromPlacement(
+      placement('red_standoff', { platformId: 'type055_destroyer', position: [0, 0], doctrine: { roe: 'hold', emconRadar: false } }),
+      localCat
+    );
+    const victim = createRuntimeUnitFromPlacement(
+      placement('blue_victim', { side: 'BLUE', platformId: 'constellation_ffg', position: [2.0, 0], doctrine: { roe: 'hold', emconRadar: false } }),
+      localCat
+    );
+    victim.hp = 20;
+
+    const priorContact: TacticalContact = {
+      id: 'RED_CONTACT_blue_victim',
+      actualUnitId: victim.id,
+      observerSide: 'RED',
+      targetSide: 'BLUE',
+      domain: 'surface',
+      classification: 'classified',
+      displayName: 'SKUNK-202',
+      sidc: victim.sidc,
+      estimatedPosition: [2.0, 0],
+      truePosition: [2.0, 0],
+      uncertaintyRadiusKm: 1.5,
+      heading: 270,
+      speedKts: 15,
+      altitudeM: 0,
+      firstDetectedTime: 0,
+      lastDetectedTime: 1000,
+      detectedBySources: ['ISR'],
+      threatLevel: 'high',
+    };
+
+    const killMissile: WeaponInFlight = {
+      id: 'bvr_kill_msl',
+      weaponId: 'yj18_ashm',
+      name: 'YJ-18',
+      side: 'RED',
+      shooterId: shooter.id,
+      shooterName: shooter.callsign,
+      targetId: victim.id,
+      targetType: 'unit',
+      position: [1.999, 0],
+      launchPosition: [0, 0],
+      trail: [],
+      altitudeM: 12,
+      heading: 90,
+      speedKts: 1850,
+      distanceRemainingKm: 0.1,
+      maxRangeKm: 540,
+      traveledKm: 220,
+      basePk: 0.99,
+      warheadDamage: 80,
+      ...launchGuidance(priorContact),
+      seekerState: 'terminal_locked',
+    };
+
+    const contacts: Record<string, TacticalContact> = { [priorContact.id]: priorContact };
+    const weaponsInFlight: Record<string, WeaponInFlight> = { [killMissile.id]: killMissile };
+    const logs: CombatLogEntry[] = [];
+    advanceWeaponPhysics({
+      units: { red_standoff: shooter, blue_victim: victim },
+      contacts,
+      weaponsInFlight,
+      previousExplosions: [],
+      catalog: localCat,
+      nextSimTime: 2000,
+      dtSec: 0.25,
+      score: emptyScore(),
+      creditedDamage: {},
+      rng: () => 0.1,
+      logs,
+      autoPauseSettings: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false },
+      triggerPause: () => undefined,
+    });
+
+    // Target is destroyed in world truth, but shooter at 222km has NO visual/SAR BDA -> contact remains kill_unconfirmed!
+    expect(victim.status).toBe('destroyed');
+    expect(contacts.RED_CONTACT_blue_victim?.bdaStatus).toBe('kill_unconfirmed');
+
+    // Overcast storm clouds block EO keyhole satellite at t=60s, leaving kill_unconfirmed unresolved!
+    const satEnv = {
+      landPolygons: [],
+      acousticZones: [],
+      weather: { condition: 'rain_storm' as const, seaState: 4 as const, cloudFloorM: 1200, cloudCeilingM: 6000 },
+      satellitePasses: [
+        {
+          id: 'eo_sat',
+          name: 'EO-Keyhole',
+          side: 'RED' as const,
+          sensorKind: 'eo_optical' as const,
+          firstPassSec: 60,
+          intervalSec: 300,
+          swathPolygon: [[1.5, -0.5], [2.5, -0.5], [2.5, 0.5], [1.5, 0.5]] as [number, number][],
+        },
+        {
+          id: 'sar_sat',
+          name: 'Yaogan-SAR',
+          side: 'RED' as const,
+          sensorKind: 'sar_radar' as const,
+          firstPassSec: 90,
+          intervalSec: 300,
+          swathPolygon: [[1.5, -0.5], [2.5, -0.5], [2.5, 0.5], [1.5, 0.5]] as [number, number][],
+        },
+      ],
+    };
+
+    const silentCarrier = createRuntimeUnitFromPlacement(
+      placement('blue_silent_cvn', {
+        side: 'BLUE',
+        platformId: 'cvn_carrier',
+        position: [2.1, 0.1],
+        doctrine: { roe: 'hold', emconRadar: false, emconJamming: false },
+      }),
+      localCat
+    );
+    const allUnits = { red_standoff: shooter, blue_victim: victim, blue_silent_cvn: silentCarrier };
+
+    // At t=62s (EO pass window under rain_storm clouds): EO satellite is blocked by clouds!
+    const atEoPass = computeContactsOnly(allUnits, localCat, contacts, 62_000, 1, satEnv, 0);
+    expect(atEoPass.contacts.RED_CONTACT_blue_silent_cvn).toBeUndefined();
+    expect(atEoPass.contacts.RED_CONTACT_blue_victim?.bdaStatus).toBe('kill_unconfirmed');
+
+    // At t=92s (SAR pass window): all-weather SAR penetrates clouds, identifies silent CVN, AND confirms BDA sinking of blue_victim!
+    const atSarPass = computeContactsOnly(allUnits, localCat, atEoPass.contacts, 92_000, 1, satEnv, 0);
+    expect(atSarPass.contacts.RED_CONTACT_blue_silent_cvn).toBeDefined();
+    expect(atSarPass.contacts.RED_CONTACT_blue_silent_cvn.classification).toBe('identified');
+    expect(atSarPass.contacts.RED_CONTACT_blue_victim).toBeUndefined();
+    expect(atSarPass.logs.some((l) => l.title.includes('BDA毁伤复核确认'))).toBe(true);
   });
 });

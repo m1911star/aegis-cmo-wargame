@@ -16,7 +16,7 @@ import { evaluateWeatherModifiers, resolveMissileTerrainInteraction } from '../e
 import { advanceGuidance, computeMissileEnergyFactor, seekerCanObserve } from '../guidance';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { creditDamage } from '../objectives';
-import { evaluateTargetEcmSuppression, observeMissile } from '../sensors';
+import { evaluateTargetEcmSuppression, hasDirectReconBdaCoverage, observeMissile } from '../sensors';
 import { getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
 import type { PauseTrigger } from './types';
 
@@ -452,6 +452,34 @@ export function advanceWeaponPhysics({
           );
           if (targetUnit.side === 'RED') score.redLosses += 1;
           else if (targetUnit.side === 'BLUE') score.blueLosses += 1;
+        }
+
+        const shooterContactKey = `${missile.side}_CONTACT_${targetUnit.id}`;
+        const shooterContact = contacts[shooterContactKey];
+        if (shooterContact) {
+          const directBda = hasDirectReconBdaCoverage(
+            missile.side,
+            targetUnit.position,
+            targetUnit.altitudeM,
+            units,
+            catalog,
+            environment
+          );
+          if (directBda) {
+            delete contacts[shooterContactKey];
+            logs.push({
+              id: `log_bda_visual_${nextSimTime}_${missile.id}`,
+              simTime: nextSimTime,
+              side: missile.side,
+              category: 'DETECTION',
+              severity: 'info',
+              title: `[BDA目视/近距确认] ${shooterContact.displayName} 已被摧毁`,
+              message: '本方近距传感器实时捕获目标解体/沉没，确认歼灭并核销接触。',
+              position: [...targetUnit.position],
+            });
+          } else {
+            shooterContact.bdaStatus = 'kill_unconfirmed';
+          }
         }
 
         explosions.push({

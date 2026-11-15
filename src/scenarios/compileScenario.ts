@@ -34,11 +34,19 @@ export function compileScenario(
   index(scenario.environment.landPolygons, 'scenario.environment.landPolygons');
   index(scenario.environment.acousticZones, 'scenario.environment.acousticZones');
   index(scenario.environment.weatherZones ?? [], 'scenario.environment.weatherZones');
+  index(scenario.environment.satellitePasses ?? [], 'scenario.environment.satellitePasses');
   if (
     scenario.environment.weather &&
     scenario.environment.weather.cloudFloorM > scenario.environment.weather.cloudCeilingM
   ) {
     invalid('scenario.environment.weather', 'cloudFloorM cannot exceed cloudCeilingM');
+  }
+  for (const pass of scenario.environment.satellitePasses ?? []) {
+    if (pass.side === 'NEUTRAL') invalid(`scenario.environment.satellitePasses.${pass.id}`, 'satellite pass requires RED or BLUE side');
+    const feature = turf.polygon([[...pass.swathPolygon, pass.swathPolygon[0]]]);
+    if (turf.area(feature) <= 1 || turf.kinks(feature).features.length > 0) {
+      invalid(`scenario.environment.satellitePasses.${pass.id}`, 'satellite swathPolygon must be non-degenerate and non-self-intersecting');
+    }
   }
   for (const polygon of [
     ...scenario.environment.landPolygons,

@@ -90,8 +90,8 @@
       "scenarioId": "op_deep_sea_carrier_hunt_2028",
       "title": "作战想定 02 // 《深海猎杀：福建舰与美核航母打击群大洋决战》",
       "seed": 5252,
-      "tick": 10379,
-      "elapsedSec": 2594.75,
+      "tick": 6622,
+      "elapsedSec": 1655.5,
       "configuredDurationSec": 5400,
       "terminalReason": "critical_objective",
       "outcomes": {
@@ -100,21 +100,21 @@
       },
       "losses": {
         "red": 1,
-        "blue": 4
+        "blue": 7
       },
       "missilesFired": {
-        "red": 102,
-        "blue": 134
+        "red": 100,
+        "blue": 138
       },
       "interceptions": {
-        "red": 20,
-        "blue": 35
+        "red": 18,
+        "blue": 34
       },
       "score": {
-        "red": 1190,
+        "red": 1780,
         "blue": 150
       },
-      "sortiesLaunched": 0,
+      "sortiesLaunched": 6,
       "events": [
         {
           "id": "ev_red_classified_blue_cvn",
@@ -128,17 +128,17 @@
         },
         {
           "id": "ev_carrier_detected_salvo_order",
-          "fireCount": 0,
+          "fireCount": 1,
           "lastFiredElapsedSec": null
         },
         {
           "id": "ev_blue_identified_red_cv18",
-          "fireCount": 0,
+          "fireCount": 1,
           "lastFiredElapsedSec": null
         },
         {
           "id": "ev_red_csg_blink_emcon",
-          "fireCount": 86,
+          "fireCount": 55,
           "lastFiredElapsedSec": null
         }
       ],
@@ -154,7 +154,7 @@
         "deep_blue_preserve_cvn": "failed",
         "deep_blue_disable_wolfpack": "pending"
       },
-      "aarEvents": 189,
+      "aarEvents": 199,
       "finiteState": true
     },
     {
@@ -174,7 +174,7 @@
         "blue": 8
       },
       "missilesFired": {
-        "red": 156,
+        "red": 154,
         "blue": 160
       },
       "interceptions": {
@@ -267,7 +267,7 @@
         "bashi_blue_disable_coastal": "failed",
         "bashi_blue_preserve_mq4c": "failed"
       },
-      "aarEvents": 262,
+      "aarEvents": 261,
       "finiteState": true
     },
     {
@@ -287,11 +287,11 @@
         "blue": 3
       },
       "missilesFired": {
-        "red": 88,
-        "blue": 70
+        "red": 84,
+        "blue": 68
       },
       "interceptions": {
-        "red": 23,
+        "red": 22,
         "blue": 6
       },
       "score": {
@@ -331,7 +331,7 @@
         "joint_blue_hold_beach": "achieved",
         "joint_blue_preserve_airbase": "achieved"
       },
-      "aarEvents": 125,
+      "aarEvents": 120,
       "finiteState": true
     },
     {

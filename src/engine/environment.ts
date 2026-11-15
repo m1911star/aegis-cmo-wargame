@@ -26,6 +26,12 @@ export function cloneEnvironment(environment?: ScenarioEnvironment): ScenarioEnv
           areaPolygon: zone.areaPolygon.map((point) => [...point] as [number, number]),
         }))
       : undefined,
+    satellitePasses: environment?.satellitePasses
+      ? environment.satellitePasses.map((pass) => ({
+          ...pass,
+          swathPolygon: pass.swathPolygon.map((point) => [...point] as [number, number]),
+        }))
+      : undefined,
   };
 }
 

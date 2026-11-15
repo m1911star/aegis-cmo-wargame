@@ -224,7 +224,8 @@ function stepWorkingWorldInPlace(
     world.contacts,
     nextSimTime,
     dtSec,
-    world.environment
+    world.environment,
+    startTime
   );
   const contacts = sensed.contacts;
   logs.push(...sensed.logs);

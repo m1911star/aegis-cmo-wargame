@@ -49,6 +49,24 @@ export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml 
         <span className="text-muted-foreground">高度 / 深度:</span>
         <span className="font-mono tabular-nums">{contact.altitudeM} m</span>
       </div>
+      <div className="flex justify-between items-center">
+        <span className="text-muted-foreground">毁伤评估 (BDA):</span>
+        <span
+          className={
+            contact.bdaStatus === 'kill_unconfirmed'
+              ? 'text-amber-300 font-semibold'
+              : contact.bdaStatus === 'damaged_suspected'
+                ? 'text-rose-300 font-semibold'
+                : 'text-emerald-300'
+          }
+        >
+          {contact.bdaStatus === 'kill_unconfirmed'
+            ? '回波消失 · 战果待侦察复核 [BDA?]'
+            : contact.bdaStatus === 'damaged_suspected'
+              ? '识别确认已受损降级'
+              : '机动正常 / 未见显伤'}
+        </span>
+      </div>
       <div className="pt-1.5 border-t border-border text-[11px] text-cyan-300">
         探测传感器: {contact.detectedBySources.join(' , ')}
       </div>

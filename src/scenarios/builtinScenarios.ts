@@ -882,6 +882,26 @@ export const SCENARIO_DEEP_SEA_CARRIER_HUNT: ScenarioDefinition = {
       { id: 'philippine_deep_water', name: '菲律宾海深水声学区', kind: 'deep', sonarRangeFactor: 1.12,
         areaPolygon: [[121, 19], [128.5, 19], [128.5, 24], [121, 24]] },
     ],
+    satellitePasses: [
+      {
+        id: 'sat_red_yaogan_sar',
+        name: '遥感-42 海上SAR侦察星',
+        side: 'RED',
+        sensorKind: 'sar_radar',
+        firstPassSec: 240,
+        intervalSec: 600,
+        swathPolygon: [[124.2, 19.2], [128.4, 19.2], [128.4, 23.8], [124.2, 23.8]],
+      },
+      {
+        id: 'sat_blue_noss_sar',
+        name: 'NOSS-4 海洋监视雷达星',
+        side: 'BLUE',
+        sensorKind: 'sar_radar',
+        firstPassSec: 300,
+        intervalSec: 600,
+        swathPolygon: [[121.2, 19.2], [125.6, 19.2], [125.6, 23.8], [121.2, 23.8]],
+      },
+    ],
   },
   groups: [
     {

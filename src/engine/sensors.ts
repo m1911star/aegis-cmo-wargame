@@ -1,7 +1,12 @@
 import * as turf from '@turf/turf';
 import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from '../db/unitConfiguration';
-import { acousticRangeFactor, evaluateWeatherModifiers, hasRadarLineOfSight } from './environment';
+import {
+  acousticRangeFactor,
+  evaluateWeatherModifiers,
+  hasRadarLineOfSight,
+  isPointInCompiledPolygon,
+} from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
 import {
@@ -269,10 +274,65 @@ export function evaluateTargetEcmSuppression(
   return Math.min(0.75, Math.max(0, bestEcm));
 }
 
+const SATELLITE_PASS_WINDOW_SEC = 15;
+
+export function isSatellitePassActive(
+  firstPassSec: number,
+  intervalSec: number,
+  elapsedSec: number
+): boolean {
+  if (elapsedSec <= 0 || elapsedSec + 1e-9 < firstPassSec || intervalSec <= 0) return false;
+  const phase = (elapsedSec - firstPassSec) % intervalSec;
+  return phase >= 0 && phase <= SATELLITE_PASS_WINDOW_SEC;
+}
+
+export function hasDirectReconBdaCoverage(
+  observerSide: SideId,
+  position: [number, number],
+  altitudeM: number,
+  units: Record<string, RuntimeUnit>,
+  catalog: EquipmentCatalog,
+  environment?: ScenarioEnvironment,
+  elapsedSec = 0
+): boolean {
+  // 1. Active SAR or clear-sky EO satellite pass over position
+  for (const pass of environment?.satellitePasses ?? []) {
+    if (pass.side !== observerSide || !isSatellitePassActive(pass.firstPassSec, pass.intervalSec, elapsedSec)) continue;
+    if (!isPointInCompiledPolygon(position, pass.swathPolygon)) continue;
+    if (pass.sensorKind === 'sar_radar') return true;
+    if (pass.sensorKind === 'eo_optical') {
+      const mods = evaluateWeatherModifiers(position, 400_000, position, Math.max(0, altitudeM), environment);
+      if (mods.opticalFactor >= 0.5) return true;
+    }
+  }
+  // 2. Close friendly recon aircraft/UAV/ship with clear IRST/EO or active radar within 35 km
+  for (const observer of Object.values(units)) {
+    if (observer.side !== observerSide || !isActiveUnit(observer)) continue;
+    const distKm = getDistanceKm(observer.position, position);
+    if (distKm > 38) continue;
+    const config = resolveUnitConfiguration(catalog, observer.platformId, observer.activeLoadoutId);
+    if (!hasRadarLineOfSight(observer.position, observer.altitudeM, config.platform.radarAntennaHeightM, position, Math.max(0, altitudeM), environment)) {
+      continue;
+    }
+    for (const sId of config.sensorIds) {
+      const sensor = catalog.sensors[sId];
+      if (!sensor || !isTargetWithinSensorArc(observer.heading, observer.position, position, sensor)) continue;
+      if (sensor.type === 'irst_optical') {
+        const mods = evaluateWeatherModifiers(observer.position, observer.altitudeM, position, Math.max(0, altitudeM), environment);
+        if (distKm <= Math.min(35, sensor.maxRangeKm * mods.opticalFactor)) return true;
+      }
+      if (sensor.type === 'radar_air_surface' && observer.doctrine.emconRadar && getUnitCapabilities(observer).radarFactor > 0 && distKm <= 35) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function computeContactsOnly(
   units: Record<string, RuntimeUnit>, catalog: EquipmentCatalog,
   previousContacts: Record<string, TacticalContact>, nextSimTime: number, dtSec = 0,
-  environment?: ScenarioEnvironment
+  environment?: ScenarioEnvironment, startTime?: number
 ): { contacts: Record<string, TacticalContact>; logs: CombatLogEntry[] } {
   const configurations = new Map(Object.values(units).map((unit) => [unit.id,
     resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId)]));
@@ -280,6 +340,10 @@ export function computeContactsOnly(
   const nextContacts: Record<string, TacticalContact> = {};
   const aliveUnits = Object.values(units).filter(
     isActiveUnit
+  );
+  const elapsedSec = startTime !== undefined ? Math.max(0, (nextSimTime - startTime) / 1000) : 0;
+  const activeSatPasses = (environment?.satellitePasses ?? []).filter((pass) =>
+    isSatellitePassActive(pass.firstPassSec, pass.intervalSec, elapsedSec)
   );
 
   for (const observerSide of ['RED', 'BLUE'] as SideId[]) {
@@ -504,6 +568,40 @@ export function computeContactsOnly(
         if (detectingSources.length > sourceCount) sourceUnitIds.push(observer.id);
       }
 
+      // E. 天基侦察卫星过顶条带扫掠 (Orbital Satellite ISR Passes: SAR / EO / ELINT)
+      if (target.domain !== 'subsurface' && activeSatPasses.length > 0) {
+        for (const pass of activeSatPasses) {
+          if (pass.side !== observerSide) continue;
+          if (!isPointInCompiledPolygon(target.position, pass.swathPolygon)) continue;
+          if (pass.sensorKind === 'sar_radar' && (target.domain === 'land' || (target.domain === 'surface' && targetSpec.rcsM2 >= 50))) {
+            hasNonEsmDetection = true;
+            detectingSources.push(`${pass.name} (天基SAR穿云成像)`);
+            bestUncertaintyKm = Math.min(bestUncertaintyKm, 1.2);
+            if (['carrier', 'airbase', 'amphibious'].includes(target.category)) {
+              bestClassification = 'identified';
+            } else if (bestClassification === 'unknown') {
+              bestClassification = 'classified';
+            }
+          } else if (pass.sensorKind === 'eo_optical' && (target.domain === 'surface' || target.domain === 'land' || target.altitudeM >= 6000)) {
+            const satWeather = evaluateWeatherModifiers(target.position, 400_000, target.position, target.altitudeM, environment);
+            if (satWeather.opticalFactor >= 0.5) {
+              hasNonEsmDetection = true;
+              detectingSources.push(`${pass.name} (天基高分光学判读)`);
+              bestUncertaintyKm = Math.min(bestUncertaintyKm, 0.25);
+              bestClassification = 'identified';
+            }
+          } else if (pass.sensorKind === 'elint_esm' && isRadioEmitting(target, catalog)) {
+            emitterObserved = true;
+            hasNonEsmDetection = true;
+            detectingSources.push(`${pass.name} (天基ELINT电子截获)`);
+            bestUncertaintyKm = Math.min(bestUncertaintyKm, 3.5);
+            if (bestClassification === 'unknown') {
+              bestClassification = 'classified';
+            }
+          }
+        }
+      }
+
       const contactKey = `${observerSide}_CONTACT_${target.id}`;
       const prevContact = previousContacts[contactKey];
 
@@ -594,6 +692,15 @@ export function computeContactsOnly(
                 target.category === 'amphibious' || target.category === 'ground_force' || target.category === 'radar_site'
                 ? 'high' : 'medium';
 
+        const bdaStatus: TacticalContact['bdaStatus'] =
+          bestClassification === 'identified'
+            ? getUnitCapabilities(target).state !== 'operational'
+              ? 'damaged_suspected'
+              : 'intact'
+            : prevContact?.bdaStatus === 'damaged_suspected'
+              ? 'damaged_suspected'
+              : 'intact';
+
         nextContacts[contactKey] = {
           id: contactKey,
           actualUnitId: target.id,
@@ -602,6 +709,7 @@ export function computeContactsOnly(
           domain: target.domain,
           classification: bestClassification,
           identifiedCategory: bestClassification === 'identified' ? target.category : undefined,
+          bdaStatus,
           displayName,
           sidc: getContactSidc(target.domain, bestClassification, target.side),
           estimatedPosition: estimatedPos,
@@ -662,14 +770,47 @@ export function computeContactsOnly(
     }
   }
 
-  // Memory cannot disappear merely because an unobserved target was destroyed.
+  // Memory cannot disappear merely because an unobserved target was destroyed;
+  // however, once a friendly recon sensor or satellite pass sweeps a lost/unconfirmed-kill position, confirm BDA!
   for (const previous of Object.values(previousContacts)) {
     if (nextContacts[previous.id] || nextSimTime - previous.lastDetectedTime > 120000) continue;
+    const truthUnit = units[previous.actualUnitId];
+    const targetActuallyDead = !truthUnit || !isActiveUnit(truthUnit);
+    if (
+      targetActuallyDead &&
+      previous.bdaStatus === 'kill_unconfirmed' &&
+      hasDirectReconBdaCoverage(
+        previous.observerSide,
+        previous.estimatedPosition,
+        previous.altitudeM,
+        units,
+        catalog,
+        environment,
+        elapsedSec
+      )
+    ) {
+      newLogs.push({
+        id: `log_bda_confirm_${nextSimTime}_${previous.id}`,
+        simTime: nextSimTime,
+        side: previous.observerSide,
+        category: 'DETECTION',
+        severity: 'info',
+        title: `[BDA毁伤复核确认] ${previous.displayName} 确认已被摧毁`,
+        message: '前出侦察传感器/过顶卫星复核目标海域，敌方目标已确认沉没/失能并自态势图核销。',
+        position: [...previous.estimatedPosition],
+      });
+      continue;
+    }
     const radius = Math.min(80, previous.uncertaintyRadiusKm + dtSec * 0.4);
-    nextContacts[previous.id] = { ...previous, uncertaintyRadiusKm: radius,
-      uncertaintyPolygon: previous.uncertaintyKind === 'circle' || !previous.uncertaintyKind
-        ? buildAouPolygon(previous.estimatedPosition, radius) : previous.uncertaintyPolygon,
-      emitterObserved: false };
+    nextContacts[previous.id] = {
+      ...previous,
+      uncertaintyRadiusKm: radius,
+      uncertaintyPolygon:
+        previous.uncertaintyKind === 'circle' || !previous.uncertaintyKind
+          ? buildAouPolygon(previous.estimatedPosition, radius)
+          : previous.uncertaintyPolygon,
+      emitterObserved: false,
+    };
   }
   return { contacts: nextContacts, logs: newLogs };
 }
