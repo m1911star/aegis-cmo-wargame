@@ -294,8 +294,25 @@ describe('Scenario input boundary', () => {
       });
       expect(scenario.units.length).toBeGreaterThanOrEqual(4);
       expect(scenario.objectives?.length).toBe(4);
+      expect(
+        scenario.units.every((u) =>
+          catalog.platforms[u.platformId].domain === 'subsurface'
+            ? u.doctrine?.emconRadar === false
+            : u.doctrine?.emconRadar === true
+        )
+      ).toBe(true);
       expect(compileScenario(scenario).scenario.id).toBe(scenario.id);
     }
+    const subSkirmish = buildSkirmishScenario({
+      theaterId: 'open_ocean',
+      redPackageIds: ['india_subsurface_patrol'],
+      bluePackageIds: ['blue_carrier_group'],
+    });
+    expect(
+      subSkirmish.units
+        .filter((u) => catalog.platforms[u.platformId].domain === 'subsurface')
+        .every((u) => u.doctrine?.emconRadar === false)
+    ).toBe(true);
     expect(Object.keys(ALL_SKIRMISH_FORCE_PACKAGES).length).toBe(30);
   });
 

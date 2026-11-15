@@ -34,6 +34,20 @@ export const SkirmishModal: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const preset = SKIRMISH_THEATER_PRESETS[theaterId];
+  const compatiblePackages = useMemo(
+    () =>
+      PACKAGE_LIST.filter((pkg) => {
+        const domains = pkg.members.map((m) => catalog.platforms[m.platformId]?.domain).filter(Boolean);
+        if (theaterId === 'inland_highland') {
+          return domains.every((d) => d === 'air' || d === 'land');
+        }
+        if (theaterId === 'open_ocean' || theaterId === 'island_archipelago') {
+          return domains.every((d) => d !== 'land');
+        }
+        return true;
+      }),
+    [catalog, theaterId]
+  );
   const redSelection = useMemo(
     () => [redPackageId, ...(redAuxPackageId !== 'none' && redAuxPackageId !== redPackageId ? [redAuxPackageId] : [])],
     [redPackageId, redAuxPackageId]
@@ -91,10 +105,23 @@ export const SkirmishModal: React.FC = () => {
               const nextPreset = SKIRMISH_THEATER_PRESETS[nextId];
               setWeatherCondition(nextPreset.defaultWeather.condition);
               setSeaState(nextPreset.defaultWeather.seaState);
+              const isPkgCompatible = (pkgId: string) => {
+                const pkg = ALL_SKIRMISH_FORCE_PACKAGES[pkgId];
+                if (!pkg) return false;
+                const domains = pkg.members.map((m) => catalog.platforms[m.platformId]?.domain).filter(Boolean);
+                if (nextId === 'inland_highland') return domains.every((d) => d === 'air' || d === 'land');
+                if (nextId === 'open_ocean' || nextId === 'island_archipelago') return domains.every((d) => d !== 'land');
+                return true;
+              };
               if (nextId === 'inland_highland') {
-                setRedPackageId('red_layered_air_defense');
-                setBluePackageId('blue_mobile_air_defense');
+                if (!isPkgCompatible(redPackageId)) setRedPackageId('red_layered_air_defense');
+                if (!isPkgCompatible(bluePackageId)) setBluePackageId('blue_mobile_air_defense');
+              } else {
+                if (!isPkgCompatible(redPackageId)) setRedPackageId('red_surface_group');
+                if (!isPkgCompatible(bluePackageId)) setBluePackageId('blue_carrier_group');
               }
+              if (redAuxPackageId !== 'none' && !isPkgCompatible(redAuxPackageId)) setRedAuxPackageId('none');
+              if (blueAuxPackageId !== 'none' && !isPkgCompatible(blueAuxPackageId)) setBlueAuxPackageId('none');
             }}
           >
             {Object.values(SKIRMISH_THEATER_PRESETS).map((item) => (
@@ -113,13 +140,13 @@ export const SkirmishModal: React.FC = () => {
               <Badge variant="destructive">{redSelection.length} 套配置</Badge>
             </div>
             <Select aria-label="红方主力军队配置" value={redPackageId} onChange={(e) => setRedPackageId(e.target.value)}>
-              {PACKAGE_LIST.map((pkg) => (
+              {compatiblePackages.map((pkg) => (
                 <option key={pkg.id} value={pkg.id}>{pkg.origin} · {pkg.name}</option>
               ))}
             </Select>
             <Select aria-label="红方支援军队配置" value={redAuxPackageId} onChange={(e) => setRedAuxPackageId(e.target.value)}>
               <option value="none">无附加支援配置</option>
-              {PACKAGE_LIST.map((pkg) => (
+              {compatiblePackages.map((pkg) => (
                 <option key={pkg.id} value={pkg.id}>+ {pkg.origin} · {pkg.name}</option>
               ))}
             </Select>
@@ -136,13 +163,13 @@ export const SkirmishModal: React.FC = () => {
               <Badge variant="secondary">{blueSelection.length} 套配置</Badge>
             </div>
             <Select aria-label="蓝方主力军队配置" value={bluePackageId} onChange={(e) => setBluePackageId(e.target.value)}>
-              {PACKAGE_LIST.map((pkg) => (
+              {compatiblePackages.map((pkg) => (
                 <option key={pkg.id} value={pkg.id}>{pkg.origin} · {pkg.name}</option>
               ))}
             </Select>
             <Select aria-label="蓝方支援军队配置" value={blueAuxPackageId} onChange={(e) => setBlueAuxPackageId(e.target.value)}>
               <option value="none">无附加支援配置</option>
-              {PACKAGE_LIST.map((pkg) => (
+              {compatiblePackages.map((pkg) => (
                 <option key={pkg.id} value={pkg.id}>+ {pkg.origin} · {pkg.name}</option>
               ))}
             </Select>

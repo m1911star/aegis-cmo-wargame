@@ -211,9 +211,9 @@ function buildSideSkirmishPlacements(
         speedKts: platform.domain === 'land' ? 0 : platform.cruiseSpeedKts,
         doctrine: {
           roe: 'tight',
-          emconRadar: false,
+          emconRadar: platform.domain !== 'subsurface',
           emconSonar: false,
-          emconJamming: false,
+          emconJamming: platform.category === 'ew_aircraft',
           autoEvade: true,
         },
       });
