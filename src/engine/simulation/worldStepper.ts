@@ -30,6 +30,7 @@ function cloneUnitForStepping(unit: RuntimeUnit): RuntimeUnit {
   return {
     ...unit,
     position: [...unit.position],
+    subsystems: unit.subsystems ? { ...unit.subsystems } : undefined,
     waypoints: unit.waypoints.map((waypoint) => ({
       ...waypoint,
       position: [...waypoint.position] as [number, number],

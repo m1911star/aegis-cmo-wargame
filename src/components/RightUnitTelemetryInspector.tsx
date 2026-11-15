@@ -321,6 +321,54 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           </div>
         </div>
 
+        {selectedUnit.subsystems &&
+          (selectedUnit.subsystems.sensors < 0.99 ||
+            selectedUnit.subsystems.propulsion < 0.99 ||
+            selectedUnit.subsystems.weapons < 0.99 ||
+            selectedUnit.subsystems.fire > 0.01 ||
+            selectedUnit.subsystems.flooding > 0.01) && (
+            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/35 space-y-1.5 text-[10px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-amber-300 font-semibold">部位损伤与损管抢修 (DC)</span>
+                <div className="flex items-center gap-1">
+                  {selectedUnit.subsystems.fire > 0.01 && (
+                    <span className="px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-200 font-mono">
+                      火灾 {Math.round(selectedUnit.subsystems.fire * 100)}%
+                    </span>
+                  )}
+                  {selectedUnit.subsystems.flooding > 0.01 && (
+                    <span className="px-1.5 py-0.5 rounded bg-sky-500/25 text-sky-200 font-mono">
+                      进水 {Math.round(selectedUnit.subsystems.flooding * 100)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 font-mono tabular-nums">
+                <div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>传感器</span>
+                    <span>{Math.round(selectedUnit.subsystems.sensors * 100)}%</span>
+                  </div>
+                  <Progress value={Math.round(selectedUnit.subsystems.sensors * 100)} indicatorClassName="bg-cyan-400" />
+                </div>
+                <div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>动力轴</span>
+                    <span>{Math.round(selectedUnit.subsystems.propulsion * 100)}%</span>
+                  </div>
+                  <Progress value={Math.round(selectedUnit.subsystems.propulsion * 100)} indicatorClassName="bg-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>武备/甲板</span>
+                    <span>{Math.round(selectedUnit.subsystems.weapons * 100)}%</span>
+                  </div>
+                  <Progress value={Math.round(selectedUnit.subsystems.weapons * 100)} indicatorClassName="bg-amber-400" />
+                </div>
+              </div>
+            </div>
+          )}
+
         {selectedUnit.category === 'tanker' && (
           <div className="bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-200">
             可转移燃油：{Math.round(selectedUnit.aarFuelRemainingSec)} 秒 · 等待队列 {selectedUnit.aarQueue.length} 架

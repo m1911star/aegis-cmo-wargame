@@ -306,6 +306,14 @@ export interface AirRefuelState {
   resumeMissionState?: RuntimeUnit['missionState'];
 }
 
+export interface UnitSubsystems {
+  sensors: number;     // 0..1 雷达/光电/电子战阵面完好度
+  propulsion: number;  // 0..1 动力推进轴/发动机完好度
+  weapons: number;     // 0..1 垂发/挂架/飞行甲板完好度
+  fire: number;        // 0..1 火灾强度 (>=0.35 暂时封锁航空起降)
+  flooding: number;    // 0..1 舰艇进水度 (压低最大航速)
+}
+
 export interface RuntimeUnit {
   id: string;
   name: string;
@@ -340,6 +348,7 @@ export interface RuntimeUnit {
 
   hp: number;
   maxHp: number;
+  subsystems?: UnitSubsystems;
   fuelRemainingSec: number;
   maxFuelSec: number;
   status: 'operational' | 'engaged' | 'evading' | 'returning' | 'recovered' | 'destroyed';

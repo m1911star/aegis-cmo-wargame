@@ -119,6 +119,29 @@ export function advanceUnitPhysics({
     }
     if (!unitActive) continue;
 
+    // Deterministic ship / submarine / base Damage Control (DC) firefighting, dewatering & emergency repair
+    if (unit.subsystems && unit.domain !== 'air') {
+      const sub = unit.subsystems;
+      if (sub.fire > 0) {
+        sub.fire = Math.max(0, Number((sub.fire - 0.012 * dtSec).toFixed(4)));
+      }
+      if (sub.flooding > 0) {
+        sub.flooding = Math.max(0, Number((sub.flooding - 0.008 * dtSec).toFixed(4)));
+      }
+      if (sub.fire < 0.25) {
+        const repairCeiling = 0.6;
+        if (sub.sensors > 0 && sub.sensors < repairCeiling) {
+          sub.sensors = Math.min(repairCeiling, Number((sub.sensors + 0.003 * dtSec).toFixed(4)));
+        }
+        if (sub.propulsion > 0 && sub.propulsion < repairCeiling) {
+          sub.propulsion = Math.min(repairCeiling, Number((sub.propulsion + 0.003 * dtSec).toFixed(4)));
+        }
+        if (sub.weapons > 0 && sub.weapons < repairCeiling) {
+          sub.weapons = Math.min(repairCeiling, Number((sub.weapons + 0.003 * dtSec).toFixed(4)));
+        }
+      }
+    }
+
     for (const mount of unit.mounts) {
       if (mount.cooldownRemainingSec > 0) {
         mount.cooldownRemainingSec = Math.max(

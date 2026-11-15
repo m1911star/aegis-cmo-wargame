@@ -10,6 +10,7 @@ import type {
   TacticalExplosionEffect,
   VictoryConditionRule,
   WeaponInFlight,
+  WeaponSpec,
 } from '../../types/wargame';
 import { evaluateWeatherModifiers, resolveMissileTerrainInteraction } from '../environment';
 import { advanceGuidance, computeMissileEnergyFactor, seekerCanObserve } from '../guidance';
@@ -36,6 +37,51 @@ export type WeaponPhysicsContext = {
   autoPauseSettings: AutoPauseSettings;
   triggerPause: PauseTrigger;
 };
+
+export function applySubsystemHitDamage(
+  target: RuntimeUnit,
+  weapon: WeaponSpec,
+  hullDamage: number
+): string[] {
+  const sub = (target.subsystems ??= {
+    sensors: 1,
+    propulsion: 1,
+    weapons: 1,
+    fire: 0,
+    flooding: 0,
+  });
+  const ratio = Math.max(0.05, hullDamage / Math.max(1, target.maxHp));
+  const effects: string[] = [];
+
+  if (weapon.guidance === 'anti_radiation') {
+    sub.sensors = Math.max(0, Number((sub.sensors - Math.max(0.65, ratio * 1.4)).toFixed(3)));
+    sub.weapons = Math.max(0, Number((sub.weapons - ratio * 0.25).toFixed(3)));
+    if (sub.sensors <= 0.2) effects.push('雷达阵面被摧毁致盲');
+    else effects.push('电子/传感器阵面重创');
+  } else if (weapon.category === 'torpedo') {
+    sub.propulsion = Math.max(0, Number((sub.propulsion - Math.max(0.52, ratio * 1.3)).toFixed(3)));
+    if (target.domain === 'surface' || target.domain === 'subsurface') {
+      sub.flooding = Math.min(1, Number((sub.flooding + Math.max(0.42, ratio * 0.9)).toFixed(3)));
+      effects.push('水下破口进水、推进轴受损');
+    }
+  } else if (weapon.category === 'ashm' || weapon.category === 'lacm') {
+    sub.weapons = Math.max(0, Number((sub.weapons - ratio * 0.45).toFixed(3)));
+    sub.sensors = Math.max(0, Number((sub.sensors - ratio * 0.3).toFixed(3)));
+    if (target.domain === 'land') {
+      sub.propulsion = Math.max(0, Number((sub.propulsion - ratio * 0.35).toFixed(3)));
+    }
+    if (target.domain === 'surface' || target.category === 'airbase') {
+      sub.fire = Math.min(1, Number((sub.fire + Math.max(0.38, ratio * 0.85)).toFixed(3)));
+      if (sub.fire >= 0.35) effects.push('甲板/跑道起火暂停航空起降');
+    }
+  } else {
+    sub.propulsion = Math.max(0, Number((sub.propulsion - ratio * 0.45).toFixed(3)));
+    sub.sensors = Math.max(0, Number((sub.sensors - ratio * 0.35).toFixed(3)));
+    sub.weapons = Math.max(0, Number((sub.weapons - ratio * 0.35).toFixed(3)));
+  }
+
+  return effects;
+}
 
 /** Advance in-flight weapons and resolve interception, terminal hit and damage. */
 export function advanceWeaponPhysics({
@@ -391,19 +437,22 @@ export function advanceWeaponPhysics({
         missile.warheadDamage * (0.85 + 0.3 * rng())
       );
       targetUnit.hp = Math.max(0, targetUnit.hp - damage);
+      const subsystemNotes = targetUnit.hp > 0 ? applySubsystemHitDamage(targetUnit, weapon, damage) : [];
 
       if (targetUnit.hp <= 0) {
         targetUnit.status = 'destroyed';
         targetUnit.speedKts = 0;
-        creditDamage(
-          score,
-          targetUnit,
-          creditedDamage,
-          1,
-          victoryConditions
-        );
-        if (targetUnit.side === 'RED') score.redLosses += 1;
-        else if (targetUnit.side === 'BLUE') score.blueLosses += 1;
+        if (!['decoy', 'sonobuoy'].includes(targetUnit.category)) {
+          creditDamage(
+            score,
+            targetUnit,
+            creditedDamage,
+            1,
+            victoryConditions
+          );
+          if (targetUnit.side === 'RED') score.redLosses += 1;
+          else if (targetUnit.side === 'BLUE') score.blueLosses += 1;
+        }
 
         explosions.push({
           id: `exp_kill_${nextSimTime}_${missile.id}`,
@@ -461,7 +510,9 @@ export function advanceWeaponPhysics({
           category: 'HIT',
           severity: 'critical',
           title: `武器命中: ${missile.name} 重创 ${targetUnit.callsign} (-${damage} HP)`,
-          message: `${targetUnit.name} 被 ${missile.name} 命中，剩余结构完好度 ${targetUnit.hp}/${targetUnit.maxHp}。`,
+          message: `${targetUnit.name} 被 ${missile.name} 命中，剩余结构完好度 ${targetUnit.hp}/${targetUnit.maxHp}${
+            subsystemNotes.length > 0 ? `（子系统受损：${subsystemNotes.join('、')}）` : ''
+          }。`,
           position: [...targetUnit.position],
           unitId: targetUnit.id,
           targetUnitId: targetUnit.id,

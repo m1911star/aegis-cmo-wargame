@@ -99,6 +99,13 @@ export function createRuntimeUnitFromPlacement(
       : [],
     hp: spec.maxHp,
     maxHp: spec.maxHp,
+    subsystems: {
+      sensors: 1,
+      propulsion: 1,
+      weapons: 1,
+      fire: 0,
+      flooding: 0,
+    },
     fuelRemainingSec: maxFuelSec,
     maxFuelSec,
     status: 'operational',

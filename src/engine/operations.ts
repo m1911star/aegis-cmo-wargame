@@ -14,7 +14,7 @@ export function effectiveDoctrine(unit: RuntimeUnit, missions: MissionDefinition
 export function recoverySolution(unit: RuntimeUnit, units: Record<string, RuntimeUnit>, catalog: EquipmentCatalog) {
   const config = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
   const compatible = Object.values(units)
-    .filter((candidate) => candidate.side === unit.side && isActiveUnit(candidate) && getUnitCapabilities(candidate).canFire)
+    .filter((candidate) => candidate.side === unit.side && isActiveUnit(candidate) && getUnitCapabilities(candidate).canLaunchAircraft)
     .flatMap((host) => host.hangar
       .filter((slot) => slot.platformId === unit.platformId)
       .map((slot) => ({ position: host.position, hostId: host.id, slotId: slot.slotId })));

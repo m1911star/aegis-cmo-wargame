@@ -31,8 +31,12 @@ export function evaluateCarrierSortieAvailability(
 ): SortieAvailability {
   const carrier = units[carrierUnitId];
   if (!carrier) return { status: 'permanent', reason: '母舰不存在' };
-  if (!isActiveUnit(carrier) || !getUnitCapabilities(carrier).canFire) {
+  const caps = getUnitCapabilities(carrier);
+  if (!isActiveUnit(carrier) || !caps.canFire) {
     return { status: 'permanent', reason: '母舰已失能，无法执行出动' };
+  }
+  if (!caps.canLaunchAircraft) {
+    return { status: 'temporary', reason: '飞行甲板/跑道起火损管抢修中，暂停起降' };
   }
   const seaState = localSeaStateAt(carrier.position, environment);
   if (seaState >= 6 && carrier.domain === 'surface' && carrier.category !== 'carrier') {
@@ -68,7 +72,7 @@ export function launchCarrierSortie(
   environment?: ScenarioEnvironment
 ): RuntimeUnit | undefined {
   const carrier = units[carrierUnitId];
-  if (!carrier || !isActiveUnit(carrier) || !getUnitCapabilities(carrier).canFire) return undefined;
+  if (!carrier || !isActiveUnit(carrier) || !getUnitCapabilities(carrier).canLaunchAircraft) return undefined;
   const seaState = localSeaStateAt(carrier.position, environment);
   if (seaState >= 6 && carrier.domain === 'surface' && carrier.category !== 'carrier') return undefined;
   const slot = carrier.hangar.find((candidate) => candidate.slotId === hangarSlotId);

@@ -7,7 +7,9 @@ import { computeFlightProfileAltitudeM, launchGuidance, seekerCanObserve } from 
 import { updateUnitOperations } from '../../src/engine/operations';
 import { computeContactsOnly, isTargetWithinSensorArc } from '../../src/engine/sensors';
 import { runAutoDefense } from '../../src/engine/simulation/autoDefense';
-import { createRuntimeUnitFromPlacement, stepSimulationWorld } from '../../src/engine/simulationEngine';
+import { applySubsystemHitDamage } from '../../src/engine/simulation/weaponPhysics';
+import { advanceSimulation, createRuntimeUnitFromPlacement } from '../../src/engine/simulationEngine';
+import { getUnitCapabilities } from '../../src/engine/unitCapabilities';
 import { buildSensorEnvelopeFeature } from '../../src/map/tacticalProjection';
 import { SCENARIO_EAST_SEA_THUNDER } from '../../src/scenarios/builtinScenarios';
 import { captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../src/store/battleRecording';
@@ -638,5 +640,58 @@ describe('Module 5: Cloud layers, rainstorm weather zones & sea-state sensor/dec
     ).toBe('temporary');
     expect(launchCarrierSortie(stormUnits, catalog, 'ffg_storm', 'hangar_z20f_ffg', undefined, stormEnv)).toBeUndefined();
     expect(launchCarrierSortie(stormUnits, catalog, 'cv_storm', 'hangar_j35_vf1', undefined, stormEnv)).toBeDefined();
+  });
+});
+
+describe('Module 6: Subsystem hit locations & deterministic Damage Control (DC)', () => {
+  test('ARM blinds radar array, torpedo cripples propulsion with flooding, and carrier deck fire suspends sorties until DC extinguishes blaze', () => {
+    // 1. ARM hit blinds AESA radar while hull retains >75% HP
+    const ddg = createRuntimeUnitFromPlacement(placement('ddg_arm', { side: 'BLUE', platformId: 'arleigh_burke_flt3' }), catalog);
+    ddg.hp = ddg.maxHp - 30;
+    applySubsystemHitDamage(ddg, catalog.weapons.ld10_arm, 30);
+    expect(ddg.hp / ddg.maxHp).toBeGreaterThan(0.75);
+    expect(ddg.subsystems!.sensors).toBeLessThanOrEqual(0.35);
+    // Second ARM hit completely blinds radar (<= 0.2 -> radarFactor === 0)
+    applySubsystemHitDamage(ddg, catalog.weapons.ld10_arm, 30);
+    expect(getUnitCapabilities(ddg).radarFactor).toBe(0);
+    expect(getUnitCapabilities(ddg).canFire).toBe(true); // VLS still functional via offboard CEC!
+
+    // 2. Torpedo hit damages propulsion shaft and induces hull flooding -> drastic speed loss
+    const cruiser = createRuntimeUnitFromPlacement(placement('ddg_torp', { platformId: 'type055_destroyer' }), catalog);
+    cruiser.hp -= 65;
+    applySubsystemHitDamage(cruiser, catalog.weapons.mk48_adcap, 65);
+    expect(cruiser.subsystems!.flooding).toBeGreaterThanOrEqual(0.4);
+    expect(getUnitCapabilities(cruiser).speedFactor).toBeLessThan(0.6);
+
+    // 3. AShM hit on carrier ignites flight deck fire (>=0.35), halting launches until Damage Control suppresses fire
+    const carrier = createRuntimeUnitFromPlacement(placement('cv_fire', { platformId: 'cv18_fujian_carrier' }), catalog);
+    carrier.hp -= 55;
+    applySubsystemHitDamage(carrier, catalog.weapons.agm158c_lrasm, 55);
+    expect(carrier.subsystems!.fire).toBeGreaterThanOrEqual(0.38);
+    expect(getUnitCapabilities(carrier).canLaunchAircraft).toBe(false);
+    expect(evaluateCarrierSortieAvailability({ cv_fire: carrier }, catalog, 'cv_fire', 'hangar_j35_vf1').status).toBe('temporary');
+
+    // Run 25s of deterministic Damage Control firefighting -> deck fire drops below 0.35 -> flight deck reopens!
+    const afterDc = advanceSimulation(
+      {
+        startTime: 0,
+        simTime: 0,
+        tick: 0,
+        rngState: 1,
+        units: { cv_fire: carrier },
+        contacts: {},
+        weaponsInFlight: {},
+        explosions: [],
+        missions: [],
+        score: emptyScore(),
+      },
+      catalog,
+      25,
+      { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false },
+      'RED'
+    ).nextState;
+    expect(afterDc.units.cv_fire.subsystems!.fire).toBeLessThan(0.35);
+    expect(getUnitCapabilities(afterDc.units.cv_fire).canLaunchAircraft).toBe(true);
+    expect(launchCarrierSortie(afterDc.units, catalog, 'cv_fire', 'hangar_j35_vf1')).toBeDefined();
   });
 });
