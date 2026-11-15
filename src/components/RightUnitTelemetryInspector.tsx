@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, Crosshair, Navigation } from 'lucide-react';
 import ms from 'milsymbol';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
+import { resolveUnitConfiguration } from '../engine/unitConfiguration';
+import { sanitizeMilsymbolSvg, sanitizeSidc } from '../validation/wargameSchemas';
 import { findAmphibiousLandingPoint, isPointOnLand, MAX_AMPHIBIOUS_STANDOFF_KM } from '../engine/environment';
 import { countActiveGuidanceChannels, resolveMaxGuidanceChannels } from '../engine/fireControl';
 import { calculateRadarHorizonKm } from '../engine/simulationEngine';
@@ -60,11 +61,14 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   );
 
   const symbolSvgHtml = useMemo(() => {
-    const sidc = selectedContact
+    const rawSidc = selectedContact
       ? selectedContact.sidc
       : selectedUnit?.sidc || 'SUAPMF------';
+    const validSidc = sanitizeSidc(rawSidc, 'SUAPMF------');
     try {
-      return new ms.Symbol(sidc, { size: 34, frame: true, fill: true, strokeWidth: 4 }).asSVG();
+      return sanitizeMilsymbolSvg(
+        new ms.Symbol(validSidc, { size: 34, frame: true, fill: true, strokeWidth: 4 }).asSVG()
+      );
     } catch {
       return '';
     }

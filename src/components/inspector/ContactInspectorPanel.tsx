@@ -1,6 +1,7 @@
 import React from 'react';
 import { classificationLabels, threatLabels } from '../../ui/labels';
 import type { TacticalContact } from '../../types/wargame';
+import { sanitizeMilsymbolSvg } from '../../validation/wargameSchemas';
 import { FireControlDiagnostics } from '../FireControlDiagnostics';
 
 interface Props {
@@ -8,12 +9,14 @@ interface Props {
   symbolSvgHtml: string;
 }
 
-export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml }) => (
+export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml }) => {
+  const safeSvg = sanitizeMilsymbolSvg(symbolSvgHtml);
+  return (
   <aside className="z-20 w-full h-full flex flex-col overflow-y-auto p-3 space-y-3 inspector-content">
     <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/35">
       <div
         className="w-11 h-11 flex items-center justify-center rounded-md bg-background/60 border border-border shrink-0"
-        dangerouslySetInnerHTML={{ __html: symbolSvgHtml }}
+        dangerouslySetInnerHTML={{ __html: safeSvg }}
       />
       <div className="min-w-0">
         <div className="text-[10px] text-amber-400 uppercase font-semibold">情报目标</div>
@@ -74,4 +77,5 @@ export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml 
 
     <FireControlDiagnostics key={contact.id} contact={contact} />
   </aside>
-);
+  );
+};

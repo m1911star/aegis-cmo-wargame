@@ -1,6 +1,26 @@
 import type { EquipmentCatalog, ScenarioDefinition } from '../types/wargame';
 import { array, boolean, coordinate, id, number, object, oneOf, optional, record, taggedUnion, text, isRecord, invalid, type Check } from './schema';
 
+export const SIDC_PATTERN = /^[A-Z0-9*-]{10,20}$/;
+
+export const sidc: Check = (value, path) => {
+  text(value, path);
+  if (!SIDC_PATTERN.test(value as string)) {
+    invalid(path, 'expected a valid 10-20 character MIL-STD-2525 SIDC');
+  }
+};
+
+export function sanitizeSidc(raw: unknown, fallback = 'SUAPMF------'): string {
+  return typeof raw === 'string' && SIDC_PATTERN.test(raw) ? raw : fallback;
+}
+
+export function sanitizeMilsymbolSvg(svgHtml: string): string {
+  if (!svgHtml) return '';
+  return svgHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+}
+
 const domain = oneOf(['air', 'surface', 'subsurface', 'land']);
 const side = oneOf(['RED', 'BLUE', 'NEUTRAL']);
 const category = oneOf(['fighter', 'stealth_fighter', 'ew_aircraft', 'awacs', 'tanker', 'bomber', 'mpa_uav', 'decoy', 'sonobuoy', 'carrier', 'amphibious', 'destroyer', 'frigate', 'ssn', 'sam_battery', 'asm_battery', 'ground_force', 'airbase', 'radar_site']);
@@ -79,7 +99,7 @@ const hangar = object({
 });
 const platform = object({
   ...metadata, className: text, origin: text, domain, category,
-  defaultSidcRed: text, defaultSidcBlue: text,
+  defaultSidcRed: sidc, defaultSidcBlue: sidc,
   maxSpeedKts: number(0), cruiseSpeedKts: number(0), defaultAltitudeM: number(),
   minAltitudeM: number(), maxAltitudeM: number(), radarAntennaHeightM: number(0),
   maxFuelSec: number(0), maxHp: positive, rcsM2: number(0),
@@ -103,7 +123,7 @@ const overlay = object(Object.fromEntries(
 ));
 const placement = object({
   id, name: text, callsign: text, side, platformId: id, loadoutId: optional(id),
-  parentGroupId: id, position: coordinate, spawnJitterKm: optional(number(0)),
+  parentGroupId: id, position: coordinate, spawnJitterKm: optional(number(0, 100)),
   appearProbability: optional(number(0, 1)), altitudeM: optional(number()), heading: number(),
   speedKts: optional(number(0)), waypoints: optional(array(waypoint)),
   doctrine: optional(doctrine), assignedMissionId: optional(id),

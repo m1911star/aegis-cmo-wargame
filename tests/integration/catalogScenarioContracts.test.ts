@@ -731,6 +731,107 @@ describe('Resolved equipment configuration', () => {
     expect(stranded.units.diverted.status).toBe('returning');
     expect(stranded.units.disabled.hangar[0].turnaroundQueue).toEqual([]);
   });
+
+  test('compileScenario rejects self-intersecting mission/trigger polygons, invalid recoveryPosition/spawnJitterKm, incompatible DEPLOY_CARRIED targetWaypoint, and malformed SIDCs', () => {
+    const { assertCatalogShape, sanitizeMilsymbolSvg, sanitizeSidc } = require('../../src/validation/wargameSchemas') as typeof import('../../src/validation/wargameSchemas');
+
+    // Bowtie self-intersecting polygon
+    const bowtie: [number, number][] = [[122, 24], [124, 26], [122, 26], [124, 24]];
+    expect(() =>
+      compileScenario(
+        scenario([placement('u1', 'j20_mighty_dragon')], {
+          missions: [
+            {
+              id: 'bad_mission',
+              name: 'Bowtie',
+              description: 'self-intersecting',
+              side: 'RED',
+              type: 'aaw_patrol',
+              isActive: true,
+              areaPolygon: bowtie,
+              prosecuteOutsideAreaKm: 20,
+            },
+          ],
+        })
+      )
+    ).toThrow(/mission areaPolygon/);
+
+    expect(() =>
+      compileScenario(
+        scenario([placement('u1', 'j20_mighty_dragon')], {
+          events: [
+            {
+              id: 'bad_evt',
+              name: 'Bad Trigger',
+              description: 'self-intersecting trigger',
+              trigger: { type: 'UNIT_ENTERS_AREA', side: 'RED', areaPolygon: bowtie },
+              actions: [],
+            },
+          ],
+        })
+      )
+    ).toThrow(/UNIT_ENTERS_AREA trigger polygon/);
+
+    // Out-of-domain / out-of-theater recoveryPosition & excessive spawnJitterKm
+    const islandLand = {
+      landPolygons: [
+        {
+          id: 'island_1',
+          name: 'Island',
+          areaPolygon: [[121, 24], [122, 24], [122, 25], [121, 25]] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    expect(() =>
+      compileScenario(
+        scenario([placement('ship_rtb_land', 'type055_destroyer', { position: [120.5, 24.5], recoveryPosition: [121.5, 24.5] })], {
+          environment: islandLand,
+        })
+      )
+    ).toThrow(/recoveryPosition/);
+    expect(() =>
+      compileScenario(scenario([placement('air_rtb_mars', 'j20_mighty_dragon', { position: [122, 25], recoveryPosition: [-75, 38] })]))
+    ).toThrow(/recoveryPosition/);
+    expect(() =>
+      compileScenario(scenario([placement('jitter_huge', 'j20_mighty_dragon', { spawnJitterKm: 250 })]))
+    ).toThrow(/spawnJitterKm/);
+
+    // DEPLOY_CARRIED targetWaypoint domain incompatibility (land armor brigade ordered to sea vs land)
+    expect(() =>
+      compileScenario(
+        scenario([placement('lhd', 'type075_lhd', { position: [120.5, 24.5] })], {
+          environment: islandLand,
+          events: [
+            {
+              id: 'bad_deploy',
+              name: 'Bad Deploy',
+              description: 'land unit deployed to open ocean waypoint',
+              trigger: { type: 'TIME_ELAPSED', elapsedSec: 10 },
+              actions: [
+                {
+                  type: 'DEPLOY_CARRIED',
+                  launcherUnitId: 'lhd',
+                  platformId: 'red_armor_brigade',
+                  targetWaypoint: [120.2, 24.5],
+                },
+              ],
+            },
+          ],
+        })
+      )
+    ).toThrow(/DEPLOY_CARRIED targetWaypoint/);
+
+    // Strict SIDC validation & SVG sanitization
+    const poisonedCatalog = structuredClone(catalog);
+    poisonedCatalog.platforms.j20_mighty_dragon.defaultSidcRed = '<img src=x onerror=alert(1)>';
+    expect(() => assertCatalogShape(poisonedCatalog)).toThrow(/SIDC/);
+    expect(sanitizeSidc('<script>alert(1)</script>', 'SUAPMF------')).toBe('SUAPMF------');
+    expect(sanitizeSidc('SHAPMF------', 'SUAPMF------')).toBe('SHAPMF------');
+    expect(sanitizeMilsymbolSvg('<svg onload="alert(1)"><script>evil()</script><path d="M0 0"/></svg>')).toBe(
+      '<svg><path d="M0 0"/></svg>'
+    );
+  });
 });
 
 describe('Mission ownership and event lifecycle', () => {

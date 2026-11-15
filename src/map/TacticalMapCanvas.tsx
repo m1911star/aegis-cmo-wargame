@@ -8,6 +8,7 @@ import { installTacticalLayers } from './tacticalLayers';
 import { BasemapLoader, BASEMAP_PRESETS, initialBasemapState, basemapFallbackImage, type BasemapMode, type BasemapState } from './basemaps';
 import { getBearingDeg, getDistanceKm } from '../engine/simulationEngine';
 import { evaluateFireControl } from '../engine/fireControl';
+import { sanitizeSidc } from '../validation/wargameSchemas';
 
 // ============================================================================
 // AEGIS-CMO // MapLibre GL + milsymbol 高性能 WebGL 战术态势沙盘组件
@@ -170,7 +171,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       const isContact = modifier === 'CONTACT';
 
       try {
-        const symbol = new ms.Symbol(rawSidc || 'SUAPMF------', {
+        const symbol = new ms.Symbol(sanitizeSidc(rawSidc, 'SUAPMF------'), {
           size: isSelected ? 32 : 27,
           frame: true,
           fill: true,

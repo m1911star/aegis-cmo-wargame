@@ -1,10 +1,21 @@
 import * as turf from '@turf/turf';
 import type { EquipmentCatalog, InitialUnitPlacement, RouteLeg, ScenarioDefinition } from '../types/wargame';
 import { cloneEnvironment, isPointOnLand, isRouteAllowed } from '../engine/environment';
+import { getDistanceKm } from '../engine/geometry';
+import { resolveUnitConfiguration } from '../engine/unitConfiguration';
 import { resolveEquipmentCatalog, validateCatalogIntegrity } from '../db';
-import { resolveUnitConfiguration } from '../db/unitConfiguration';
 import { assertScenarioShape } from '../validation/wargameSchemas';
 import { invalid } from '../validation/schema';
+
+function assertValidPolygon(coords: [number, number][], path: string, label: string): void {
+  if (coords.length < 3) {
+    invalid(path, `${label} requires at least 3 polygon vertices`);
+  }
+  const feature = turf.polygon([[...coords, coords[0]]]);
+  if (turf.area(feature) <= 1 || turf.kinks(feature).features.length > 0) {
+    invalid(path, `${label} must be non-degenerate and non-self-intersecting`);
+  }
+}
 
 export function compileScenario(
   input: unknown,
@@ -116,6 +127,7 @@ export function compileScenario(
   }
 
   for (const mission of scenario.missions) {
+    assertValidPolygon(mission.areaPolygon, `mission.${mission.id}`, 'mission areaPolygon');
     if (mission.type === 'escort') {
       const escortTarget = mission.escortUnitId ? units.get(mission.escortUnitId) : undefined;
       if (!escortTarget || escortTarget.side !== mission.side) {
@@ -182,6 +194,21 @@ export function compileScenario(
     if (placement.altitudeM !== undefined && (placement.altitudeM < configuration.platform.minAltitudeM || placement.altitudeM > configuration.platform.maxAltitudeM)) {
       invalid(`${path}.altitudeM`, 'outside platform limits');
     }
+    if (placement.spawnJitterKm !== undefined && placement.spawnJitterKm > 100) {
+      invalid(`${path}.spawnJitterKm`, 'exceeds maximum 100 km spawn jitter bound');
+    }
+    if (placement.recoveryPosition) {
+      const recOnLand = isPointOnLand(placement.recoveryPosition, scenario.environment);
+      if (
+        ((configuration.platform.domain === 'surface' || configuration.platform.domain === 'subsurface') && recOnLand) ||
+        (configuration.platform.domain === 'land' && scenario.environment.landPolygons.length > 0 && !recOnLand)
+      ) {
+        invalid(`${path}.recoveryPosition`, 'recoveryPosition is outside the configured domain environment');
+      }
+      if (getDistanceKm(placement.position, placement.recoveryPosition) > 6000) {
+        invalid(`${path}.recoveryPosition`, 'recoveryPosition exceeds maximum theater range (6000 km)');
+      }
+    }
     if (placement.assignedMissionId) {
       const mission = missions.get(placement.assignedMissionId);
       if (!mission || mission.side !== placement.side) invalid(path, 'unknown mission or mission-side mismatch');
@@ -200,6 +227,9 @@ export function compileScenario(
     const targetId = trigger.type === 'UNIT_DESTROYED' ? trigger.unitId
       : trigger.type === 'UNIT_DETECTED' ? trigger.targetUnitId : undefined;
     if (targetId && !units.has(targetId)) invalid(path, `unknown trigger unit ${targetId}`);
+    if (trigger.type === 'UNIT_ENTERS_AREA') {
+      assertValidPolygon(trigger.areaPolygon, `${path}.trigger.areaPolygon`, 'UNIT_ENTERS_AREA trigger polygon');
+    }
     for (const action of event.actions) {
       if (action.type === 'ACTIVATE_MISSION' && !missions.has(action.missionId)) invalid(path, `unknown mission ${action.missionId}`);
       if (action.type === 'UPDATE_SIDE_DOCTRINE' && action.groupId) {
@@ -220,7 +250,17 @@ export function compileScenario(
         const launcher = units.get(action.launcherUnitId);
         const deployables = launcher ? catalog.platforms[launcher.platformId]?.deployables : undefined;
         const entry = deployables?.find((candidate) => candidate.platformId === action.platformId);
-        if (!launcher || !entry) invalid(path, 'unknown launcher or unsupported carried platform');
+        const deployedSpec = catalog.platforms[action.platformId];
+        if (!launcher || !entry || !deployedSpec) invalid(path, 'unknown launcher or unsupported carried platform');
+        if (action.targetWaypoint) {
+          const wpOnLand = isPointOnLand(action.targetWaypoint, scenario.environment);
+          if (
+            ((deployedSpec.domain === 'surface' || deployedSpec.domain === 'subsurface') && wpOnLand) ||
+            (deployedSpec.domain === 'land' && scenario.environment.landPolygons.length > 0 && !wpOnLand)
+          ) {
+            invalid(`${path}.targetWaypoint`, 'DEPLOY_CARRIED targetWaypoint is incompatible with deployed platform domain');
+          }
+        }
         if (action.assignedMissionId) {
           const mission = missions.get(action.assignedMissionId);
           if (!mission || mission.side !== launcher.side) invalid(path, 'unknown deploy mission or side mismatch');
