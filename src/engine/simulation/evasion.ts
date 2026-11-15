@@ -1,9 +1,9 @@
 import * as turf from '@turf/turf';
-import type { CombatLogEntry, EquipmentCatalog, RuntimeUnit, WeaponInFlight } from '../../types/wargame';
+import type { CombatLogEntry, EquipmentCatalog, RuntimeUnit, SideId, TacticalContact, WeaponInFlight } from '../../types/wargame';
 import { resolveUnitConfiguration } from '../unitConfiguration';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { observeMissile } from '../sensors';
-import { isActiveUnit } from '../unitCapabilities';
+import { compareRuntimeUnits, isActiveUnit } from '../unitCapabilities';
 
 const EVASION_MEMORY_MS = 10_000;
 
@@ -68,7 +68,48 @@ export function runEvasionAndSoftKill({
   nextSimTime,
   logs,
 }: EvasionContext): void {
-  for (const unit of Object.values(units)) {
+  const activeUnits = Object.values(units)
+    .filter(isActiveUnit)
+    .sort(compareRuntimeUnits);
+  const observersBySide: Record<SideId, RuntimeUnit[]> = {
+    RED: activeUnits.filter((u) => u.side === 'RED'),
+    BLUE: activeUnits.filter((u) => u.side === 'BLUE'),
+    NEUTRAL: [],
+  };
+  const nonInterceptorMissiles = Object.values(weaponsInFlight).filter(
+    (m) => m.targetType !== 'missile'
+  );
+  const observationCache = new Map<
+    string,
+    Array<{ missile: WeaponInFlight; observed: TacticalContact }>
+  >();
+  const getObservedFor = (side: SideId, allowPassive: boolean) => {
+    const key = `${side}:${allowPassive ? 1 : 0}`;
+    let cached = observationCache.get(key);
+    if (!cached) {
+      const sideObservers = observersBySide[side] ?? [];
+      cached = [];
+      for (const missile of nonInterceptorMissiles) {
+        if (missile.side === side) continue;
+        const observed = observeMissile(
+          side,
+          missile,
+          units,
+          catalog,
+          nextSimTime,
+          undefined,
+          undefined,
+          allowPassive,
+          sideObservers
+        );
+        if (observed) cached.push({ missile, observed });
+      }
+      observationCache.set(key, cached);
+    }
+    return cached;
+  };
+
+  for (const unit of Object.values(units).sort(compareRuntimeUnits)) {
     if (unit.countermeasureEffect && unit.countermeasureEffect.expiresAtSimTime <= nextSimTime) {
       unit.countermeasureEffect = undefined;
     }
@@ -80,16 +121,14 @@ export function runEvasionAndSoftKill({
     }
     const triggerRangeKm = unit.domain === 'air' ? 45
       : unit.domain === 'surface' ? 30 : unit.domain === 'subsurface' ? 15 : 8;
-    const observedThreats = Object.values(weaponsInFlight).flatMap((missile) => {
-      if (missile.side === unit.side || missile.targetType === 'missile') return [];
-      // Passive 360° MAWS (IRST/DAS) warns aircrews of tail-aspect rocket plumes, while ships/ground still require radar/sonar track
-      const observed = observeMissile(unit.side, missile, units, catalog, nextSimTime, undefined, undefined, unit.domain === 'air');
-      if (!observed) return [];
-      const distanceKm = getDistanceKm(unit.position, observed.estimatedPosition);
-      const bearingToUnit = getBearingDeg(observed.estimatedPosition, unit.position);
-      if (distanceKm > triggerRangeKm || angularDifference(observed.heading, bearingToUnit) > 65) return [];
-      return [{ missile, observed, distanceKm }];
-    }).sort((a, b) => a.distanceKm - b.distanceKm || a.missile.id.localeCompare(b.missile.id));
+    const observedThreats = getObservedFor(unit.side, unit.domain === 'air')
+      .flatMap(({ missile, observed }) => {
+        const distanceKm = getDistanceKm(unit.position, observed.estimatedPosition);
+        const bearingToUnit = getBearingDeg(observed.estimatedPosition, unit.position);
+        if (distanceKm > triggerRangeKm || angularDifference(observed.heading, bearingToUnit) > 65) return [];
+        return [{ missile, observed, distanceKm }];
+      })
+      .sort((a, b) => a.distanceKm - b.distanceKm || a.missile.id.localeCompare(b.missile.id));
     const threat = observedThreats[0];
 
     if (!threat) {

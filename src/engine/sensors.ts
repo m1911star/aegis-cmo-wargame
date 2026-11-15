@@ -98,14 +98,15 @@ export function calculateEffectiveRadarRangeKm(
   observerAltM: number,
   observerAntennaM: number,
   targetAltM: number,
-  ecmSuppressionFactor = 0
+  ecmSuppressionFactor = 0,
+  rangeMultiplier = 1
 ): number {
   const horizonKm = calculateRadarHorizonKm(
     observerAltM,
     observerAntennaM,
     targetAltM
   );
-  if (horizonKm <= 0) return 0;
+  if (horizonKm <= 0 || rangeMultiplier <= 0) return 0;
 
   const isCounterStealthBand =
     sensor.type === 'radar_oth' ||
@@ -130,7 +131,7 @@ export function calculateEffectiveRadarRangeKm(
   );
 
   const powerLimitedRangeKm =
-    sensor.maxRangeKm * rcsFactor * clutterModifier * jammerMultiplier;
+    sensor.maxRangeKm * rangeMultiplier * rcsFactor * clutterModifier * jammerMultiplier;
   return Math.min(horizonKm, powerLimitedRangeKm);
 }
 
@@ -334,13 +335,51 @@ export function computeContactsOnly(
   previousContacts: Record<string, TacticalContact>, nextSimTime: number, dtSec = 0,
   environment?: ScenarioEnvironment, startTime?: number
 ): { contacts: Record<string, TacticalContact>; logs: CombatLogEntry[] } {
-  const configurations = new Map(Object.values(units).map((unit) => [unit.id,
-    resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId)]));
-  const newLogs: CombatLogEntry[] = [];
-  const nextContacts: Record<string, TacticalContact> = {};
   const aliveUnits = Object.values(units)
     .filter(isActiveUnit)
     .sort(compareRuntimeUnits);
+  const configurations = new Map(
+    aliveUnits.map((unit) => [
+      unit.id,
+      resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId),
+    ])
+  );
+  const capabilitiesById = new Map(
+    aliveUnits.map((unit) => [unit.id, getUnitCapabilities(unit)])
+  );
+  const observerSensorMeta = new Map<
+    string,
+    { sensors: SensorSpec[]; domains: Set<Domain> }
+  >();
+  for (const unit of aliveUnits) {
+    const cfg = configurations.get(unit.id)!;
+    const sensors: SensorSpec[] = [];
+    const domains = new Set<Domain>();
+    for (const sId of cfg.sensorIds) {
+      const s = catalog.sensors[sId];
+      if (!s) continue;
+      sensors.push(s);
+      for (const d of s.detectDomains) domains.add(d);
+    }
+    observerSensorMeta.set(unit.id, { sensors, domains });
+  }
+  const activeJammers = aliveUnits.filter(
+    (unit) =>
+      unit.doctrine.emconJamming &&
+      (capabilitiesById.get(unit.id)?.radarFactor ?? 0) > 0 &&
+      (catalog.platforms[unit.platformId]?.ecmStrength ?? 0) > 0
+  );
+  const emittingCache = new Map<string, boolean>();
+  const getIsEmitting = (unit: RuntimeUnit): boolean => {
+    let val = emittingCache.get(unit.id);
+    if (val === undefined) {
+      val = isRadioEmitting(unit, catalog);
+      emittingCache.set(unit.id, val);
+    }
+    return val;
+  };
+  const newLogs: CombatLogEntry[] = [];
+  const nextContacts: Record<string, TacticalContact> = {};
   const elapsedSec = startTime !== undefined ? Math.max(0, (nextSimTime - startTime) / 1000) : 0;
   const activeSatPasses = (environment?.satellitePasses ?? []).filter((pass) =>
     isSatellitePassActive(pass.firstPassSec, pass.intervalSec, elapsedSec)
@@ -361,7 +400,7 @@ export function computeContactsOnly(
       // 计算目标当前享有的综合电子战压制强度 (自身 ECM + 75km 内电子战机伴随掩护)
       const targetEcmSuppression = evaluateTargetEcmSuppression(
         target,
-        aliveUnits,
+        activeJammers,
         catalog
       );
 
@@ -377,7 +416,10 @@ export function computeContactsOnly(
       for (const observer of friendlyUnits) {
         const obsSpec = catalog.platforms[observer.platformId];
         if (!obsSpec) continue;
+        const obsMeta = observerSensorMeta.get(observer.id);
+        if (!obsMeta || !obsMeta.domains.has(target.domain)) continue;
 
+        const obsCaps = capabilitiesById.get(observer.id)!;
         const distKm = getDistanceKm(observer.position, target.position);
         let cachedLos: boolean | undefined;
         const hasLineOfSight = () => (cachedLos ??= hasRadarLineOfSight(
@@ -388,27 +430,25 @@ export function computeContactsOnly(
           target.altitudeM,
           environment
         ));
-        const weatherMods = evaluateWeatherModifiers(
+        let cachedWeatherMods: ReturnType<typeof evaluateWeatherModifiers> | undefined;
+        const getWeatherMods = () => (cachedWeatherMods ??= evaluateWeatherModifiers(
           observer.position,
           observer.altitudeM,
           target.position,
           target.altitudeM,
           environment
-        );
-
-        // 计算目标相对该观察者雷达视线的姿态等效 RCS (正前/侧向/尾向 + 外挂惩罚)
-        const aspectRcsM2 = calculateAspectEffectiveRcsM2(
+        ));
+        let cachedAspectRcsM2: number | undefined;
+        const getAspectRcsM2 = () => (cachedAspectRcsM2 ??= calculateAspectEffectiveRcsM2(
           targetSpec,
           observer.position,
           target.position,
           target.heading,
           loadoutRcsPenalty
-        );
+        ));
 
         const sourceCount = detectingSources.length;
-        for (const sensorId of configurations.get(observer.id)!.sensorIds) {
-          const sensor = catalog.sensors[sensorId];
-          if (!sensor) continue;
+        for (const sensor of obsMeta.sensors) {
           if (!sensor.detectDomains.includes(target.domain)) continue;
           if (!isTargetWithinSensorArc(observer.heading, observer.position, target.position, sensor)) continue;
 
@@ -417,20 +457,21 @@ export function computeContactsOnly(
             sensor.type === 'radar_air_surface' ||
             sensor.type === 'radar_oth'
           ) {
-            if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) continue;
+            if (!observer.doctrine.emconRadar || obsCaps.radarFactor === 0) continue;
             if (sensor.type === 'radar_air_surface' && !hasLineOfSight()) continue;
 
             const baseEffRangeKm = calculateEffectiveRadarRangeKm(
-              { ...sensor, maxRangeKm: sensor.maxRangeKm * getUnitCapabilities(observer).radarFactor },
-              aspectRcsM2,
+              sensor,
+              getAspectRcsM2(),
               observer.altitudeM,
               obsSpec.radarAntennaHeightM,
               target.altitudeM,
-              targetEcmSuppression
+              targetEcmSuppression,
+              obsCaps.radarFactor
             );
             const effRangeKm =
               sensor.type === 'radar_air_surface' && target.altitudeM < LOW_ALTITUDE_THRESHOLD && !sensor.lookDownCapable
-                ? baseEffRangeKm * weatherMods.radarClutterPenalty
+                ? baseEffRangeKm * getWeatherMods().radarClutterPenalty
                 : baseEffRangeKm;
 
             if (distKm <= effRangeKm) {
@@ -452,7 +493,7 @@ export function computeContactsOnly(
 
           // B. 被动电子支援侦察 (ESM/RWR) —— 敌方开启主动雷达或开启强 OECM 干扰都会暴露辐射方位！
           else if (sensor.type === 'esm') {
-            if (!isRadioEmitting(target, catalog)) continue;
+            if (!getIsEmitting(target)) continue;
             const horizonKm =
               calculateRadarHorizonKm(
                 observer.altitudeM,
@@ -498,7 +539,7 @@ export function computeContactsOnly(
               obsSpec.radarAntennaHeightM,
               target.altitudeM
             );
-            const effRangeKm = Math.min(sensor.maxRangeKm * weatherMods.opticalFactor, horizonKm);
+            const effRangeKm = Math.min(sensor.maxRangeKm * getWeatherMods().opticalFactor, horizonKm);
             if (distKm <= effRangeKm && hasLineOfSight()) {
               hasNonEsmDetection = true;
               detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
@@ -537,7 +578,7 @@ export function computeContactsOnly(
               target.speedKts,
               target.doctrine.emconSonar
             ) * acousticRangeFactor(observer.position, target.position, environment) *
-              (sensor.type === 'sonar_passive' ? weatherMods.passiveSonarFactor : 1);
+              (sensor.type === 'sonar_passive' ? getWeatherMods().passiveSonarFactor : 1);
 
             if (distKm <= sonarRangeKm) {
               hasNonEsmDetection = true;
@@ -694,7 +735,7 @@ export function computeContactsOnly(
 
         const bdaStatus: TacticalContact['bdaStatus'] =
           bestClassification === 'identified'
-            ? getUnitCapabilities(target).state !== 'operational'
+            ? (capabilitiesById.get(target.id) ?? getUnitCapabilities(target)).state !== 'operational'
               ? 'damaged_suspected'
               : 'intact'
             : prevContact?.bdaStatus === 'damaged_suspected'
@@ -818,17 +859,31 @@ export function computeContactsOnly(
 export function observeMissile(
   side: SideId, missile: WeaponInFlight, units: Record<string, RuntimeUnit>,
   catalog: EquipmentCatalog, simTime: number, receiver?: RuntimeUnit, environment?: ScenarioEnvironment,
-  allowPassiveWarning = false
+  allowPassiveWarning = false,
+  preSortedSideObservers?: readonly RuntimeUnit[]
 ): TacticalContact | undefined {
   const sources: RuntimeUnit[] = [];
-  const sortedObservers = Object.values(units).sort(compareRuntimeUnits);
-  for (const observer of sortedObservers) {
+  const candidateObservers =
+    preSortedSideObservers ??
+    Object.values(units)
+      .filter((u) => u.side === side && isActiveUnit(u))
+      .sort(compareRuntimeUnits);
+  const missileDomain: Domain = missile.altitudeM < 0 ? 'subsurface' : 'air';
+  const receiverHasDatalink = receiver
+    ? !!catalog.platforms[receiver.platformId]?.hasDatalink
+    : true;
+  for (const observer of candidateObservers) {
     if (observer.side !== side || !isActiveUnit(observer)) continue;
     const config = resolveUnitConfiguration(catalog, observer.platformId, observer.activeLoadoutId);
     if (receiver && receiver.id !== observer.id &&
-        (!catalog.platforms[receiver.platformId]?.hasDatalink || !config.platform.hasDatalink)) continue;
+        (!receiverHasDatalink || !config.platform.hasDatalink)) continue;
     const distance = getDistanceKm(observer.position, missile.position);
-    const missileDomain: Domain = missile.altitudeM < 0 ? 'subsurface' : 'air';
+    const obsCaps = getUnitCapabilities(observer);
+    let cachedLos: boolean | undefined;
+    const hasLos = () => (cachedLos ??= hasRadarLineOfSight(
+      observer.position, observer.altitudeM, config.platform.radarAntennaHeightM,
+      missile.position, missile.altitudeM, environment
+    ));
     const detected = config.sensorIds.some((id) => {
       const sensor = catalog.sensors[id];
       if (!sensor?.detectDomains.includes(missileDomain)) return false;
@@ -843,27 +898,24 @@ export function observeMissile(
         const horizonKm = calculateRadarHorizonKm(
           observer.altitudeM, config.platform.radarAntennaHeightM, missile.altitudeM
         );
-        return distance <= Math.min(sensor.maxRangeKm * 0.45, horizonKm) &&
-          hasRadarLineOfSight(
-            observer.position, observer.altitudeM, config.platform.radarAntennaHeightM,
-            missile.position, missile.altitudeM, environment
-          );
+        return distance <= Math.min(sensor.maxRangeKm * 0.45, horizonKm) && hasLos();
       }
       if (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth') return false;
-      if (!observer.doctrine.emconRadar || getUnitCapabilities(observer).radarFactor === 0) return false;
-      if (sensor.type === 'radar_air_surface' && !hasRadarLineOfSight(
-        observer.position, observer.altitudeM, config.platform.radarAntennaHeightM,
-        missile.position, missile.altitudeM, environment
-      )) return false;
+      if (!observer.doctrine.emconRadar || obsCaps.radarFactor === 0) return false;
+      if (sensor.type === 'radar_air_surface' && !hasLos()) return false;
       return distance <= calculateEffectiveRadarRangeKm(
-        { ...sensor, maxRangeKm: sensor.maxRangeKm * getUnitCapabilities(observer).radarFactor },
-        0.1, observer.altitudeM, config.platform.radarAntennaHeightM, missile.altitudeM
+        sensor,
+        0.1,
+        observer.altitudeM,
+        config.platform.radarAntennaHeightM,
+        missile.altitudeM,
+        0,
+        obsCaps.radarFactor
       );
     });
     if (detected) sources.push(observer);
   }
   if (!sources.length) return undefined;
-  const missileDomain: Domain = missile.altitudeM < 0 ? 'subsurface' : 'air';
   return {
     id: `${side}_MISSILE_${missile.id}`, actualUnitId: missile.id, observerSide: side,
     targetSide: missile.side, domain: missileDomain, classification: 'classified', displayName: '来袭武器',

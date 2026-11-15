@@ -3,11 +3,17 @@ import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
 import { resolveUnitConfiguration } from '../../../src/db/unitConfiguration';
 import { getCompiledPolygon, hasRadarLineOfSight, pointInBbox, segmentOverlapsBbox } from '../../../src/engine/environment';
 import { computeMissileEnergyFactor } from '../../../src/engine/guidance';
+import { deriveMissionAssignments } from '../../../src/engine/missions';
 import { evaluateBattleAssessment } from '../../../src/engine/simulation/battleAssessment';
 import { createRuntimeUnitFromPlacement } from '../../../src/engine/simulation/unitFactory';
 import { advanceSimulation, type SimulationWorldState } from '../../../src/engine/simulationEngine';
-import { SimulationWorkerClient } from '../../../src/engine/workerClient';
-import { handleSimulationWorkerRequest } from '../../../src/engine/workerProtocol';
+import { SimulationWorkerClient, type WorkerLike } from '../../../src/engine/workerClient';
+import {
+  handleSimulationWorkerRequest,
+  type SimulationWorkerRequest,
+  type SimulationWorkerResponse,
+  type WorkerAdvanceBatchRequest,
+} from '../../../src/engine/workerProtocol';
 import type { InitialUnitPlacement, ScoreLedger, WeaponInFlight } from '../../../src/types/wargame';
 
 const emptyScore = (): ScoreLedger => ({
@@ -184,5 +190,139 @@ describe('modular simulation boundaries', () => {
     clonedCatalog.platforms.j20_mighty_dragon.mounts = [];
     const c2 = resolveUnitConfiguration(clonedCatalog, 'j20_mighty_dragon');
     expect(c2).not.toBe(c1);
+
+    const missionPoly: [number, number][] = [[120, 23], [122, 23], [122, 25], [120, 25]];
+    const preCompiled = getCompiledPolygon(missionPoly);
+    const derived = deriveMissionAssignments(
+      [
+        {
+          id: 'm1',
+          name: 'CAP',
+          description: 'CAP',
+          side: 'RED',
+          type: 'aaw_patrol',
+          areaPolygon: missionPoly,
+          prosecuteOutsideAreaKm: 40,
+          isActive: true,
+        },
+      ],
+      {}
+    );
+    expect(derived[0].areaPolygon).toBe(missionPoly);
+    expect(getCompiledPolygon(derived[0].areaPolygon)).toBe(preCompiled);
+  });
+
+  test('worker client deduplicates catalog transfers, validates epoch, and recovers after worker crashes', async () => {
+    const unit = createRuntimeUnitFromPlacement(
+      {
+        id: 'w_unit_2',
+        name: 'W',
+        callsign: 'W2',
+        side: 'RED',
+        platformId: 'j20_mighty_dragon',
+        parentGroupId: 'red_air_cmd',
+        position: [122, 25],
+        heading: 90,
+        speedKts: 500,
+      },
+      catalog
+    );
+    const world: SimulationWorldState = {
+      startTime: 0,
+      simTime: 0,
+      tick: 0,
+      rngState: 99,
+      units: { w_unit_2: unit },
+      contacts: {},
+      weaponsInFlight: {},
+      explosions: [],
+      missions: [],
+      score: emptyScore(),
+    };
+    const pauses = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
+
+    // Protocol edge cases: SYNC_CATALOG, missing catalog, unsupported request
+    const workerCache = new Map();
+    const syncRes = handleSimulationWorkerRequest(
+      { type: 'SYNC_CATALOG', requestId: 1, epoch: 1, catalogKey: 'cat#1', catalog },
+      workerCache
+    );
+    expect(syncRes.type).toBe('CATALOG_SYNCED');
+    const missingCatRes = handleSimulationWorkerRequest(
+      { type: 'ADVANCE_BATCH', requestId: 2, epoch: 1, world, catalogKey: 'missing', seconds: 1, autoPause: pauses, playerSide: 'RED' },
+      workerCache
+    );
+    expect(missingCatRes.type).toBe('ERROR');
+    const badReqRes = handleSimulationWorkerRequest(
+      { type: 'UNKNOWN' } as unknown as SimulationWorkerRequest,
+      workerCache
+    );
+    expect(badReqRes.type).toBe('ERROR');
+
+    // Mock Worker lifecycle: catalog dedup, epoch mismatch rejection, crash recovery
+    const postedRequests: WorkerAdvanceBatchRequest[] = [];
+    let activeMockWorker: (WorkerLike & { mode: 'normal' | 'stale_epoch' | 'crash_onerror' | 'throw_post' }) | null = null;
+    let createdCount = 0;
+
+    const client = new SimulationWorkerClient(() => {
+      createdCount += 1;
+      const localCache = new Map();
+      const mock: WorkerLike & { mode: 'normal' | 'stale_epoch' | 'crash_onerror' | 'throw_post' } = {
+        mode: 'normal',
+        onmessage: null,
+        onerror: null,
+        terminate: () => {},
+        postMessage: (raw) => {
+          const req = raw as WorkerAdvanceBatchRequest;
+          postedRequests.push(req);
+          if (mock.mode === 'throw_post') {
+            throw new Error('Clone error');
+          }
+          if (mock.mode === 'crash_onerror') {
+            queueMicrotask(() => mock.onerror?.({} as ErrorEvent));
+            return;
+          }
+          const response: SimulationWorkerResponse = handleSimulationWorkerRequest(req, localCache);
+          if (mock.mode === 'stale_epoch') {
+            queueMicrotask(() =>
+              mock.onmessage?.({ data: { ...response, epoch: req.epoch - 1 } } as MessageEvent<SimulationWorkerResponse>)
+            );
+            return;
+          }
+          queueMicrotask(() => mock.onmessage?.({ data: response } as MessageEvent<SimulationWorkerResponse>));
+        },
+      };
+      activeMockWorker = mock;
+      return mock;
+    });
+
+    // 1st batch sends catalog; 2nd batch omits catalog and reuses catalogKey
+    const r1 = await client.runBatch(world, catalog, 1, pauses, 'RED', 5);
+    const r2 = await client.runBatch(r1.nextState, catalog, 1, pauses, 'RED', 5);
+    expect(postedRequests[0].catalog).toBeDefined();
+    expect(postedRequests[1].catalog).toBeUndefined();
+    expect(postedRequests[1].catalogKey).toBe(postedRequests[0].catalogKey);
+    expect(r2.nextState.tick!).toBeGreaterThan(r1.nextState.tick!);
+
+    // Mismatched epoch rejects cleanly
+    activeMockWorker!.mode = 'stale_epoch';
+    await expect(client.runBatch(world, catalog, 1, pauses, 'RED', 6)).rejects.toThrow(/epoch/i);
+
+    // Crash via onerror seamlessly falls back for in-flight batch AND spawns a fresh worker on next batch
+    activeMockWorker!.mode = 'crash_onerror';
+    const recovered = await client.runBatch(world, catalog, 1, pauses, 'RED', 7);
+    expect(recovered.nextState.tick).toBe(4);
+    const afterCrash = await client.runBatch(world, catalog, 1, pauses, 'RED', 7);
+    expect(afterCrash.nextState.tick).toBe(4);
+    expect(createdCount).toBe(2);
+    // Fresh worker received full catalog sync again!
+    expect(postedRequests[postedRequests.length - 1].catalog).toBeDefined();
+
+    // postMessage throwing falls back cleanly too
+    activeMockWorker!.mode = 'throw_post';
+    const fallbackPost = await client.runBatch(world, catalog, 1, pauses, 'RED', 8);
+    expect(fallbackPost.nextState.tick).toBe(4);
+    client.resetRecoveryState();
+    client.dispose();
   });
 });
