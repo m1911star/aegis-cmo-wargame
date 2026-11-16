@@ -61,6 +61,147 @@ export type GuidanceType =
   | 'anti_radiation';   // 反辐射被动雷达导引 (专门猎杀开机雷达/预警机)
 
 // ----------------------------------------------------------------------------
+// LEVEL 0 / CMO-ALIGNED RELATIONAL PRIMITIVES (8-Arc, Signatures, OODA, Envelopes)
+// ----------------------------------------------------------------------------
+
+export type CmoSectorArc = 'SB' | 'SMF' | 'SMA' | 'SS' | 'PS' | 'PMA' | 'PMF' | 'PB';
+export type CmoArcMask = Partial<Record<CmoSectorArc, boolean>>;
+
+export interface OodaCycleProfile {
+  detectionSec: number;
+  targetingSec: number;
+  evasionSec: number;
+}
+
+export type SignatureType =
+  | 'radar_em'
+  | 'radar_ad'
+  | 'passive_sonar_vlf'
+  | 'passive_sonar_lf'
+  | 'passive_sonar_mf'
+  | 'passive_sonar_hf'
+  | 'active_sonar'
+  | 'infrared_detect'
+  | 'infrared_classify'
+  | 'visual_detect'
+  | 'visual_classify';
+
+export interface SignatureProfile {
+  type: SignatureType;
+  front: number;
+  side: number;
+  rear: number;
+  top?: number;
+}
+
+export interface WarheadSpec {
+  id: string;
+  dbid?: number;
+  name: string;
+  type: string;
+  damagePoints: number;
+  explosivesType?: string;
+  explosivesWeightKg?: number;
+  numberOfWarheads?: number;
+  description?: string;
+}
+
+export interface MountSpec {
+  id: string;
+  dbid?: number;
+  name: string;
+  rofPerMin: number;
+  capacity: number;
+  magazineRofPerMin: number;
+  magazineCapacity: number;
+  damagePoints: number;
+  armorGeneral?: number;
+  trainable: boolean;
+  autonomous: boolean;
+  localControl?: boolean;
+  weaponIds: string[];
+  sensorIds?: string[];
+  description?: string;
+}
+
+export interface MagazineSpec {
+  id: string;
+  dbid?: number;
+  name: string;
+  rofPerMin: number;
+  capacity: number;
+  armorGeneral?: number;
+  aviationMagazine?: boolean;
+  weaponIds: string[];
+  description?: string;
+}
+
+export interface PropulsionSpeedPoint {
+  altitudeBand: number; // 1..4
+  throttle: 1 | 2 | 3 | 4; // 1=loiter, 2=cruise, 3=full, 4=flank/afterburner
+  speedKts: number;
+  altitudeMinM: number;
+  altitudeMaxM: number;
+  consumptionPerHour: number;
+}
+
+export interface PropulsionSpec {
+  id: string;
+  dbid?: number;
+  name: string;
+  type: string;
+  combinedType?: string;
+  numberOfEngines?: number;
+  numberOfShafts?: number;
+  thrustMilitaryKn?: number;
+  thrustAfterburnerKn?: number;
+  speedProfile: PropulsionSpeedPoint[];
+  description?: string;
+}
+
+export interface CommSpec {
+  id: string;
+  dbid?: number;
+  name: string;
+  type: string;
+  supportsDatalink: boolean;
+  supportsCec?: boolean;
+  rangeKm?: number;
+  maxChannels?: number;
+  description?: string;
+}
+
+export interface PlatformSensorMount {
+  sensorId: string;
+  componentNumber?: number;
+  mastHeightM?: number;
+  arcs?: CmoArcMask;
+  isFireControl?: boolean;
+}
+
+export interface WeaponWraRule {
+  targetType: string;
+  weaponQty: number; // >0 count, 0=none, -2=MissileDefense, -99=all
+  shooterQty: number;
+  autoFireRangePct: number; // 0-100, or -99=max
+  selfDefenseRangeKm: number;
+}
+
+export interface WeaponEnvelopeBand {
+  speedMinKts?: number;
+  speedMaxKts?: number;
+  altitudeMinM?: number;
+  altitudeMaxM?: number;
+}
+
+export interface TorpedoPerformanceProfile {
+  speedCruiseKts: number;
+  rangeCruiseKm: number;
+  speedFullKts: number;
+  rangeFullKm: number;
+}
+
+// ----------------------------------------------------------------------------
 // LEVEL 1: 原子传感器与武器组件 (Atomic Sensors & Weapons)
 // ----------------------------------------------------------------------------
 
@@ -77,6 +218,52 @@ export interface SensorSpec {
   jammingPowerKw?: number;      // 若为电子战系统/AESA副瓣干扰，具备有源压制功率 (kW)
   coverageArcDeg?: number;      // 前向覆盖扇角 (10°~360°，默认 360° 全向)
   blindArcRearDeg?: number;     // 尾后推进器/挡音盲区角 (0°~180°，默认 0°)
+  dbid?: number;
+  role?: string;
+  generation?: string;
+  rangeMinKm?: number;
+  altitudeMinM?: number;
+  altitudeMaxM?: number;
+  scanIntervalSec?: number;
+  maxContacts?: { air?: number; surface?: number; subsurface?: number; illuminate?: number };
+  resolution?: { rangeKm?: number; heightM?: number; angleDeg?: number };
+  radarParams?: {
+    horizontalBeamwidthDeg?: number;
+    verticalBeamwidthDeg?: number;
+    peakPowerW?: number;
+    pulseWidthUs?: number;
+    prfHz?: number;
+    systemNoiseLevelDb?: number;
+    processingGainLossDb?: number;
+  };
+  esmParams?: {
+    sensitivityDbm?: number;
+    numberOfChannels?: number;
+    preciseEmitterId?: boolean;
+  };
+  ecmParams?: {
+    gainDb?: number;
+    peakPowerW?: number;
+    bandwidthMhz?: number;
+    numberOfTargets?: number;
+    pokReduction?: number;
+  };
+  sonarParams?: {
+    sourceLevelDb?: number;
+    directivityIndexDb?: number;
+    towLengthM?: number;
+    minDeploymentDepthM?: number;
+    maxDeploymentDepthM?: number;
+    czNumber?: number;
+  };
+  minimumSignature?: {
+    radarDbsm?: number;
+    visualKm?: number;
+    irKm?: number;
+    esmDbm?: number;
+    activeSonarDb?: number;
+    passiveSonarDb?: number;
+  };
   description: string;
 }
 
@@ -115,6 +302,22 @@ export interface WeaponSpec {
   airDropSpeedKts?: number;
   waterEntrySpeedKts?: number;
   waterEntryAltitudeM?: number;
+  dbid?: number;
+  weaponType?: string;
+  generation?: string;
+  warheadId?: string;
+  warheadCount?: number;
+  cepM?: number;
+  cepSurfaceM?: number;
+  maxFlightTimeSec?: number;
+  waypointNumber?: number;
+  domainRangesKm?: Partial<Record<Domain, { minKm: number; maxKm: number }>>;
+  domainPk?: Partial<Record<Domain, number>>;
+  launchEnvelope?: WeaponEnvelopeBand;
+  targetEnvelope?: WeaponEnvelopeBand;
+  seekerSensorIds?: string[];
+  wraRules?: WeaponWraRule[];
+  torpedoProfile?: TorpedoPerformanceProfile;
   description: string;
 }
 
@@ -127,6 +330,12 @@ export interface PlatformMountTemplate {
   weaponId: string;
   maxAmmo: number;
   reloadTimeSec: number;
+  mountSpecId?: string;
+  arcs?: CmoArcMask;
+  trainable?: boolean;
+  autonomous?: boolean;
+  internal?: boolean;
+  optional?: boolean;
 }
 
 export interface LoadoutSpec {
@@ -140,6 +349,16 @@ export interface LoadoutSpec {
   combatRadiusMultiplier?: number; // 副油箱带来的续航时间倍率 (如 1.25)
   additionalSensorIds?: string[];  // 挂载的吊舱传感器 (如 KG-800 / ALQ-99 电子战吊舱)
   mounts: PlatformMountTemplate[];
+  dbid?: number;
+  readyTimeSec?: number;
+  readyTimeSustainedSec?: number;
+  defaultCombatRadiusKm?: number;
+  defaultTimeOnStationMin?: number;
+  missionProfile?: string;
+  payloadWeightDragModifier?: number;
+  quickTurnaround?: boolean;
+  quickTurnaroundReadyTimeSec?: number;
+  quickTurnaroundMaxSorties?: number;
   description: string;
 }
 
@@ -206,6 +425,26 @@ export interface PlatformSpec {
   aarTransferRateSecPerSec?: number;
   canReceiveAar?: boolean;
   deployables?: { platformId: string; count: number }[];
+  dbid?: number;
+  cmoTable?: 'DataAircraft' | 'DataShip' | 'DataSubmarine' | 'DataFacility' | 'DataGroundUnit';
+  operatorCountry?: string;
+  operatorService?: string;
+  yearCommissioned?: number;
+  yearDecommissioned?: number;
+  physicalSize?: string;
+  ergonomics?: string;
+  ooda?: OodaCycleProfile;
+  missileDefense?: number;
+  lengthM?: number;
+  beamOrSpanM?: number;
+  displacementTonsOrWeightKg?: number;
+  crew?: number;
+  hypothetical?: boolean;
+  propulsionIds?: string[];
+  magazineIds?: string[];
+  commIds?: string[];
+  sensorMounts?: PlatformSensorMount[];
+  signatures?: SignatureProfile[];
   description: string;
 }
 
@@ -215,6 +454,11 @@ export interface EquipmentCatalog {
   weapons: Record<string, WeaponSpec>;
   loadouts: Record<string, LoadoutSpec>;
   platforms: Record<string, PlatformSpec>;
+  warheads?: Record<string, WarheadSpec>;
+  mounts?: Record<string, MountSpec>;
+  magazines?: Record<string, MagazineSpec>;
+  propulsions?: Record<string, PropulsionSpec>;
+  comms?: Record<string, CommSpec>;
 }
 
 export interface ForcePackageMember {
