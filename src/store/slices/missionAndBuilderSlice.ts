@@ -33,7 +33,7 @@ function resolveMissionDraft(
   state: Pick<WargameStoreState, 'referencePoints' | 'units' | 'playerSide' | 'playMode' | 'battleResult'>,
   draft: MissionReferencePointDraft,
   requiredSide?: SideId
-): { name: string; type: MissionType; side: SideId; areaPolygon: [number, number][]; prosecuteOutsideAreaKm: number; escortUnitId?: string; stationRadiusKm: number } | undefined {
+): { name: string; type: MissionType; side: SideId; areaPolygon: [number, number][]; prosecuteOutsideAreaKm: number; escortUnitId?: string; stationRadiusKm: number; packageTotSec?: number; coordinatedPackageId?: string } | undefined {
   const name = typeof draft.name === 'string' ? draft.name.trim() : '';
   if (state.battleResult || !name || name.length > 80 || !MISSION_TYPES.includes(draft.type) ||
       !Number.isFinite(draft.prosecuteOutsideAreaKm) || draft.prosecuteOutsideAreaKm < 0 ||
@@ -53,11 +53,20 @@ function resolveMissionDraft(
   const escortTarget = draft.escortUnitId ? state.units[draft.escortUnitId] : undefined;
   if (draft.type === 'escort' && (!escortTarget || escortTarget.side !== side) ||
       draft.type !== 'escort' && draft.escortUnitId) return undefined;
+  const packageTotSec = draft.packageTotSec !== undefined
+    ? (Number.isFinite(draft.packageTotSec) && draft.packageTotSec >= 0 ? Math.round(draft.packageTotSec) : undefined)
+    : undefined;
+  if (draft.packageTotSec !== undefined && packageTotSec === undefined) return undefined;
+  const coordinatedPackageId = typeof draft.coordinatedPackageId === 'string' && draft.coordinatedPackageId.trim()
+    ? draft.coordinatedPackageId.trim().slice(0, 48)
+    : undefined;
   return {
     name, type: draft.type, side, areaPolygon,
     prosecuteOutsideAreaKm: draft.prosecuteOutsideAreaKm,
     escortUnitId: draft.type === 'escort' ? draft.escortUnitId : undefined,
     stationRadiusKm,
+    packageTotSec,
+    coordinatedPackageId,
   };
 }
 

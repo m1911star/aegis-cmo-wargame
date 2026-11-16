@@ -393,6 +393,9 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           campaignState: {
             ...campaign,
             finished: true,
+            supplyPoints: nextCarryover.supplyPoints,
+            airbaseIntegrityPct: nextCarryover.airbaseIntegrityPct,
+            stageModifiers: [...nextCarryover.stageModifiers],
             carryover: nextCarryover,
           },
         });
@@ -404,6 +407,9 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       const nextCampaignState: CampaignState = {
         ...campaign,
         currentStageIndex: nextIndex,
+        supplyPoints: nextCarryover.supplyPoints,
+        airbaseIntegrityPct: nextCarryover.airbaseIntegrityPct,
+        stageModifiers: [...nextCarryover.stageModifiers],
         carryover: nextCarryover,
       };
       get().loadScenario(stageScenario, false, DEFAULT_SEED + nextIndex);

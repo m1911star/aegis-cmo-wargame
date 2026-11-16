@@ -24,6 +24,8 @@ export const MissionsTab: React.FC = () => {
   const [missionRangeKm, setMissionRangeKm] = useState(50);
   const [missionStationRadiusKm, setMissionStationRadiusKm] = useState(20);
   const [missionEscortUnitId, setMissionEscortUnitId] = useState('');
+  const [missionPackageId, setMissionPackageId] = useState('');
+  const [missionTotSecInput, setMissionTotSecInput] = useState('');
   const [selectedReferencePointIds, setSelectedReferencePointIds] = useState<string[]>([]);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
 
@@ -61,10 +63,13 @@ export const MissionsTab: React.FC = () => {
     setMissionRangeKm(50);
     setMissionStationRadiusKm(20);
     setMissionEscortUnitId('');
+    setMissionPackageId('');
+    setMissionTotSecInput('');
     setSelectedReferencePointIds([]);
   };
 
   const submitMissionDraft = () => {
+    const parsedTotSec = missionTotSecInput.trim() === '' ? undefined : Number(missionTotSecInput);
     const draft = {
       name: missionName,
       type: missionType,
@@ -72,6 +77,8 @@ export const MissionsTab: React.FC = () => {
       prosecuteOutsideAreaKm: missionRangeKm,
       stationRadiusKm: missionStationRadiusKm,
       escortUnitId: missionType === 'escort' ? missionEscortUnitId || undefined : undefined,
+      coordinatedPackageId: missionPackageId.trim() || undefined,
+      packageTotSec: parsedTotSec,
     };
     const before = useWargameStore.getState().commandSequence;
     if (editingMissionId) updateMissionFromReferencePoints(editingMissionId, draft);
@@ -123,6 +130,21 @@ export const MissionsTab: React.FC = () => {
 
                 {m.description && (
                   <p className="text-[11px] text-muted-foreground leading-relaxed">{m.description}</p>
+                )}
+
+                {(m.coordinatedPackageId || m.packageTotSec !== undefined) && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    {m.coordinatedPackageId && (
+                      <Badge variant="outline" className="border-amber-500/40 text-amber-300 bg-amber-500/10">
+                        任务包: {m.coordinatedPackageId}
+                      </Badge>
+                    )}
+                    {m.packageTotSec !== undefined && (
+                      <Badge variant="outline" className="border-cyan-500/40 text-cyan-300 bg-cyan-500/10 font-mono tabular-nums">
+                        TOT: T+{m.packageTotSec}s
+                      </Badge>
+                    )}
+                  </div>
                 )}
 
                 {isEditable && (
@@ -185,6 +207,8 @@ export const MissionsTab: React.FC = () => {
                         setMissionRangeKm(m.prosecuteOutsideAreaKm);
                         setMissionStationRadiusKm(m.stationRadiusKm ?? 20);
                         setMissionEscortUnitId(m.escortUnitId ?? '');
+                        setMissionPackageId(m.coordinatedPackageId ?? '');
+                        setMissionTotSecInput(m.packageTotSec !== undefined ? String(m.packageTotSec) : '');
                         setSelectedReferencePointIds(m.areaPolygon.map(([longitude, latitude]) =>
                           editableReferencePoints.find((point) => point.side === m.side &&
                             point.position[0] === longitude && point.position[1] === latitude)?.id
@@ -295,6 +319,34 @@ export const MissionsTab: React.FC = () => {
             </Select>
           </label>
         )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block space-y-1 min-w-0">
+            <span className="block text-[10px] text-muted-foreground whitespace-nowrap">协同任务包 ID</span>
+            <Input
+              aria-label="协同任务包 ID"
+              placeholder="如 PKG-ALPHA"
+              value={missionPackageId}
+              maxLength={48}
+              onChange={(event) => setMissionPackageId(event.target.value)}
+            />
+          </label>
+          <label className="block space-y-1 min-w-0">
+            <span className="block text-[10px] text-muted-foreground whitespace-nowrap">TOT 协同时间窗</span>
+            <div className="flex items-center h-8 bg-background/85 border border-input rounded-md px-2 focus-within:ring-2 focus-within:ring-ring">
+              <input
+                aria-label="TOT 协同时间窗秒"
+                type="number"
+                min={0}
+                placeholder="可选"
+                value={missionTotSecInput}
+                onChange={(event) => setMissionTotSecInput(event.target.value)}
+                className="min-w-0 w-full bg-transparent text-xs text-foreground font-mono tabular-nums focus:outline-none"
+              />
+              <span className="text-[10px] text-muted-foreground shrink-0 ml-1">s</span>
+            </div>
+          </label>
+        </div>
 
         <p className="text-[10px] text-muted-foreground leading-relaxed">
           按勾选顺序连接至少 3 个同阵营参考点；自交或退化多边形会被拒绝。

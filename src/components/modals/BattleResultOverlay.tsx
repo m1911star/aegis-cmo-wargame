@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
-import type { CampaignResupplyChoice } from '../../scenarios/campaign';
+import React, { useMemo, useState } from 'react';
+import {
+  applyCampaignResupplyChoice,
+  CAMPAIGN_RESUPPLY_OPTIONS,
+  computeNextCampaignCarryover,
+  type CampaignResupplyChoice,
+} from '../../scenarios/campaign';
 import { Award, ChartColumn, RotateCcw } from 'lucide-react';
 import { evaluateBattleAssessment } from '../../engine/simulation/battleAssessment';
 import { useWargameStore } from '../../store/useWargameStore';
@@ -24,11 +29,29 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const playerSide = useWargameStore((s) => s.playerSide);
   const objectives = useWargameStore((s) => s.objectives);
   const objectiveProgress = useWargameStore((s) => s.objectiveProgress);
+  const units = useWargameStore((s) => s.units);
   const campaignState = useWargameStore((s) => s.campaignState);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const resetScenario = useWargameStore((s) => s.resetScenario);
   const advanceCampaignStage = useWargameStore((s) => s.advanceCampaignStage);
   const [resupplyChoice, setResupplyChoice] = useState<CampaignResupplyChoice>('balanced');
+
+  const campaignPreview = useMemo(() => {
+    if (!campaignState || !battleResult) return null;
+    const cSide = campaignState.playerSide;
+    const stageScore = cSide === 'RED' ? score.redScore : score.blueScore;
+    const ownLosses = cSide === 'RED' ? score.redLosses : score.blueLosses;
+    const postBattle = computeNextCampaignCarryover(
+      campaignState.carryover,
+      battleResult,
+      cSide,
+      stageScore,
+      ownLosses,
+      units
+    );
+    const afterResupply = applyCampaignResupplyChoice(postBattle, resupplyChoice);
+    return { postBattle, afterResupply };
+  }, [campaignState, battleResult, score, units, resupplyChoice]);
 
   if (!battleResult) return null;
 
@@ -97,41 +120,61 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
             )}
           </div>
 
-          {campaignState && (
-            <div className="p-3.5 rounded-lg bg-cyan-500/8 border border-cyan-500/25 space-y-1 text-[11px]">
-              <div className="text-cyan-300 font-semibold">
-                战役连贯态势（第 {campaignState.currentStageIndex + 1}/{campaignState.totalStages} 阶段）
+          {campaignState && campaignPreview && (
+            <div className="p-3.5 rounded-lg bg-cyan-500/8 border border-cyan-500/25 space-y-2 text-[11px]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-cyan-300 font-semibold">
+                  战役连贯态势（第 {campaignState.currentStageIndex + 1}/{campaignState.totalStages} 阶段）
+                </span>
+                <span className="font-mono text-amber-300">
+                  战区补给 {campaignPreview.afterResupply.supplyPoints} SP · 机场完好度{' '}
+                  {campaignPreview.afterResupply.airbaseIntegrityPct}%
+                </span>
               </div>
               <div className="text-muted-foreground">
-                此前累计战役积分 {campaignState.carryover.cumulativeScore} · 当前战备系数{' '}
-                {Math.round(campaignState.carryover.readinessMultiplier * 100)}% · 本阶段主力战损、机库架数与稀缺防区外弹药消耗将计入下一阶段后勤账本。
+                累计战役积分 {campaignPreview.postBattle.cumulativeScore} · 战后战备系数{' '}
+                {Math.round(campaignPreview.afterResupply.readinessMultiplier * 100)}%（本战净入账补给{' '}
+                {campaignPreview.postBattle.supplyPoints - campaignState.supplyPoints >= 0 ? '+' : ''}
+                {campaignPreview.postBattle.supplyPoints - campaignState.supplyPoints} SP）
+              </div>
+              <div className="pt-1 border-t border-cyan-500/20 space-y-0.5">
+                <div className="text-amber-300 font-medium">下阶段战场修正摘要：</div>
+                <ul className="list-disc list-inside space-y-0.5 text-foreground/85">
+                  {campaignPreview.afterResupply.stageModifiers.map((modifier, idx) => (
+                    <li key={idx}>{modifier}</li>
+                  ))}
+                </ul>
               </div>
               {!campaignState.finished && campaignState.currentStageIndex + 1 < campaignState.totalStages && (
-                <div className="pt-1.5 border-t border-cyan-500/20 space-y-1">
-                  <div className="text-cyan-200 font-medium">战间有限后勤整备取舍（仅可优先强化一项）：</div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(
-                      [
-                        ['balanced', '均衡补给', '战损/机库/弹药适度恢复'],
-                        ['munitions', '弹药优先', '大幅补充垂发与防区外弹药'],
-                        ['airframes', '航空兵优先', '优先补充舰载/岸基战机架数'],
-                        ['hull_repair', '抢修优先', '大幅修复主力舰体战损'],
-                      ] as const
-                    ).map(([key, title, desc]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setResupplyChoice(key)}
-                        className={`text-left px-2 py-1 rounded border text-[10px] transition ${
-                          resupplyChoice === key
-                            ? 'border-cyan-400 bg-cyan-500/20 text-cyan-100'
-                            : 'border-border/50 bg-background/40 text-muted-foreground hover:border-cyan-500/40'
-                        }`}
-                      >
-                        <div className="font-semibold">{title}</div>
-                        <div className="opacity-80">{desc}</div>
-                      </button>
-                    ))}
+                <div className="pt-1.5 border-t border-cyan-500/20 space-y-1.5">
+                  <div className="text-cyan-200 font-medium">
+                    战间有限后勤整备取舍（当前可用 {campaignPreview.postBattle.supplyPoints} SP）：
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {CAMPAIGN_RESUPPLY_OPTIONS.map((opt) => {
+                      const affordable = campaignPreview.postBattle.supplyPoints >= opt.cost;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setResupplyChoice(opt.id)}
+                          className={`text-left px-2.5 py-1.5 rounded border text-[10px] transition ${
+                            resupplyChoice === opt.id
+                              ? 'border-cyan-400 bg-cyan-500/20 text-cyan-100'
+                              : 'border-border/50 bg-background/40 text-muted-foreground hover:border-cyan-500/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1 font-semibold">
+                            <span>{opt.title}</span>
+                            <span className={affordable ? 'font-mono text-amber-300' : 'font-mono text-rose-300'}>
+                              -{opt.cost} SP{affordable ? '' : ' (折算)'}
+                            </span>
+                          </div>
+                          <div className="opacity-90">{opt.summary}</div>
+                          <div className="opacity-70">{opt.tradeoff}</div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}

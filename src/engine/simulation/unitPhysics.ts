@@ -1,6 +1,7 @@
 import * as turf from '../turfGeo';
 import { resolveUnitConfiguration } from '../unitConfiguration';
 import type {
+  ActivePerspective,
   CombatLogEntry,
   EquipmentCatalog,
   RuntimeUnit,
@@ -28,6 +29,7 @@ export type UnitPhysicsContext = {
   dtSec: number;
   score: ScoreLedger;
   logs: CombatLogEntry[];
+  playerSide?: ActivePerspective;
 };
 
 /** Advance platform readiness, operations, navigation and kinematics for one tick. */
@@ -42,6 +44,7 @@ export function advanceUnitPhysics({
   dtSec,
   score,
   logs,
+  playerSide,
 }: UnitPhysicsContext): void {
   const configurations = new Map(
     Object.values(units).map((unit) => [
@@ -170,7 +173,8 @@ export function advanceUnitPhysics({
       score,
       logs,
       weaponsInFlight,
-      environment
+      environment,
+      playerSide
     );
     if (!isActiveUnit(unit)) continue;
 

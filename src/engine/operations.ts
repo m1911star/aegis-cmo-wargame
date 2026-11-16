@@ -1,10 +1,84 @@
 import * as turf from './turfGeo';
-import type { CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScenarioEnvironment, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
+import type { ActivePerspective, CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScenarioEnvironment, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from './unitConfiguration';
 import { getCompiledPolygon, isRouteAllowed, pointInBbox } from './environment';
 import { guidanceProfile } from './fireControl';
 import { getBearingDeg, getDistanceKm } from './geometry';
+import {
+  assessStrikeCoordination,
+  getSeadTargetPriority,
+  getStrikeTargetPriority,
+  isActiveSamRadarContact,
+  isSeadOrEwUnit,
+} from './missions';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
+
+const CRITICAL_HP_FRACTION = 0.25;
+const CRITICAL_FUEL_FRACTION = 0.1;
+
+function isAiControlledUnit(unit: RuntimeUnit, playerSide?: ActivePerspective): boolean {
+  const effectiveNavMode =
+    unit.status === 'evading' && unit.evasionState?.resumeNavigationMode
+      ? unit.evasionState.resumeNavigationMode
+      : unit.navigationMode;
+  const isNonPlayerSide =
+    (playerSide === 'RED' || playerSide === 'BLUE') && unit.side !== playerSide;
+  const isMissionControlled =
+    effectiveNavMode === 'mission' &&
+    !(unit.status !== 'evading' && unit.waypoints.length > 0 && !unit.missionTargetId && !unit.assignedMissionId);
+  return isNonPlayerSide || isMissionControlled;
+}
+
+function computeDefensiveEgressPoint(
+  unit: RuntimeUnit,
+  contacts: Record<string, TacticalContact>,
+  simTime: number,
+  environment?: ScenarioEnvironment
+): [number, number] | undefined {
+  const nearestThreat = Object.values(contacts)
+    .filter(
+      (contact) =>
+        contact.observerSide === unit.side &&
+        contact.targetSide !== unit.side &&
+        contact.targetSide !== 'NEUTRAL' &&
+        simTime - contact.lastDetectedTime <= 30_000
+    )
+    .sort(
+      (a, b) =>
+        getDistanceKm(unit.position, a.estimatedPosition) -
+        getDistanceKm(unit.position, b.estimatedPosition) || a.id.localeCompare(b.id)
+    )[0];
+
+  const egressDistKm = unit.domain === 'air' ? 60 : unit.domain === 'surface' ? 25 : 15;
+  if (nearestThreat) {
+    const awayBearing = (getBearingDeg(nearestThreat.estimatedPosition, unit.position) + 360) % 360;
+    for (const offset of [0, 35, -35, 70, -70, 110, -110]) {
+      const bearing = (awayBearing + offset + 360) % 360;
+      const dest = turf.destination(unit.position, egressDistKm, bearing, { units: 'kilometers' })
+        .geometry.coordinates as [number, number];
+      if (isRouteAllowed(unit.domain, unit.position, dest, environment)) {
+        return dest;
+      }
+    }
+  }
+  if (
+    unit.recoveryPosition &&
+    getDistanceKm(unit.position, unit.recoveryPosition) > 1 &&
+    isRouteAllowed(unit.domain, unit.position, unit.recoveryPosition, environment)
+  ) {
+    return [...unit.recoveryPosition];
+  }
+  const reverseBearing = (unit.heading + 180) % 360;
+  for (const offset of [0, 45, -45, 90, -90]) {
+    const dest = turf.destination(unit.position, egressDistKm, (reverseBearing + offset + 360) % 360, {
+      units: 'kilometers',
+    }).geometry.coordinates as [number, number];
+    if (isRouteAllowed(unit.domain, unit.position, dest, environment)) {
+      return dest;
+    }
+  }
+  return undefined;
+}
 
 export function effectiveDoctrine(unit: RuntimeUnit, missions: MissionDefinition[]) {
   const mission = missions.find((m) => m.id === unit.assignedMissionId && m.isActive);
@@ -66,7 +140,7 @@ export function updateUnitOperations(
   unit: RuntimeUnit, units: Record<string, RuntimeUnit>, contacts: Record<string, TacticalContact>,
   missions: MissionDefinition[], catalog: EquipmentCatalog, simTime: number, dtSec: number,
   score: ScoreLedger, logs: CombatLogEntry[], weaponsInFlight: Record<string, WeaponInFlight> = {},
-  environment?: ScenarioEnvironment
+  environment?: ScenarioEnvironment, playerSide?: ActivePerspective
 ) {
   const mission = missions.find((m) => m.id === unit.assignedMissionId && m.isActive);
   const unitEffDoctrine = effectiveDoctrine(unit, missions);
@@ -177,42 +251,67 @@ export function updateUnitOperations(
     : mission?.type === 'asw_patrol' ? ['subsurface']
     : mission?.type === 'land_strike' ? ['land']
     : mission?.type === 'sead' ? ['surface', 'land'] : [];
+  const aiControlled = isAiControlledUnit(unit, playerSide);
+  const hpCritical = unit.hp > 0 && unit.maxHp > 0 && unit.hp / unit.maxHp <= CRITICAL_HP_FRACTION;
+  const isAirborneOrUnderway =
+    unit.speedKts > 0.5 ||
+    unit.targetSpeedKts > 0.5 ||
+    !!unit.hostCarrierId ||
+    unit.waypoints.length > 0 ||
+    !!unit.missionTargetId;
   if (unit.domain === 'air') {
     if (unit.category !== 'decoy') {
       const recovery = recoverySolution(unit, units, catalog);
-    const combatMounts = targetDomains.length > 0
-      ? unit.mounts.filter((mount) => targetDomains.some((domain) => catalog.weapons[mount.weaponId]?.targetDomains.includes(domain)))
-      : [];
-    const empty = combatMounts.length > 0 && combatMounts.every((mount) => mount.currentAmmo === 0);
-    if (unit.status !== 'returning' && (unit.fuelRemainingSec <= recovery.reserveSec || empty)) {
-      unit.status = 'returning';
-      unit.missionState = 'egress';
-      unit.returnReason = empty ? 'ammunition' : 'fuel';
-      logs.push({ id: `rtb_${unit.id}_${simTime}`, simTime, side: unit.side, category: 'DOCTRINE', severity: 'warning',
-        title: `${unit.callsign} 脱离返航`, message: `${empty ? '任务弹药耗尽' : '达到返航油量储备'}；${recovery.position ? '前往可用回收点。' : '没有可用回收点，需人工处置。'}`, unitId: unit.id });
-    }
-    if (unit.status === 'returning' && recovery.position) {
-      unit.waypoints = [{ position: [...recovery.position] }];
-      unit.targetSpeedKts = recovery.cruise;
-      unit.missionTargetId = undefined;
-      if (getDistanceKm(unit.position, recovery.position) <= Math.max(0.5, recovery.cruise * 1.852 * dtSec / 3600)) {
-        unit.position = [...recovery.position];
-        unit.status = 'recovered';
-        unit.missionState = 'recovering';
-        unit.speedKts = unit.targetSpeedKts = 0;
-        unit.waypoints = [];
-        const turnaround = recovery.hostId && recovery.slotId
-          ? enqueueRecoveredSortie(unit, units, recovery.hostId, recovery.slotId, simTime)
-          : undefined;
-        logs.push({ id: `recovered_${unit.id}_${simTime}`, simTime, side: unit.side, category: 'EVENT', severity: 'info',
-          title: `${unit.callsign} 已回收 / 撤出战区`,
-          message: turnaround
-            ? `本架次结束并进入 ${turnaround.turnaroundSec} 秒整备队列；剩余补给 ${turnaround.turnaroundSupplies} 批。`
-            : '本架次结束，不计战损；该回收点不提供再次出动整备。',
-          unitId: unit.id, aarType: 'recovery' });
-        return;
+      const combatMounts = targetDomains.length > 0
+        ? unit.mounts.filter((mount) => targetDomains.some((domain) => catalog.weapons[mount.weaponId]?.targetDomains.includes(domain)))
+        : [];
+      const empty = combatMounts.length > 0 && combatMounts.every((mount) => mount.currentAmmo === 0);
+      const fuelLow = unit.fuelRemainingSec <= recovery.reserveSec;
+      const damageRtb = aiControlled && hpCritical && isAirborneOrUnderway;
+      if (unit.status !== 'returning' && (fuelLow || empty || damageRtb)) {
+        unit.status = 'returning';
+        unit.missionState = 'egress';
+        unit.missionTargetId = undefined;
+        unit.returnReason = empty ? 'ammunition' : damageRtb ? 'damage' : 'fuel';
+        const reasonText = empty
+          ? '任务弹药耗尽'
+          : damageRtb
+            ? '机体严重受损（耐久 ≤ 25%）'
+            : '达到返航油量储备';
+        logs.push({ id: `rtb_${unit.id}_${simTime}`, simTime, side: unit.side, category: 'DOCTRINE', severity: 'warning',
+          title: `${unit.callsign} 脱离返航`, message: `${reasonText}；${recovery.position ? '前往可用回收点。' : '执行防御性脱离航线。'}`, unitId: unit.id });
       }
-    }
+      if (unit.status === 'returning') {
+        if (recovery.position) {
+          unit.waypoints = [{ position: [...recovery.position] }];
+          unit.targetSpeedKts = recovery.cruise;
+          unit.missionTargetId = undefined;
+          if (getDistanceKm(unit.position, recovery.position) <= Math.max(0.5, recovery.cruise * 1.852 * dtSec / 3600)) {
+            unit.position = [...recovery.position];
+            unit.status = 'recovered';
+            unit.missionState = 'recovering';
+            unit.speedKts = unit.targetSpeedKts = 0;
+            unit.waypoints = [];
+            const turnaround = recovery.hostId && recovery.slotId
+              ? enqueueRecoveredSortie(unit, units, recovery.hostId, recovery.slotId, simTime)
+              : undefined;
+            logs.push({ id: `recovered_${unit.id}_${simTime}`, simTime, side: unit.side, category: 'EVENT', severity: 'info',
+              title: `${unit.callsign} 已回收 / 撤出战区`,
+              message: turnaround
+                ? `本架次结束并进入 ${turnaround.turnaroundSec} 秒整备队列；剩余补给 ${turnaround.turnaroundSupplies} 批。`
+                : '本架次结束，不计战损；该回收点不提供再次出动整备。',
+              unitId: unit.id, aarType: 'recovery' });
+            return;
+          }
+        } else if (unit.waypoints.length === 0) {
+          const egressDest = computeDefensiveEgressPoint(unit, contacts, simTime, environment);
+          unit.missionTargetId = undefined;
+          unit.targetSpeedKts = recovery.cruise;
+          if (egressDest) {
+            unit.waypoints = [{ position: egressDest, speedKts: recovery.cruise }];
+          }
+        }
+      }
     }
     const cruise = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId).cruiseSpeedKts;
     const burnRate = Math.max(0.6, Math.pow(unit.speedKts / Math.max(1, cruise), 1.5));
@@ -230,6 +329,32 @@ export function updateUnitOperations(
         message: unit.category === 'decoy' ? '诱饵燃油耗尽并退出战场。' : '未到达回收点，平台失能并计入本方战损。',
         unitId: unit.id });
       return;
+    }
+  } else if (unit.category !== 'decoy') {
+    const config = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
+    const maxSpeed = config.maxSpeedKts * getUnitCapabilities(unit).speedFactor;
+    const fuelCritical =
+      unit.maxFuelSec > 0 && unit.fuelRemainingSec <= Math.max(60, unit.maxFuelSec * CRITICAL_FUEL_FRACTION);
+    if (aiControlled && isAirborneOrUnderway && maxSpeed > 0 && unit.status !== 'returning' && (hpCritical || fuelCritical)) {
+      unit.status = 'returning';
+      unit.missionState = 'egress';
+      unit.missionTargetId = undefined;
+      unit.returnReason = hpCritical ? 'damage' : 'fuel';
+      const egressDest = computeDefensiveEgressPoint(unit, contacts, simTime, environment);
+      const egressSpeed = Math.max(1, config.cruiseSpeedKts * getUnitCapabilities(unit).speedFactor);
+      unit.waypoints = egressDest ? [{ position: egressDest, speedKts: egressSpeed }] : [];
+      if (egressDest) unit.targetSpeedKts = egressSpeed;
+      logs.push({
+        id: `rtb_${unit.id}_${simTime}`,
+        simTime,
+        side: unit.side,
+        category: 'DOCTRINE',
+        severity: 'warning',
+        title: `${unit.callsign} 战损脱离撤出`,
+        message: `${hpCritical ? '平台严重受损（耐久 ≤ 25%）' : '达到临界油量储备'}，停止前出并执行防御性脱离。`,
+        position: [...unit.position],
+        unitId: unit.id,
+      });
     }
   }
 
@@ -290,15 +415,77 @@ export function updateUnitOperations(
   }
 
   if (targetDomains.length === 0) return;
-  const candidates = Object.values(contacts).filter((contact) =>
-    contact.observerSide === unit.side && targetDomains.includes(contact.domain) &&
-    (mission.type !== 'sead' || contact.emitterObserved === true) &&
-    simTime - contact.lastDetectedTime <= 5000 &&
-    (pointInBbox(contact.estimatedPosition, compiledArea.bbox) && turf.booleanPointInPolygon(contact.estimatedPosition, area) ||
-      turf.pointToLineDistance(contact.estimatedPosition, boundary, { units: 'kilometers' }) <= mission.prosecuteOutsideAreaKm)
-  ).sort((a, b) => getDistanceKm(unit.position, a.estimatedPosition) - getDistanceKm(unit.position, b.estimatedPosition) || a.id.localeCompare(b.id));
-  const target = candidates.find((contact) => contact.id === unit.missionTargetId) ?? candidates[0];
+  const seadPrioritized = isSeadOrEwUnit(unit, catalog, mission);
+  const unitCanTargetAir = unit.mounts.some(
+    (mount) => mount.currentAmmo > 0 && catalog.weapons[mount.weaponId]?.targetDomains.includes('air')
+  );
+  const strikeCoordination =
+    !seadPrioritized && (mission.type === 'land_strike' || mission.type === 'asuw_patrol')
+      ? assessStrikeCoordination(unit, mission, units, contacts, missions, catalog, simTime, weaponsInFlight)
+      : undefined;
+  const candidatePriority = (contact: TacticalContact): number => {
+    if (seadPrioritized) return getSeadTargetPriority(contact);
+    if (strikeCoordination) return getStrikeTargetPriority(contact, mission.type, strikeCoordination);
+    return 0;
+  };
+  const candidates = Object.values(contacts).filter((contact) => {
+    if (contact.observerSide !== unit.side || simTime - contact.lastDetectedTime > 5000) return false;
+    if (mission.type === 'sead') {
+      if (contact.emitterObserved !== true) return false;
+      const domainMatch =
+        targetDomains.includes(contact.domain) ||
+        (contact.domain === 'air' && contact.identifiedCategory === 'awacs' && unitCanTargetAir);
+      if (!domainMatch) return false;
+    } else if (!targetDomains.includes(contact.domain)) {
+      return false;
+    }
+    return (
+      (pointInBbox(contact.estimatedPosition, compiledArea.bbox) && turf.booleanPointInPolygon(contact.estimatedPosition, area)) ||
+      turf.pointToLineDistance(contact.estimatedPosition, boundary, { units: 'kilometers' }) <= mission.prosecuteOutsideAreaKm
+    );
+  }).sort(
+    (a, b) =>
+      candidatePriority(a) - candidatePriority(b) ||
+      getDistanceKm(unit.position, a.estimatedPosition) - getDistanceKm(unit.position, b.estimatedPosition) ||
+      a.id.localeCompare(b.id)
+  );
+  const bestCandidate = candidates[0];
+  const currentTarget = unit.missionTargetId
+    ? candidates.find((contact) => contact.id === unit.missionTargetId)
+    : undefined;
+  const target =
+    currentTarget && (!bestCandidate || candidatePriority(currentTarget) <= candidatePriority(bestCandidate))
+      ? currentTarget
+      : bestCandidate;
   if (target) {
+    if (mission.packageTotSec !== undefined && simTime / 1000 < mission.packageTotSec) {
+      const config = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
+      const speedKts = Math.max(1, config.cruiseSpeedKts * getUnitCapabilities(unit).speedFactor);
+      const distKm = getDistanceKm(unit.position, target.estimatedPosition);
+      const etaSec = distKm / ((speedKts * 1.852) / 3600);
+      if (simTime / 1000 + etaSec < mission.packageTotSec - 15) {
+        unit.missionTargetId = undefined;
+        unit.missionState = pointInBbox(unit.position, compiledArea.bbox) && turf.booleanPointInPolygon(unit.position, area)
+          ? 'on_station'
+          : 'ingress';
+        unit.waypoints = [];
+        return;
+      }
+    }
+    if (
+      strikeCoordination?.hasFriendlySeadSupport &&
+      strikeCoordination.armInFlightAny &&
+      isActiveSamRadarContact(target, mission.type) &&
+      (strikeCoordination.armInFlightTargetIds.has(target.actualUnitId) ||
+        strikeCoordination.armInFlightTargetIds.has(target.id))
+    ) {
+      unit.missionTargetId = undefined;
+      unit.missionState = pointInBbox(unit.position, compiledArea.bbox) && turf.booleanPointInPolygon(unit.position, area)
+        ? 'on_station'
+        : 'ingress';
+      unit.waypoints = [];
+      return;
+    }
     const doctrine = effectiveDoctrine(unit, missions);
     const inFlight = Object.values(unit.weaponUsage).some((usage) => usage.cooldownUntil > simTime);
     if (unit.domain === 'air' && doctrine.bvrTactics === 'crank_pump') {

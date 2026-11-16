@@ -55,6 +55,8 @@ export interface MissionReferencePointDraft {
   prosecuteOutsideAreaKm: number;
   escortUnitId?: string;
   stationRadiusKm?: number;
+  packageTotSec?: number;
+  coordinatedPackageId?: string;
 }
 
 export interface ObjectiveDraft {

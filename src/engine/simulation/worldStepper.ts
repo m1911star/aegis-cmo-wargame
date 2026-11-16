@@ -200,6 +200,7 @@ function stepWorkingWorldInPlace(
     dtSec,
     score,
     logs,
+    playerSide: activePerspective,
   });
 
   pendingSortieOrders = processPendingSortieOrders(

@@ -44,12 +44,14 @@ export const BriefingModal: React.FC = () => {
 
         {campaignState && (
           <div className="p-3.5 rounded-lg bg-amber-500/8 border border-amber-500/30 space-y-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-amber-300 font-semibold">
                 【战役连贯进度与后勤继承账本 · 第 {campaignState.currentStageIndex + 1}/{campaignState.totalStages} 阶段】
               </span>
               <span className="text-[11px] font-mono text-cyan-300">
-                战备 {Math.round(campaignState.carryover.readinessMultiplier * 100)}% · 累计 {campaignState.carryover.cumulativeScore} 分
+                战备 {Math.round(campaignState.carryover.readinessMultiplier * 100)}% · 补给{' '}
+                {campaignState.supplyPoints} SP · 机场完好度 {campaignState.airbaseIntegrityPct}% · 累计{' '}
+                {campaignState.carryover.cumulativeScore} 分
               </span>
             </div>
             <div className="grid grid-cols-5 gap-1 text-[10px]">
@@ -73,6 +75,16 @@ export const BriefingModal: React.FC = () => {
                 );
               })}
             </div>
+            {campaignState.stageModifiers.length > 0 && (
+              <div className="text-[11px] text-amber-200/90 space-y-0.5 pt-1 border-t border-border/60">
+                <div className="font-medium text-amber-300">本阶段战场修正：</div>
+                <ul className="list-disc list-inside space-y-0.5 text-foreground/85">
+                  {campaignState.stageModifiers.map((modifier, idx) => (
+                    <li key={idx}>{modifier}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {campaignState.carryover.completedStages > 0 && (
               <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border/60">
                 <div>

@@ -351,7 +351,7 @@ export interface RuntimeUnit {
   missionState?: 'ingress' | 'on_station' | 'engaging' | 'egress' | 'recovering';
   missionRouteIndex?: number;
   nextMissionDecisionTime?: number;
-  returnReason?: 'fuel' | 'ammunition';
+  returnReason?: 'fuel' | 'ammunition' | 'damage';
   coordinatedAttack?: { contactId: string; releaseAtSimTime: number };
   parentGroupId: string;
   domain: Domain;
@@ -525,6 +525,8 @@ export interface MissionDefinition {
   prosecuteOutsideAreaKm: number;
   escortUnitId?: string;
   stationRadiusKm?: number;
+  packageTotSec?: number;
+  coordinatedPackageId?: string;
   doctrineOverride?: Partial<UnitDoctrine>;
   description: string;
 }

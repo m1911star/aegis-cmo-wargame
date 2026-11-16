@@ -172,6 +172,7 @@ const scenario = object({
     ...metadata, side, type: oneOf(['aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'aew_support', 'escort', 'sead', 'tanker_support']),
     isActive: boolean, areaPolygon: array(coordinate, 3), assignedUnitIds: optional(identifiers),
     prosecuteOutsideAreaKm: number(0), escortUnitId: optional(id), stationRadiusKm: optional(number(0)),
+    packageTotSec: optional(number(0)), coordinatedPackageId: optional(text),
     doctrineOverride: optional(doctrine),
   })),
   referencePoints: array(object({ id, name: text, side, position: coordinate, locked: boolean })),
