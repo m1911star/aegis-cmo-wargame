@@ -45,6 +45,7 @@ describe('CMO unit conversions & 8-arc geometry', () => {
     const base = structuredClone(MASTER_EQUIPMENT_CATALOG.platforms.f35c_lightning);
     const cmoPlatform: PlatformSpec = {
       ...base,
+      dbid: 3501,
       rcsProfile: undefined,
       acousticSignatureDb: 0,
       signatures: [

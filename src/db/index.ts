@@ -20,6 +20,7 @@ import {
   EXPANSION_SENSORS,
   EXPANSION_WEAPONS,
 } from './expansion/catalogExpansion';
+import { buildCmoRelationalBundle } from './cmoRelationalData';
 export { resolveUnitConfiguration } from './unitConfiguration';
 export { createForcePackagePlacements, validateForcePackageIntegrity } from './forcePackages';
 
@@ -27,7 +28,7 @@ export { createForcePackagePlacements, validateForcePackageIntegrity } from './f
 // AEGIS-CMO // 四层模块化装备数据库汇总与引用完整性校验器
 // ============================================================================
 
-export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = {
+const RAW_PLATFORMS: Record<string, PlatformSpec> = {
   ...RED_FORCE_PLATFORMS,
   ...BLUE_FORCE_PLATFORMS,
   ...REGIONAL_PLATFORMS,
@@ -37,7 +38,7 @@ export const MODULAR_SENSORS: Record<string, SensorSpec> = {
   ...BASE_SENSORS,
   ...EXPANSION_SENSORS,
 };
-export const MODULAR_WEAPONS: Record<string, WeaponSpec> = {
+const RAW_WEAPONS: Record<string, WeaponSpec> = {
   ...BASE_WEAPONS,
   ...EXPANSION_WEAPONS,
 };
@@ -45,6 +46,14 @@ export const MODULAR_LOADOUTS: Record<string, LoadoutSpec> = {
   ...BASE_LOADOUTS,
   ...EXPANSION_LOADOUTS,
 };
+const CMO_RELATIONAL = buildCmoRelationalBundle({
+  sensors: MODULAR_SENSORS,
+  weapons: RAW_WEAPONS,
+  loadouts: MODULAR_LOADOUTS,
+  platforms: RAW_PLATFORMS,
+});
+export const MODULAR_PLATFORMS: Record<string, PlatformSpec> = CMO_RELATIONAL.platforms;
+export const MODULAR_WEAPONS: Record<string, WeaponSpec> = CMO_RELATIONAL.weapons;
 export const FORCE_PACKAGES = {
   ...BASE_FORCE_PACKAGES,
   ...EXPANSION_FORCE_PACKAGES,
@@ -56,6 +65,11 @@ export const MASTER_EQUIPMENT_CATALOG: EquipmentCatalog = {
   weapons: MODULAR_WEAPONS,
   loadouts: MODULAR_LOADOUTS,
   platforms: MODULAR_PLATFORMS,
+  warheads: CMO_RELATIONAL.warheads,
+  mounts: CMO_RELATIONAL.mounts,
+  magazines: CMO_RELATIONAL.magazines,
+  propulsions: CMO_RELATIONAL.propulsions,
+  comms: CMO_RELATIONAL.comms,
 };
 
 /**

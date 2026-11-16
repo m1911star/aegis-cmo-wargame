@@ -2,6 +2,7 @@ import type {
   EquipmentCatalog,
   LoadoutSpec,
   PlatformMountTemplate,
+  PlatformSensorMount,
   PlatformSpec,
   RuntimeUnit,
   RuntimeWeaponMount,
@@ -13,11 +14,13 @@ export interface ResolvedUnitConfiguration {
   loadout?: LoadoutSpec;
   loadoutId?: string;
   sensorIds: string[];
+  sensorMounts: PlatformSensorMount[];
   mounts: PlatformMountTemplate[];
   maxSpeedKts: number;
   cruiseSpeedKts: number;
   maxFuelSec: number;
   rcsPenaltyM2: number;
+  hasDatalink: boolean;
 }
 
 const configCache = new WeakMap<
@@ -92,12 +95,22 @@ export function resolveUnitConfiguration(
     throw new Error(`Loadout ${loadout.id} is incompatible with platform ${platformId}`);
   }
 
-  const sensorIds = [
-    ...new Set([
-      ...platform.sensorIds,
-      ...(loadout?.additionalSensorIds ?? []),
-    ]),
-  ];
+  const sensorMountsMap = new Map<string, PlatformSensorMount>();
+  for (const sm of platform.sensorMounts ?? []) {
+    sensorMountsMap.set(sm.sensorId, { ...sm });
+  }
+  for (const id of platform.sensorIds) {
+    if (!sensorMountsMap.has(id)) {
+      sensorMountsMap.set(id, { sensorId: id });
+    }
+  }
+  for (const id of loadout?.additionalSensorIds ?? []) {
+    if (!sensorMountsMap.has(id)) {
+      sensorMountsMap.set(id, { sensorId: id });
+    }
+  }
+  const sensorMounts = Array.from(sensorMountsMap.values());
+  const sensorIds = sensorMounts.map((sm) => sm.sensorId);
   for (const id of sensorIds) {
     if (!Object.hasOwn(catalog.sensors, id)) throw new Error(`Unknown sensor: ${id}`);
   }
@@ -105,10 +118,37 @@ export function resolveUnitConfiguration(
     if (!Object.hasOwn(catalog.weapons, mount.weaponId)) {
       throw new Error(`Unknown weapon: ${mount.weaponId}`);
     }
-    return { ...mount };
+    const spec = mount.mountSpecId ? catalog.mounts?.[mount.mountSpecId] : undefined;
+    if (!spec) return { ...mount };
+    const useSpecDefaults = mount.maxAmmo <= 0;
+    return {
+      ...mount,
+      maxAmmo: useSpecDefaults ? spec.capacity : mount.maxAmmo,
+      reloadTimeSec: useSpecDefaults && mount.reloadTimeSec <= 0 && spec.rofPerMin > 0
+        ? Math.round(60 / spec.rofPerMin)
+        : mount.reloadTimeSec,
+      trainable: mount.trainable ?? spec.trainable,
+      autonomous: mount.autonomous ?? spec.autonomous,
+    };
   });
+  let baseMaxSpeedKts = platform.maxSpeedKts;
+  let baseCruiseSpeedKts = platform.cruiseSpeedKts;
+  if ((baseMaxSpeedKts <= 0 || baseCruiseSpeedKts <= 0) && platform.propulsionIds?.length) {
+    for (const propId of platform.propulsionIds) {
+      const prop = catalog.propulsions?.[propId];
+      if (!prop) continue;
+      for (const pt of prop.speedProfile) {
+        if (pt.throttle === 4 && pt.speedKts > baseMaxSpeedKts) baseMaxSpeedKts = pt.speedKts;
+        if (pt.throttle === 2 && pt.speedKts > baseCruiseSpeedKts) baseCruiseSpeedKts = pt.speedKts;
+      }
+    }
+    if (baseCruiseSpeedKts <= 0 && baseMaxSpeedKts > 0) baseCruiseSpeedKts = Math.round(baseMaxSpeedKts * 0.65);
+  }
+  const hasDatalink =
+    platform.hasDatalink ||
+    Boolean(platform.commIds?.some((commId) => catalog.comms?.[commId]?.supportsDatalink));
   const penalty = loadout?.speedPenaltyKts ?? 0;
-  const maxSpeedKts = Math.max(0, platform.maxSpeedKts - penalty);
+  const maxSpeedKts = Math.max(0, baseMaxSpeedKts - penalty);
   const maxFuelSec = Math.round(platform.maxFuelSec * (loadout?.combatRadiusMultiplier ?? 1));
   if (!Number.isFinite(maxFuelSec)) throw new Error(`Invalid endurance for platform ${platformId}`);
 
@@ -117,11 +157,13 @@ export function resolveUnitConfiguration(
     loadout,
     loadoutId,
     sensorIds,
+    sensorMounts,
     mounts,
     maxSpeedKts,
-    cruiseSpeedKts: Math.max(0, Math.min(maxSpeedKts, platform.cruiseSpeedKts - penalty * 0.5)),
+    cruiseSpeedKts: Math.max(0, Math.min(maxSpeedKts, baseCruiseSpeedKts - penalty * 0.5)),
     maxFuelSec,
     rcsPenaltyM2: loadout?.rcsPenaltyM2 ?? 0,
+    hasDatalink,
   };
 
   if (!perCatalog) {

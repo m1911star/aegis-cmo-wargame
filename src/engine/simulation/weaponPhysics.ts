@@ -12,6 +12,7 @@ import type {
   WeaponInFlight,
   WeaponSpec,
 } from '../../types/wargame';
+import { resolveWeaponWarheadDamage } from '../cmoUnits';
 import { evaluateWeatherModifiers, resolveMissileTerrainInteraction } from '../environment';
 import { advanceGuidance, computeMissileEnergyFactor, seekerCanObserve } from '../guidance';
 import { getBearingDeg, getDistanceKm } from '../geometry';
@@ -461,8 +462,11 @@ export function advanceWeaponPhysics({
         aarOutcome: 'intercept',
       });
     } else if (rng() < effectivePk) {
+      const baseDamage = missile.warheadDamage > 0
+        ? missile.warheadDamage
+        : resolveWeaponWarheadDamage(weapon, catalog);
       const damage = Math.round(
-        missile.warheadDamage * (0.85 + 0.3 * rng())
+        baseDamage * (0.85 + 0.3 * rng())
       );
       targetUnit.hp = Math.max(0, targetUnit.hp - damage);
       const subsystemNotes = targetUnit.hp > 0 ? applySubsystemHitDamage(targetUnit, weapon, damage) : [];

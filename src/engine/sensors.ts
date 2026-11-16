@@ -1,5 +1,6 @@
 import * as turf from './turfGeo';
-import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
+import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSensorMount, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
+import { isBearingInCmoArcs, resolvePlatformAcousticDb, resolvePlatformRcsProfile } from './cmoUnits';
 import { resolveUnitConfiguration } from './unitConfiguration';
 import {
   acousticRangeFactor,
@@ -30,8 +31,14 @@ export function isTargetWithinSensorArc(
   observerHeadingDeg: number,
   observerPosition: [number, number],
   targetPosition: [number, number],
-  sensor: Pick<SensorSpec, 'coverageArcDeg' | 'blindArcRearDeg'>
+  sensor: Pick<SensorSpec, 'coverageArcDeg' | 'blindArcRearDeg'>,
+  sensorMount?: Pick<PlatformSensorMount, 'arcs'>
 ): boolean {
+  if (sensorMount?.arcs) {
+    if (getDistanceKm(observerPosition, targetPosition) <= 0.05) return true;
+    const bearingToTarget = getBearingDeg(observerPosition, targetPosition);
+    return isBearingInCmoArcs(observerHeadingDeg, bearingToTarget, sensorMount.arcs);
+  }
   const coverage = sensor.coverageArcDeg ?? 360;
   const blindRear = sensor.blindArcRearDeg ?? 0;
   if (coverage >= 360 && blindRear <= 0) return true;
@@ -61,7 +68,7 @@ export function calculateAspectEffectiveRcsM2(
   targetHeadingDeg: number,
   loadoutRcsPenaltyM2 = 0
 ): number {
-  const profile = targetSpec.rcsProfile;
+  const profile = resolvePlatformRcsProfile(targetSpec);
   if (!profile) {
     return Math.max(0.001, targetSpec.rcsM2 + loadoutRcsPenaltyM2);
   }
@@ -352,9 +359,9 @@ export function hasDirectReconBdaCoverage(
     if (!hasRadarLineOfSight(observer.position, observer.altitudeM, config.platform.radarAntennaHeightM, position, Math.max(0, altitudeM), environment)) {
       continue;
     }
-    for (const sId of config.sensorIds) {
-      const sensor = catalog.sensors[sId];
-      if (!sensor || !isTargetWithinSensorArc(observer.heading, observer.position, position, sensor)) continue;
+    for (const sm of config.sensorMounts) {
+      const sensor = catalog.sensors[sm.sensorId];
+      if (!sensor || !isTargetWithinSensorArc(observer.heading, observer.position, position, sensor, sm)) continue;
       if (sensor.type === 'irst_optical') {
         const mods = evaluateWeatherModifiers(observer.position, observer.altitudeM, position, Math.max(0, altitudeM), environment);
         if (distKm <= Math.min(35, sensor.maxRangeKm * mods.opticalFactor)) return true;
@@ -386,16 +393,16 @@ export function computeContactsOnly(
   );
   const observerSensorMeta = new Map<
     string,
-    { sensors: SensorSpec[]; domains: Set<Domain> }
+    { sensors: { sensor: SensorSpec; mount: PlatformSensorMount }[]; domains: Set<Domain> }
   >();
   for (const unit of aliveUnits) {
     const cfg = configurations.get(unit.id)!;
-    const sensors: SensorSpec[] = [];
+    const sensors: { sensor: SensorSpec; mount: PlatformSensorMount }[] = [];
     const domains = new Set<Domain>();
-    for (const sId of cfg.sensorIds) {
-      const s = catalog.sensors[sId];
+    for (const mount of cfg.sensorMounts) {
+      const s = catalog.sensors[mount.sensorId];
       if (!s) continue;
-      sensors.push(s);
+      sensors.push({ sensor: s, mount });
       for (const d of s.detectDomains) domains.add(d);
     }
     observerSensorMeta.set(unit.id, { sensors, domains });
@@ -482,9 +489,10 @@ export function computeContactsOnly(
         ));
 
         const sourceCount = detectingSources.length;
-        for (const sensor of obsMeta.sensors) {
+        for (const { sensor, mount } of obsMeta.sensors) {
           if (!sensor.detectDomains.includes(target.domain)) continue;
-          if (!isTargetWithinSensorArc(observer.heading, observer.position, target.position, sensor)) continue;
+          if (!isTargetWithinSensorArc(observer.heading, observer.position, target.position, sensor, mount)) continue;
+          const effectiveAntennaM = mount.mastHeightM ?? obsSpec.radarAntennaHeightM;
 
           // A. 主动雷达探测 (受姿态 RCS 与敌方 OECM 压制影响)
           if (
@@ -498,7 +506,7 @@ export function computeContactsOnly(
               sensor,
               getAspectRcsM2(),
               observer.altitudeM,
-              obsSpec.radarAntennaHeightM,
+              effectiveAntennaM,
               target.altitudeM,
               targetEcmSuppression,
               obsCaps.radarFactor
@@ -531,7 +539,7 @@ export function computeContactsOnly(
             const horizonKm =
               calculateRadarHorizonKm(
                 observer.altitudeM,
-                obsSpec.radarAntennaHeightM,
+                effectiveAntennaM,
                 target.altitudeM
               ) * 1.28;
             const esmRangeKm = Math.min(sensor.maxRangeKm, horizonKm);
@@ -570,7 +578,7 @@ export function computeContactsOnly(
           else if (sensor.type === 'irst_optical') {
             const horizonKm = calculateRadarHorizonKm(
               observer.altitudeM,
-              obsSpec.radarAntennaHeightM,
+              effectiveAntennaM,
               target.altitudeM
             );
             const effRangeKm = Math.min(sensor.maxRangeKm * getWeatherMods().opticalFactor, horizonKm);
@@ -608,7 +616,7 @@ export function computeContactsOnly(
               sensor,
               observer.altitudeM,
               target.altitudeM,
-              targetSpec.acousticSignatureDb,
+              resolvePlatformAcousticDb(targetSpec),
               target.speedKts,
               target.doctrine.emconSonar
             ) * acousticRangeFactor(observer.position, target.position, environment) *

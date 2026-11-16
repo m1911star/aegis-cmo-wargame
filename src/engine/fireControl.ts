@@ -1,4 +1,6 @@
 import type { EquipmentCatalog, GuidanceProfile, PlatformSpec, RuntimeUnit, RuntimeWeaponMount, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
+import { resolveWeaponRangeForDomain } from './cmoUnits';
+import { resolveUnitConfiguration } from './unitConfiguration';
 import { getDistanceKm } from './geometry';
 import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
 import { GUIDANCE_DEFAULTS } from './constants';
@@ -97,8 +99,9 @@ export function trackSupport(
     const source = units[id];
     if (!source || !isActiveUnit(source) || source.side !== attacker.side) return false;
     if (profile.requiresSupport && (!source.doctrine.emconRadar || !getUnitCapabilities(source).radarFactor)) return false;
-    return id === attacker.id ||
-      (catalog.platforms[attacker.platformId]?.hasDatalink && catalog.platforms[source.platformId]?.hasDatalink);
+    const attackerHasDatalink = resolveUnitConfiguration(catalog, attacker.platformId, attacker.activeLoadoutId).hasDatalink;
+    const sourceHasDatalink = resolveUnitConfiguration(catalog, source.platformId, source.activeLoadoutId).hasDatalink;
+    return id === attacker.id || (attackerHasDatalink && sourceHasDatalink);
   });
 }
 
@@ -199,7 +202,8 @@ export function evaluateFireControl(
   if (contact) {
     distanceKm = computeStrikeRouteDistanceKm(attacker.position, contact.estimatedPosition, doglegWaypoints);
     trackAgeSec = Math.max(0, (simTime - contact.lastDetectedTime) / 1000);
-    withinNez = distanceKm >= weapon.minRangeKm && distanceKm <= nezRangeKm;
+    const domainRange = resolveWeaponRangeForDomain(weapon, contact.domain);
+    withinNez = distanceKm >= domainRange.minKm && distanceKm <= nezRangeKm;
     estimatedTofSec = estimateWeaponTimeOfFlightSec(distanceKm, weapon);
     if (!weapon.targetDomains.includes(contact.domain)) hardBlockReasons.push('武器与目标域不匹配');
     if (mode === 'defense' && weapon.interceptAltitudeBandM && contact.domain === 'air') {

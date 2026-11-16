@@ -80,6 +80,7 @@ export function isBearingInCmoArcs(
  */
 export function resolvePlatformRcsProfile(platform: PlatformSpec): RcsAspectProfile | undefined {
   if (platform.rcsProfile) return platform.rcsProfile;
+  if (platform.rcsM2 > 0 && platform.dbid === undefined) return undefined;
   const radarSig =
     platform.signatures?.find((s) => s.type === 'radar_em') ??
     platform.signatures?.find((s) => s.type === 'radar_ad');
