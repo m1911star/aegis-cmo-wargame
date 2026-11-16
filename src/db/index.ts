@@ -83,6 +83,26 @@ export function resolveEquipmentCatalog(
       ...MASTER_EQUIPMENT_CATALOG.platforms,
       ...(overlay.platforms || {}),
     },
+    warheads: {
+      ...(MASTER_EQUIPMENT_CATALOG.warheads || {}),
+      ...(overlay.warheads || {}),
+    },
+    mounts: {
+      ...(MASTER_EQUIPMENT_CATALOG.mounts || {}),
+      ...(overlay.mounts || {}),
+    },
+    magazines: {
+      ...(MASTER_EQUIPMENT_CATALOG.magazines || {}),
+      ...(overlay.magazines || {}),
+    },
+    propulsions: {
+      ...(MASTER_EQUIPMENT_CATALOG.propulsions || {}),
+      ...(overlay.propulsions || {}),
+    },
+    comms: {
+      ...(MASTER_EQUIPMENT_CATALOG.comms || {}),
+      ...(overlay.comms || {}),
+    },
   };
 }
 
@@ -115,6 +135,32 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
       if (key !== spec.id) errors.push(`${section}.${key}: key must match id ${spec.id}`);
     }
   }
+  for (const section of ['warheads', 'mounts', 'magazines', 'propulsions', 'comms'] as const) {
+    const table = catalog[section];
+    if (!table) continue;
+    for (const [key, spec] of Object.entries(table)) {
+      if (key !== spec.id) errors.push(`${section}.${key}: key must match id ${spec.id}`);
+    }
+  }
+  for (const [mId, mountSpec] of Object.entries(catalog.mounts ?? {})) {
+    for (const wId of mountSpec.weaponIds) {
+      if (!Object.hasOwn(catalog.weapons, wId)) {
+        errors.push(`mounts.${mId}: unknown weapon ${wId}`);
+      }
+    }
+    for (const sId of mountSpec.sensorIds ?? []) {
+      if (!Object.hasOwn(catalog.sensors, sId)) {
+        errors.push(`mounts.${mId}: unknown sensor ${sId}`);
+      }
+    }
+  }
+  for (const [magId, magSpec] of Object.entries(catalog.magazines ?? {})) {
+    for (const wId of magSpec.weaponIds) {
+      if (!Object.hasOwn(catalog.weapons, wId)) {
+        errors.push(`magazines.${magId}: unknown weapon ${wId}`);
+      }
+    }
+  }
   for (const [sId, sensor] of Object.entries(catalog.sensors)) {
     const cov = sensor.coverageArcDeg ?? 360;
     const blind = sensor.blindArcRearDeg ?? 0;
@@ -136,6 +182,14 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
     } else if (weapon.airDropRangeKm !== undefined || weapon.airDropSpeedKts !== undefined ||
                weapon.waterEntrySpeedKts !== undefined || weapon.waterEntryAltitudeM !== undefined) {
       errors.push(`weapons.${id}: water-entry fields require launchMedium air_drop`);
+    }
+    if (weapon.warheadId && !Object.hasOwn(catalog.warheads ?? {}, weapon.warheadId)) {
+      errors.push(`weapons.${id}: unknown warhead ${weapon.warheadId}`);
+    }
+    for (const sId of weapon.seekerSensorIds ?? []) {
+      if (!Object.hasOwn(catalog.sensors, sId)) {
+        errors.push(`weapons.${id}: unknown seeker sensor ${sId}`);
+      }
     }
   }
 
@@ -202,6 +256,29 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
     for (const m of platform.mounts) {
       if (!Object.hasOwn(catalog.weapons, m.weaponId)) {
         errors.push(`Platform [${pId}] 挂架 [${m.mountId}] 引用了不存在的武器 ID: ${m.weaponId}`);
+      }
+      if (m.mountSpecId && !Object.hasOwn(catalog.mounts ?? {}, m.mountSpecId)) {
+        errors.push(`platforms.${pId}: unknown mountSpecId ${m.mountSpecId}`);
+      }
+    }
+    for (const sm of platform.sensorMounts ?? []) {
+      if (!Object.hasOwn(catalog.sensors, sm.sensorId)) {
+        errors.push(`platforms.${pId}.sensorMounts: unknown sensor ${sm.sensorId}`);
+      }
+    }
+    for (const propId of platform.propulsionIds ?? []) {
+      if (!Object.hasOwn(catalog.propulsions ?? {}, propId)) {
+        errors.push(`platforms.${pId}: unknown propulsion ${propId}`);
+      }
+    }
+    for (const magId of platform.magazineIds ?? []) {
+      if (!Object.hasOwn(catalog.magazines ?? {}, magId)) {
+        errors.push(`platforms.${pId}: unknown magazine ${magId}`);
+      }
+    }
+    for (const commId of platform.commIds ?? []) {
+      if (!Object.hasOwn(catalog.comms ?? {}, commId)) {
+        errors.push(`platforms.${pId}: unknown comm ${commId}`);
       }
     }
     if (platform.defaultLoadoutId) {

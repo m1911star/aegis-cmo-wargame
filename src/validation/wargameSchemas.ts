@@ -53,13 +53,68 @@ const doctrine = object({
   bvrTactics: optional(oneOf(['standard', 'crank_pump'])),
   baffleClearPeriodic: optional(boolean),
 });
-const mount = object({ mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0) });
+const cmoArcMask = object({
+  SB: optional(boolean), SMF: optional(boolean), SMA: optional(boolean), SS: optional(boolean),
+  PS: optional(boolean), PMA: optional(boolean), PMF: optional(boolean), PB: optional(boolean),
+});
+const signatureProfile = object({
+  type: oneOf([
+    'radar_em', 'radar_ad', 'passive_sonar_vlf', 'passive_sonar_lf', 'passive_sonar_mf',
+    'passive_sonar_hf', 'active_sonar', 'infrared_detect', 'infrared_classify',
+    'visual_detect', 'visual_classify',
+  ]),
+  front: number(), side: number(), rear: number(), top: optional(number()),
+});
+const oodaProfile = object({
+  detectionSec: number(0), targetingSec: number(0), evasionSec: number(0),
+});
+const warhead = object({
+  id, dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), name: text, type: text,
+  damagePoints: number(0), explosivesType: optional(text), explosivesWeightKg: optional(number(0)),
+  numberOfWarheads: optional(number(1, Number.MAX_SAFE_INTEGER, true)), description: optional(text),
+});
+const mountSpec = object({
+  id, dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), name: text,
+  rofPerMin: number(0), capacity: count, magazineRofPerMin: number(0), magazineCapacity: count,
+  damagePoints: number(0), armorGeneral: optional(number(0)),
+  trainable: boolean, autonomous: boolean, localControl: optional(boolean),
+  weaponIds: identifiers, sensorIds: optional(identifiers), description: optional(text),
+});
+const magazineSpec = object({
+  id, dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), name: text,
+  rofPerMin: number(0), capacity: count, armorGeneral: optional(number(0)),
+  aviationMagazine: optional(boolean), weaponIds: identifiers, description: optional(text),
+});
+const propulsionSpeedPoint = object({
+  altitudeBand: number(1, 10, true), throttle: number(1, 4, true),
+  speedKts: number(0), altitudeMinM: number(), altitudeMaxM: number(), consumptionPerHour: number(0),
+});
+const propulsionSpec = object({
+  id, dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), name: text, type: text,
+  combinedType: optional(text), numberOfEngines: optional(number(0)), numberOfShafts: optional(number(0)),
+  thrustMilitaryKn: optional(number(0)), thrustAfterburnerKn: optional(number(0)),
+  speedProfile: array(propulsionSpeedPoint), description: optional(text),
+});
+const commSpec = object({
+  id, dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), name: text, type: text,
+  supportsDatalink: boolean, supportsCec: optional(boolean),
+  rangeKm: optional(number(0)), maxChannels: optional(number(0)), description: optional(text),
+});
+const mount = object({
+  mountId: id, weaponId: id, maxAmmo: count, reloadTimeSec: number(0),
+  mountSpecId: optional(id), arcs: optional(cmoArcMask),
+  trainable: optional(boolean), autonomous: optional(boolean),
+  internal: optional(boolean), optional: optional(boolean),
+});
 const sensor = object({
   ...metadata, codeName: text,
   type: oneOf(['radar_air_surface', 'radar_oth', 'esm', 'ecm_jammer', 'sonar_passive', 'sonar_active', 'irst_optical']),
   maxRangeKm: number(0), isActiveEmitter: boolean, lookDownCapable: boolean,
   detectDomains: array(domain), frequencyBand: text, jammingPowerKw: optional(number(0)),
   coverageArcDeg: optional(number(10, 360)), blindArcRearDeg: optional(number(0, 180)),
+  dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), role: optional(text), generation: optional(text),
+  rangeMinKm: optional(number(0)), altitudeMinM: optional(number()), altitudeMaxM: optional(number()),
+  scanIntervalSec: optional(number(0)),
 });
 const altitudeBand: Check = (value, path) => {
   array(number(), 2)(value, path);
@@ -85,12 +140,22 @@ const weapon = object({
     maxTrackAgeSec: optional(number(0)), maxUncertaintyKm: optional(number(0)),
     receivesUpdates: optional(boolean), requiresSupport: optional(boolean),
   })),
+  dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), weaponType: optional(text), generation: optional(text),
+  warheadId: optional(id), warheadCount: optional(number(1, Number.MAX_SAFE_INTEGER, true)),
+  cepM: optional(number(0)), cepSurfaceM: optional(number(0)),
+  maxFlightTimeSec: optional(number(0)), waypointNumber: optional(count),
+  seekerSensorIds: optional(identifiers),
 });
 const loadout = object({
   ...metadata, codeName: text,
   role: oneOf(['aaw_cap', 'asuw_strike', 'sead_ew', 'asw_patrol', 'multi_mission']),
   compatiblePlatformIds: identifiers, speedPenaltyKts: optional(number(0)), rcsPenaltyM2: optional(number(0)),
   combatRadiusMultiplier: optional(positive), additionalSensorIds: optional(identifiers), mounts: array(mount),
+  dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), readyTimeSec: optional(number(0)),
+  readyTimeSustainedSec: optional(number(0)), defaultCombatRadiusKm: optional(number(0)),
+  defaultTimeOnStationMin: optional(number(0)), missionProfile: optional(text),
+  payloadWeightDragModifier: optional(number(0)), quickTurnaround: optional(boolean),
+  quickTurnaroundReadyTimeSec: optional(number(0)), quickTurnaroundMaxSorties: optional(count),
 });
 const hangar = object({
   slotId: id, squadronName: text, platformId: id, defaultLoadoutId: id,
@@ -112,10 +177,28 @@ const platform = object({
   aarFuelCapacitySec: optional(number(0)), aarTransferRateSecPerSec: optional(number(0)),
   canReceiveAar: optional(boolean),
   deployables: optional(array(object({ platformId: id, count }))),
+  dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)),
+  cmoTable: optional(oneOf(['DataAircraft', 'DataShip', 'DataSubmarine', 'DataFacility', 'DataGroundUnit'])),
+  operatorCountry: optional(text), operatorService: optional(text),
+  yearCommissioned: optional(number(1900, 2100, true)), yearDecommissioned: optional(number(0, 2100, true)),
+  physicalSize: optional(text), ergonomics: optional(text), ooda: optional(oodaProfile),
+  missileDefense: optional(number(0)), lengthM: optional(number(0)), beamOrSpanM: optional(number(0)),
+  displacementTonsOrWeightKg: optional(number(0)), crew: optional(count), hypothetical: optional(boolean),
+  propulsionIds: optional(identifiers), magazineIds: optional(identifiers), commIds: optional(identifiers),
+  sensorMounts: optional(array(object({
+    sensorId: id, componentNumber: optional(count), mastHeightM: optional(number(0)),
+    arcs: optional(cmoArcMask), isFireControl: optional(boolean),
+  }))),
+  signatures: optional(array(signatureProfile)),
 });
 const catalogFields = {
   version: id, sensors: record(sensor), weapons: record(weapon),
   loadouts: record(loadout), platforms: record(platform),
+  warheads: optional(record(warhead)),
+  mounts: optional(record(mountSpec)),
+  magazines: optional(record(magazineSpec)),
+  propulsions: optional(record(propulsionSpec)),
+  comms: optional(record(commSpec)),
 };
 const catalog = object(catalogFields);
 const overlay = object(Object.fromEntries(
