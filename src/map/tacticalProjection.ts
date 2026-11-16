@@ -27,6 +27,7 @@ export type ProjectionLayers = {
   showMissions: boolean;
   showAouPolygons: boolean;
   showReferencePoints: boolean;
+  show3dTerrain?: boolean;
 };
 
 export type TacticalProjectionInput = {
@@ -129,6 +130,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       properties: {
         id: polygon.id,
         label: `${polygon.name} (${polygon.elevationM}m)`,
+        elevationM: polygon.elevationM ?? 0,
       },
       geometry: {
         type: 'Polygon',
