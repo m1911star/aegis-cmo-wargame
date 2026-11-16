@@ -19,20 +19,20 @@
         "BLUE": "costly_victory"
       },
       "losses": {
-        "red": 6,
+        "red": 5,
         "blue": 7
       },
       "missilesFired": {
-        "red": 186,
-        "blue": 174
+        "red": 176,
+        "blue": 160
       },
       "interceptions": {
-        "red": 43,
-        "blue": 30
+        "red": 36,
+        "blue": 24
       },
       "score": {
-        "red": 1270,
-        "blue": 1322
+        "red": 1200,
+        "blue": 1099
       },
       "sortiesLaunched": 2,
       "events": [
@@ -76,22 +76,22 @@
         "east_red_locate_aegis": "achieved",
         "east_red_preserve_kj500": "achieved",
         "east_blue_hold_ishigaki": "achieved",
-        "east_blue_disable_h6n": "achieved",
+        "east_blue_disable_h6n": "failed",
         "east_blue_preserve_e2d": "achieved",
         "east_red_disable_taigei": "failed",
         "east_blue_disable_039c": "failed",
         "east_red_preserve_y9g": "achieved",
         "east_blue_preserve_mq4c": "achieved"
       },
-      "aarEvents": 289,
+      "aarEvents": 260,
       "finiteState": true
     },
     {
       "scenarioId": "op_deep_sea_carrier_hunt_2028",
       "title": "作战想定 02 // 《深海猎杀：福建舰与美核航母打击群大洋决战》",
       "seed": 5252,
-      "tick": 12264,
-      "elapsedSec": 3066,
+      "tick": 9311,
+      "elapsedSec": 2327.75,
       "configuredDurationSec": 5400,
       "terminalReason": "critical_objective",
       "outcomes": {
@@ -99,20 +99,20 @@
         "BLUE": "defeat"
       },
       "losses": {
-        "red": 3,
+        "red": 2,
         "blue": 6
       },
       "missilesFired": {
-        "red": 126,
-        "blue": 136
+        "red": 140,
+        "blue": 142
       },
       "interceptions": {
-        "red": 19,
-        "blue": 39
+        "red": 26,
+        "blue": 41
       },
       "score": {
-        "red": 1735,
-        "blue": 450
+        "red": 1660,
+        "blue": 480
       },
       "sortiesLaunched": 6,
       "events": [
@@ -138,7 +138,7 @@
         },
         {
           "id": "ev_red_csg_blink_emcon",
-          "fireCount": 102,
+          "fireCount": 77,
           "lastFiredElapsedSec": null
         }
       ],
@@ -154,7 +154,7 @@
         "deep_blue_preserve_cvn": "failed",
         "deep_blue_disable_wolfpack": "pending"
       },
-      "aarEvents": 228,
+      "aarEvents": 244,
       "finiteState": true
     },
     {
@@ -292,7 +292,7 @@
       },
       "interceptions": {
         "red": 17,
-        "blue": 6
+        "blue": 7
       },
       "score": {
         "red": 600,
@@ -331,7 +331,7 @@
         "joint_blue_hold_beach": "achieved",
         "joint_blue_preserve_airbase": "achieved"
       },
-      "aarEvents": 100,
+      "aarEvents": 101,
       "finiteState": true
     },
     {

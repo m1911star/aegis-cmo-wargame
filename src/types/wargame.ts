@@ -452,6 +452,7 @@ export interface WeaponInFlight {
   position: [number, number];
   launchPosition: [number, number];
   trail: [number, number][];
+  altitudeTrail?: number[];
   altitudeM: number;
   heading: number;
   speedKts: number;
@@ -830,6 +831,7 @@ export interface CombatLogEntry {
   title: string;
   message: string;
   position?: [number, number];
+  altitudeM?: number;
   unitId?: string;
   contactId?: string;
   weaponId?: string;
@@ -854,6 +856,8 @@ export interface AarEventRecord {
   quantity: number;
   shooterId?: string;
   outcome?: 'hit' | 'destroy' | 'intercept' | 'softkill' | 'miss';
+  position?: [number, number];
+  altitudeM?: number;
 }
 
 export interface AarTrackSample {
