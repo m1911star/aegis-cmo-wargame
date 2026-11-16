@@ -88,7 +88,9 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
 
   return (
     <header className="command-header tactical-panel">
+      {/* Tier 1: Left/Mode Zone & Utility/Tools Zone */}
       <div className="command-row command-primary">
+        {/* 1. Left / Mode Zone */}
         <div className="scenario-controls">
           <div className="brand-mark"><i /> <span>AEGIS-CMO</span></div>
           <Select
@@ -103,69 +105,187 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
               <option key={sc.id} value={sc.id}>{sc.title.replace(' // ', ' · ')}</option>
             ))}
           </Select>
-          <button onClick={() => setActiveModal('briefing')} className="toolbar-button" title="查看想定简报">
+          <button
+            type="button"
+            onClick={() => setActiveModal('briefing')}
+            className="toolbar-button toolbar-button-subtle"
+            title="查看想定简报"
+          >
             <BookOpen /><span>简报</span>
           </button>
-          {hasAutosave && !hasStarted && (
-            <button
-              onClick={() => restoreAutosaveCheckpoint()}
-              className="toolbar-button text-emerald-300"
-              title="恢复浏览器本地自动保存的上一局断点"
-            >
-              <History /><span>继续上局</span>
-            </button>
-          )}
-          <button
-            onClick={() => (campaignState ? exitCampaign() : startCampaign())}
-            className={`toolbar-button ${campaignState ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-cyan-300'}`}
-            title={campaignState ? '退出战役连贯模式' : '开启五阶段西太联合战役（继承战损与稀缺弹药）'}
-          >
-            <span>
-              {campaignState
-                ? `战役 ${campaignState.currentStageIndex + 1}/${campaignState.totalStages}`
-                : '战役模式'}
-            </span>
-          </button>
-          <button
-            onClick={() => setActiveModal('skirmish')}
-            className="toolbar-button text-cyan-300"
-            title="选择战区模板、双方军队配置与气象一键生成自由遭遇战"
-          >
-            <Swords /><span>遭遇战</span>
-          </button>
-        </div>
-        <div className="utility-controls">
           <Select
             aria-label="控制席位"
             title="开局选择控制席位；观察视角不会改变控制权"
             disabled={hasStarted || timeScale !== 0}
             value={playerSide}
             onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')}
-            className="w-auto min-w-[92px] h-7 text-[11px]"
+            className="w-auto min-w-[90px] h-7 text-[11px]"
           >
-            <option value="RED">指挥红方</option><option value="BLUE">指挥蓝方</option>
+            <option value="RED">指挥红方</option>
+            <option value="BLUE">指挥蓝方</option>
           </Select>
-          <button className="toolbar-button" aria-pressed={playMode === 'sandbox'} title="沙盒模式可编辑双方；与观察视角独立"
-            onClick={() => setPlayMode(playMode === 'command' ? 'sandbox' : 'command')}>{playMode === 'sandbox' ? '沙盒编辑中' : '指挥模式'}</button>
-          <button disabled={playMode !== 'sandbox'} onClick={() => setActiveModal('unit_spawner')} className="toolbar-button text-emerald-300 disabled:opacity-40">
-            <PlusCircle /><span>兵力投放</span>
-          </button>
-          <button onClick={() => setActiveModal('catalog_viewer')} className="toolbar-button">
+
+          <div className="header-divider" aria-hidden="true" />
+
+          <div className="mode-controls" role="group" aria-label="推演模式">
+            <button
+              type="button"
+              onClick={() => (campaignState ? exitCampaign() : startCampaign())}
+              className={`toolbar-button ${campaignState ? 'text-amber-200 border-amber-500/45 bg-amber-500/15' : 'text-cyan-200/90 border-cyan-500/25 bg-cyan-500/[0.06] hover:bg-cyan-500/15'}`}
+              title={campaignState ? '退出战役连贯模式' : '开启五阶段西太联合战役（继承战损与稀缺弹药）'}
+            >
+              <span>
+                {campaignState
+                  ? `战役 ${campaignState.currentStageIndex + 1}/${campaignState.totalStages}`
+                  : '战役模式'}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveModal('skirmish')}
+              className="toolbar-button text-cyan-200/90 border-cyan-500/25 bg-cyan-500/[0.06] hover:bg-cyan-500/15"
+              title="选择战区模板、双方军队配置与气象一键生成自由遭遇战"
+            >
+              <Swords /><span>遭遇战</span>
+            </button>
+            <button
+              type="button"
+              className={`toolbar-button ${playMode === 'sandbox' ? 'text-emerald-200 border-emerald-500/45 bg-emerald-500/15' : 'toolbar-button-subtle'}`}
+              aria-pressed={playMode === 'sandbox'}
+              title="沙盒模式可编辑双方；与观察视角独立"
+              onClick={() => setPlayMode(playMode === 'command' ? 'sandbox' : 'command')}
+            >
+              {playMode === 'sandbox' ? '沙盒模式' : '指挥模式'}
+            </button>
+            <button
+              type="button"
+              disabled={playMode !== 'sandbox'}
+              onClick={() => setActiveModal('builder')}
+              title={playMode === 'sandbox' ? '打开可视化想定编辑器' : '切换至沙盒模式后可编辑想定'}
+              className={`toolbar-button ${playMode === 'sandbox' ? 'text-emerald-200 border-emerald-500/35 bg-emerald-500/10 hover:bg-emerald-500/20' : 'toolbar-button-subtle opacity-40 cursor-not-allowed'}`}
+            >
+              <PencilRuler /><span>想定编辑</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 2. Utility / Tools Zone */}
+        <div className="utility-controls" role="group" aria-label="辅助工具">
+          {hasAutosave && !hasStarted && (
+            <button
+              type="button"
+              onClick={() => restoreAutosaveCheckpoint()}
+              className="toolbar-button toolbar-button-subtle text-emerald-300 border-emerald-500/30 hover:border-emerald-400/50 hover:bg-emerald-500/10"
+              title="恢复浏览器本地自动保存的上一局断点"
+            >
+              <History /><span>恢复自动存档</span>
+            </button>
+          )}
+          {playMode === 'sandbox' && (
+            <button
+              type="button"
+              onClick={() => setActiveModal('unit_spawner')}
+              className="toolbar-button toolbar-button-subtle text-emerald-300 border-emerald-500/30 hover:border-emerald-400/50 hover:bg-emerald-500/10"
+              title="向当前战场实时投放新兵力"
+            >
+              <PlusCircle /><span>兵力投放</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setActiveModal('catalog_viewer')}
+            className="toolbar-button toolbar-button-subtle"
+            title="查阅红蓝双方平台、传感器与武器数据库"
+          >
             <Database /><span>装备库</span>
           </button>
-          <button onClick={() => setActiveModal('scenario_io')} className="toolbar-button">
+          <button
+            type="button"
+            onClick={() => setActiveModal('scenario_io')}
+            className="toolbar-button toolbar-button-subtle"
+            title="导入导出想定 JSON、管理存档与指令重放"
+          >
             <FileJson /><span>想定管理</span>
           </button>
-          <button disabled={playMode !== 'sandbox'} onClick={() => setActiveModal('builder')}
-            className="toolbar-button text-emerald-300 disabled:opacity-35">
-            <PencilRuler /><span>想定编辑</span>
-          </button>
-          <button disabled={!battleResult && playMode !== 'sandbox'} onClick={() => setActiveModal('aar')}
-            className="toolbar-button text-amber-300 disabled:opacity-35" title="战后或沙盒模式可查看完整真值复盘">
+          <button
+            type="button"
+            disabled={!battleResult && playMode !== 'sandbox'}
+            onClick={() => setActiveModal('aar')}
+            className={`toolbar-button toolbar-button-subtle ${battleResult || playMode === 'sandbox' ? 'text-amber-300 border-amber-500/30 hover:border-amber-400/50 hover:bg-amber-500/10' : 'opacity-40 cursor-not-allowed'}`}
+            title="战后或沙盒模式可查看完整真值复盘"
+          >
             <ChartColumn /><span>战后复盘</span>
           </button>
+        </div>
+      </div>
+
+      {/* Tier 2: Battlefield Clock/Environment & Right/Simulation Control Zone */}
+      <div className="command-row command-secondary">
+        <div className="simulation-context">
+          <div className="mission-clock" title={`推演时间 ${utc.slice(0, 10)}（协调世界时）`}>
+            <span>{utc.slice(0, 10)} · UTC</span>
+            <time dateTime={utc}>{utc.slice(11, 19)}</time>
+          </div>
+          {weather && (
+            <span
+              className="px-2 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-200 font-mono whitespace-nowrap"
+              title={`云底 ${weather.cloudFloorM}m ~ 云顶 ${weather.cloudCeilingM}m（穿云衰减光电/红外探测）`}
+            >
+              {weather.condition === 'clear'
+                ? '晴空'
+                : weather.condition === 'overcast'
+                  ? '阴云层'
+                  : weather.condition === 'rain_storm'
+                    ? '雷暴锋面'
+                    : '台风外围'}{' '}
+              · {weather.seaState}级海况
+            </span>
+          )}
+          <div className="header-divider" aria-hidden="true" />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleResetClick(randomizeSpawns)}
+              aria-label="重置当前想定"
+              title="使用当前种子或随机散布重新开局"
+              className="toolbar-button toolbar-button-subtle icon-button"
+            >
+              <RotateCcw />
+            </button>
+            <button
+              type="button"
+              onClick={() => setRandomizeSpawns((prev) => !prev)}
+              aria-pressed={randomizeSpawns}
+              title="开局随机散布与随机种子开关"
+              className={`toolbar-button toolbar-button-subtle icon-button ${randomizeSpawns ? 'text-amber-300 border-amber-400/50 bg-amber-500/10' : ''}`}
+            >
+              <Shuffle />
+            </button>
+          </div>
+        </div>
+
+        {/* 3. Right / Simulation Control Zone */}
+        <div className="view-controls">
+          <div className="perspective-controls" role="group" aria-label="战场视角">
+            <Eye className="text-slate-500" />
+            {PERSPECTIVES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={activePerspective === item.id}
+                onClick={() => setActivePerspective(item.id)}
+                className={activePerspective === item.id ? item.activeClass : 'text-slate-400 hover:text-slate-200'}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
           <details className="pause-settings">
-            <summary className="toolbar-button" title="默认全部关闭，由你手动控制暂停">
+            <summary
+              className={`toolbar-button toolbar-button-subtle ${autoPause.onNewContact || autoPause.onMissileDetected || autoPause.onUnitHitOrDestroyed ? 'text-amber-300 border-amber-500/35 bg-amber-500/10' : ''}`}
+              title="默认全部关闭，由你手动控制暂停"
+            >
               <ShieldAlert />
               <span>
                 自动暂停
@@ -197,32 +317,33 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
               <SimulationDebugStatus />
             </div>
           </details>
-        </div>
-      </div>
 
-      <div className="command-row command-secondary">
-        <div className="simulation-controls">
-          <div className="mission-clock" title={`推演时间 ${utc.slice(0, 10)}（协调世界时）`}>
-            <span>{utc.slice(0, 10)} · UTC</span>
-            <time dateTime={utc}>{utc.slice(11, 19)}</time>
-          </div>
-          {weather && (
-            <span
-              className="px-2 py-0.5 rounded border border-sky-500/35 bg-sky-500/10 text-[10px] text-sky-200 font-mono whitespace-nowrap"
-              title={`云底 ${weather.cloudFloorM}m ~ 云顶 ${weather.cloudCeilingM}m（穿云衰减光电/红外探测）`}
-            >
-              {weather.condition === 'clear'
-                ? '晴空'
-                : weather.condition === 'overcast'
-                  ? '阴云层'
-                  : weather.condition === 'rain_storm'
-                    ? '雷暴锋面'
-                    : '台风外围'}{' '}
-              · {weather.seaState}级海况
-            </span>
-          )}
+          <div className="header-divider" aria-hidden="true" />
+
           <div className="playback-controls">
+            <div className="speed-controls" role="group" aria-label="推演倍速">
+              {TIME_SCALES.map((scale) => (
+                <button
+                  key={scale}
+                  type="button"
+                  aria-pressed={timeScale === scale}
+                  onClick={() => setTimeScale(scale)}
+                  className={timeScale === scale ? 'is-active' : ''}
+                >
+                  {scale}×
+                </button>
+              ))}
+            </div>
             <button
+              type="button"
+              onClick={() => stepSingleTick(5)}
+              title="单步推进 5 秒"
+              className="toolbar-button toolbar-button-subtle"
+            >
+              <StepForward /><span>+5秒</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setTimeScale(timeScale === 0 ? 5 : 0)}
               title="空格键：暂停或继续推演"
               className={`toolbar-button playback-toggle ${timeScale === 0 ? 'is-paused' : 'is-running'}`}
@@ -230,46 +351,31 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
               {timeScale === 0 ? <Play /> : <Pause />}
               <span>{timeScale === 0 ? '开始推演' : '暂停推演'}</span>
             </button>
-            <div className="speed-controls" role="group" aria-label="推演倍速">
-              {TIME_SCALES.map((scale) => (
-                <button key={scale} aria-pressed={timeScale === scale} onClick={() => setTimeScale(scale)} className={timeScale === scale ? 'is-active' : ''}>
-                  {scale}×
-                </button>
-              ))}
-            </div>
-            <button onClick={() => stepSingleTick(5)} title="单步推进 5 秒" className="toolbar-button">
-              <StepForward /><span>+5秒</span>
-            </button>
-            <button onClick={() => handleResetClick(randomizeSpawns)} aria-label="重置当前想定" title="使用当前种子或随机散布重新开局" className="toolbar-button icon-button">
-              <RotateCcw />
-            </button>
+          </div>
+
+          <div className="header-divider" aria-hidden="true" />
+
+          <div className="panel-controls" role="group" aria-label="工作区面板">
             <button
-              onClick={() => setRandomizeSpawns((prev) => !prev)}
-              aria-pressed={randomizeSpawns}
-              title="开局随机散布与随机种子开关"
-              className={`toolbar-button icon-button ${randomizeSpawns ? 'text-amber-300 border-amber-400/50' : ''}`}
+              type="button"
+              onClick={onToggleLeft}
+              aria-expanded={leftOpen}
+              aria-controls="order-panel"
+              className={`toolbar-button toolbar-button-subtle ${leftOpen ? 'panel-active' : ''}`}
             >
-              <Shuffle />
-            </button>
-          </div>
-        </div>
-        <div className="view-controls">
-          <div className="perspective-controls" role="group" aria-label="战场视角">
-            <Eye className="text-slate-500" />
-            {PERSPECTIVES.map((item) => (
-              <button key={item.id} aria-pressed={activePerspective === item.id} onClick={() => setActivePerspective(item.id)} className={activePerspective === item.id ? item.activeClass : 'text-slate-400'}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <div className="panel-controls">
-            <button onClick={onToggleLeft} aria-expanded={leftOpen} aria-controls="order-panel" className={`toolbar-button ${leftOpen ? 'panel-active' : ''}`}>
               <PanelLeft /><span>编制</span>
             </button>
-            <button onClick={onToggleRight} aria-expanded={rightOpen} aria-controls="inspector-panel" className={`toolbar-button ${rightOpen ? 'panel-active' : ''}`}>
+            <button
+              type="button"
+              onClick={onToggleRight}
+              aria-expanded={rightOpen}
+              aria-controls="inspector-panel"
+              className={`toolbar-button toolbar-button-subtle ${rightOpen ? 'panel-active' : ''}`}
+            >
               <PanelRight /><span>详情</span>
             </button>
             <button
+              type="button"
               onClick={() => {
                 if (leftOpen || rightOpen) {
                   if (leftOpen) onToggleLeft();
@@ -280,7 +386,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
                 }
               }}
               title="快捷键 [Tab]：切换纯净全屏地图"
-              className={`toolbar-button ${!leftOpen && !rightOpen ? 'panel-active' : ''}`}
+              className={`toolbar-button toolbar-button-subtle ${!leftOpen && !rightOpen ? 'panel-active' : ''}`}
             >
               <span>全屏</span>
             </button>
@@ -296,6 +402,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
               : '当前推演正在进行中，确认放弃当前进度并切换至新想定吗？'}
           </span>
           <button
+            type="button"
             onClick={() => {
               if (pendingConfirm.type === 'reset') {
                 exitReplayPlayer();
@@ -313,14 +420,14 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           >
             确认执行
           </button>
-          <button onClick={() => setPendingConfirm(null)} className="toolbar-button">取消</button>
+          <button type="button" onClick={() => setPendingConfirm(null)} className="toolbar-button">取消</button>
         </div>
       )}
       {lastAutoPauseBanner && (
         <div className="auto-pause-banner" role="status">
           <ShieldAlert className="w-4 h-4 shrink-0" />
           <span>已自动暂停 · {lastAutoPauseBanner}</span>
-          <button onClick={clearAutoPauseBanner} className="toolbar-button">知道了</button>
+          <button type="button" onClick={clearAutoPauseBanner} className="toolbar-button">知道了</button>
         </div>
       )}
     </header>

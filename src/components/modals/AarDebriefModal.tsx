@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ChartColumn, Check, Download } from 'lucide-react';
-import { summarizeAar } from '../../engine/aar';
-import { captureShareableAarPackage } from '../../store/battleRecording';
+import { ChartColumn, Check, Download, Play } from 'lucide-react';
+import { summarizeAar, summarizeAarBreakdowns } from '../../engine/aar';
+import { captureBattleRecording, captureShareableAarPackage } from '../../store/battleRecording';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -17,13 +17,42 @@ const OUTCOME_BADGES = {
 
 export const AarDebriefModal: React.FC = () => {
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
+  const startReplayPlayer = useWargameStore((s) => s.startReplayPlayer);
   const catalog = useWargameStore((s) => s.catalog);
   const units = useWargameStore((s) => s.units);
   const aar = useWargameStore((s) => s.aar);
   const battleResult = useWargameStore((s) => s.battleResult);
   const playMode = useWargameStore((s) => s.playMode);
+  const tick = useWargameStore((s) => s.tick);
+  const commandHistory = useWargameStore((s) => s.commandHistory);
+  const currentScenario = useWargameStore((s) => s.currentScenario);
+  const replayPlayer = useWargameStore((s) => s.replayPlayer);
   const [exported, setExported] = useState(false);
   const aarSummary = summarizeAar(aar);
+  const breakdowns = summarizeAarBreakdowns(aar, units);
+
+  const canJumpToReplay = Boolean(
+    currentScenario && (commandHistory.length > 0 || tick > 0 || replayPlayer || Object.keys(units).length > 0)
+  );
+
+  const handleJumpToReplay = (targetTick: number) => {
+    const recording =
+      replayPlayer && replayPlayer.recording.untilTick >= targetTick
+        ? replayPlayer.recording
+        : captureBattleRecording();
+    startReplayPlayer(recording, targetTick);
+    setActiveModal('none');
+  };
+
+  const maxWeaponTotal = breakdowns.ammunition.topWeapons[0]?.totalCount ?? 1;
+  const redAmmoPct =
+    breakdowns.ammunition.total > 0
+      ? (breakdowns.ammunition.redTotal / breakdowns.ammunition.total) * 100
+      : 0;
+  const blueAmmoPct =
+    breakdowns.ammunition.total > 0
+      ? (breakdowns.ammunition.blueTotal / breakdowns.ammunition.total) * 100
+      : 0;
 
   const exportShareableReport = () => {
     const pkg = captureShareableAarPackage();
@@ -72,15 +101,159 @@ export const AarDebriefModal: React.FC = () => {
               );
             })}
           </div>
-          <section className="p-3.5 rounded-lg bg-muted/35 border border-border">
-            <h3 className="text-primary font-semibold mb-2">弹药消耗</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-foreground/90 font-mono tabular-nums">
-              {aarSummary.weaponUsage.length === 0 ? <span className="text-muted-foreground">尚无发射记录</span> :
-                aarSummary.weaponUsage.map(([weaponId, count]) => (
-                  <span key={weaponId}>{catalog.weapons[weaponId]?.codeName ?? weaponId}: {count}</span>
-                ))}
+
+          <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-3" aria-label="兵力生存与战损对比">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-primary font-semibold">兵力生存与战损对比 (存活 / 战损)</h3>
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-2.5 h-2 rounded-xs bg-rose-500" />
+                  <span>红方存活</span>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-2.5 h-2 rounded-xs bg-sky-500" />
+                  <span>蓝方存活</span>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-2.5 h-2 rounded-xs bg-zinc-700/90 border border-white/10" />
+                  <span>战损销毁</span>
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {(['RED', 'BLUE'] as const).map((side) => {
+                const survival = breakdowns.forceSurvival[side];
+                const survivalPct = Math.round(survival.survivalRate * 100);
+                const attritionPct = Math.max(0, 100 - survivalPct);
+                const activeBarClass = side === 'RED' ? 'bg-rose-500' : 'bg-sky-500';
+                const labelClass = side === 'RED' ? 'text-rose-300' : 'text-sky-300';
+                return (
+                  <div key={side} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                      <span className={`${labelClass} font-semibold`}>
+                        {side === 'RED' ? '红方 RED' : '蓝方 BLUE'}
+                      </span>
+                      <span className="text-foreground/90">
+                        存活 {survival.active} · 战损 {survival.destroyed} / 共 {survival.total} ({survivalPct}%)
+                      </span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label={`${side} 兵力存活率`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={survivalPct}
+                      className="h-3 w-full rounded-full overflow-hidden bg-zinc-800/90 border border-border/70 flex"
+                    >
+                      {survival.total > 0 && (
+                        <>
+                          <div
+                            className={`${activeBarClass} h-full transition-all duration-300`}
+                            style={{ width: `${(survival.active / survival.total) * 100}%` }}
+                            title={`存活 ${survival.active} 单位`}
+                          />
+                          <div
+                            className="bg-zinc-700/90 h-full transition-all duration-300"
+                            style={{ width: `${(survival.destroyed / survival.total) * 100}%` }}
+                            title={`战损 ${survival.destroyed} 单位 (${attritionPct}%)`}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
+
+          <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-3" aria-label="红蓝弹药消耗对比">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-primary font-semibold">弹药消耗</h3>
+              {breakdowns.ammunition.total > 0 && (
+                <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
+                  红方 {breakdowns.ammunition.redTotal} 发 ({redAmmoPct.toFixed(0)}%) · 蓝方 {breakdowns.ammunition.blueTotal} 发 ({blueAmmoPct.toFixed(0)}%)
+                </span>
+              )}
+            </div>
+            {breakdowns.ammunition.total === 0 ? (
+              <p className="text-muted-foreground font-mono">尚无发射记录</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                    <span className="text-rose-300">RED {breakdowns.ammunition.redTotal} 发</span>
+                    <span className="text-muted-foreground">总消耗 {breakdowns.ammunition.total} 发</span>
+                    <span className="text-sky-300">BLUE {breakdowns.ammunition.blueTotal} 发</span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-label="红蓝双方弹药消耗占比"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(redAmmoPct)}
+                    className="h-3 w-full rounded-full overflow-hidden bg-zinc-800/90 border border-border/70 flex"
+                  >
+                    <div
+                      className="bg-rose-500 h-full transition-all duration-300"
+                      style={{ width: `${redAmmoPct}%` }}
+                      title={`红方消耗 ${breakdowns.ammunition.redTotal} 发`}
+                    />
+                    <div
+                      className="bg-sky-500 h-full transition-all duration-300"
+                      style={{ width: `${blueAmmoPct}%` }}
+                      title={`蓝方消耗 ${breakdowns.ammunition.blueTotal} 发`}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="text-[11px] text-muted-foreground font-medium">主要弹种消耗分布 (Top 武器型号)</div>
+                  <div className="space-y-2">
+                    {breakdowns.ammunition.topWeapons.slice(0, 6).map((item) => {
+                      const label = catalog.weapons[item.weaponId]?.codeName ?? item.weaponId;
+                      const barScalePct = maxWeaponTotal > 0 ? (item.totalCount / maxWeaponTotal) * 100 : 0;
+                      const redShare = item.totalCount > 0 ? (item.redCount / item.totalCount) * 100 : 0;
+                      const blueShare = item.totalCount > 0 ? (item.blueCount / item.totalCount) * 100 : 0;
+                      return (
+                        <div key={item.weaponId} className="space-y-1">
+                          <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
+                            <span className="text-foreground/95 truncate">{label}</span>
+                            <span className="text-muted-foreground shrink-0">
+                              <span className="text-rose-300">红 {item.redCount}</span>
+                              {' / '}
+                              <span className="text-sky-300">蓝 {item.blueCount}</span>
+                              {' · '}
+                              <span className="text-foreground font-semibold">{item.totalCount} 发</span>
+                            </span>
+                          </div>
+                          <div className="h-2 w-full rounded-full bg-zinc-800/80 overflow-hidden">
+                            <div
+                              className="h-full flex rounded-full overflow-hidden transition-all duration-300"
+                              style={{ width: `${barScalePct}%` }}
+                            >
+                              {item.redCount > 0 && (
+                                <div
+                                  className="bg-rose-500 h-full"
+                                  style={{ width: `${redShare}%` }}
+                                />
+                              )}
+                              {item.blueCount > 0 && (
+                                <div
+                                  className="bg-sky-500 h-full"
+                                  style={{ width: `${blueShare}%` }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
           <section className="p-3.5 rounded-lg bg-muted/35 border border-border">
             <h3 className="text-primary font-semibold mb-2">单发战果与战役事件时间线 ({aar.events.length})</h3>
             {aar.events.length === 0 ? (
@@ -105,6 +278,19 @@ export const AarDebriefModal: React.FC = () => {
                         <Badge variant="warning">
                           {OUTCOME_BADGES[event.outcome]}
                         </Badge>
+                      )}
+                      {canJumpToReplay && (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => handleJumpToReplay(event.tick)}
+                          className="text-amber-300 border-amber-500/35 hover:bg-amber-500/15"
+                          title={`跳转到 Tick ${event.tick} 进行地图回放`}
+                          aria-label={`跳转回放 T+${event.tick} ${event.title}`}
+                        >
+                          <Play className="w-2.5 h-2.5" />
+                          <span>跳转回放</span>
+                        </Button>
                       )}
                     </div>
                   </div>

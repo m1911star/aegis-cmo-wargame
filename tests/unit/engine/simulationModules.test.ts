@@ -505,5 +505,49 @@ describe('modular simulation boundaries', () => {
     const highSpeed = calculateSonarDetectionRangeKm(hullSonar, -20, -40, 95, 24, false);
     expect(highSpeed - moderateSpeed).toBeGreaterThan(moderateSpeed - quietCrawl);
   });
+
+  test('summarizeAarBreakdowns computes side force survival and top weapon expenditure splits', async () => {
+    const { summarizeAarBreakdowns } = await import('../../../src/engine/aar');
+    const redAlive = createRuntimeUnitFromPlacement(
+      { id: 'r1', name: 'R1', callsign: 'R1', side: 'RED', platformId: 'j20_mighty_dragon', parentGroupId: 'g1', position: [120, 25], heading: 90 },
+      catalog
+    );
+    const redDead = createRuntimeUnitFromPlacement(
+      { id: 'r2', name: 'R2', callsign: 'R2', side: 'RED', platformId: 'j20_mighty_dragon', parentGroupId: 'g1', position: [120.1, 25], heading: 90 },
+      catalog
+    );
+    redDead.hp = 0;
+    redDead.status = 'destroyed';
+    const blueDead = createRuntimeUnitFromPlacement(
+      { id: 'b1', name: 'B1', callsign: 'B1', side: 'BLUE', platformId: 'f35c_lightning', parentGroupId: 'g2', position: [121, 25], heading: 270 },
+      catalog
+    );
+    blueDead.hp = 0;
+    blueDead.status = 'destroyed';
+
+    const result = summarizeAarBreakdowns(
+      {
+        events: [
+          { id: 'e1', tick: 4, simTime: 1000, side: 'RED', kind: 'launch', title: 'PL-15', weaponId: 'pl15_aam', quantity: 4 },
+          { id: 'e2', tick: 6, simTime: 1500, side: 'BLUE', kind: 'launch', title: 'AIM-120D', weaponId: 'aim120d_aam', quantity: 2 },
+          { id: 'e3', tick: 8, simTime: 2000, side: 'RED', kind: 'launch', title: 'YJ-18', weaponId: 'yj18_ashm', quantity: 1 },
+          { id: 'e4', tick: 9, simTime: 2250, side: 'RED', kind: 'hit', title: 'Hit', weaponId: 'pl15_aam', quantity: 1 },
+        ],
+        tracks: [],
+      },
+      { r1: redAlive, r2: redDead, b1: blueDead }
+    );
+
+    expect(result.forceSurvival.RED).toEqual({ active: 1, destroyed: 1, total: 2, survivalRate: 0.5, attritionRate: 0.5 });
+    expect(result.forceSurvival.BLUE).toEqual({ active: 0, destroyed: 1, total: 1, survivalRate: 0, attritionRate: 1 });
+    expect(result.ammunition.redTotal).toBe(5);
+    expect(result.ammunition.blueTotal).toBe(2);
+    expect(result.ammunition.total).toBe(7);
+    expect(result.ammunition.topWeapons).toEqual([
+      { weaponId: 'pl15_aam', redCount: 4, blueCount: 0, totalCount: 4 },
+      { weaponId: 'aim120d_aam', redCount: 0, blueCount: 2, totalCount: 2 },
+      { weaponId: 'yj18_ashm', redCount: 1, blueCount: 0, totalCount: 1 },
+    ]);
+  });
 });
 

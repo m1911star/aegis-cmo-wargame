@@ -896,6 +896,26 @@ describe('Scenario-owned environment rules', () => {
     expect(shallowContacts.RED_CONTACT_target).toBeUndefined();
     expect(deepContacts.RED_CONTACT_target).toBeDefined();
   });
+
+  test('AAR timeline event can jump directly into Replay v2 at that event tick and close the modal', () => {
+    store.getState().loadScenario(INFORMATION_EXERCISE, false, 707);
+    store.getState().stepSingleTick(2);
+    store.getState().updateUnitDoctrine('red_055_nanchang', { roe: 'hold' });
+    const targetTick = store.getState().tick;
+    store.getState().stepSingleTick(4);
+    store.getState().setActiveModal('aar');
+
+    const recording = captureBattleRecording();
+    expect(recording.untilTick).toBeGreaterThan(targetTick);
+
+    store.getState().startReplayPlayer(recording, targetTick);
+    store.getState().setActiveModal('none');
+
+    expect(store.getState().activeModal).toBe('none');
+    expect(store.getState().replayPlayer?.currentTick).toBe(targetTick);
+    expect(store.getState().tick).toBe(targetTick);
+    store.getState().exitReplayPlayer();
+  });
 });
 
 describe('Player-authored mission commands', () => {

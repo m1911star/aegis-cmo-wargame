@@ -109,3 +109,98 @@ export function summarizeAar(ledger: BattleAarLedger) {
     trackSamples: ledger.tracks.length,
   };
 }
+
+export interface SideSurvivalSummary {
+  active: number;
+  destroyed: number;
+  total: number;
+  survivalRate: number;
+  attritionRate: number;
+}
+
+export interface WeaponExpenditureItem {
+  weaponId: string;
+  redCount: number;
+  blueCount: number;
+  totalCount: number;
+}
+
+export interface AarBreakdowns {
+  forceSurvival: Record<'RED' | 'BLUE', SideSurvivalSummary>;
+  ammunition: {
+    redTotal: number;
+    blueTotal: number;
+    total: number;
+    redWeapons: [string, number][];
+    blueWeapons: [string, number][];
+    topWeapons: WeaponExpenditureItem[];
+  };
+}
+
+export function summarizeAarBreakdowns(
+  ledger: BattleAarLedger,
+  units: Record<string, RuntimeUnit>
+): AarBreakdowns {
+  const summarizeForce = (side: 'RED' | 'BLUE'): SideSurvivalSummary => {
+    const sideUnits = Object.values(units).filter((unit) => unit.side === side);
+    const destroyed = sideUnits.filter((unit) => unit.status === 'destroyed' || unit.hp <= 0).length;
+    const total = sideUnits.length;
+    const active = total - destroyed;
+    return {
+      active,
+      destroyed,
+      total,
+      survivalRate: total > 0 ? active / total : 0,
+      attritionRate: total > 0 ? destroyed / total : 0,
+    };
+  };
+
+  let redTotal = 0;
+  let blueTotal = 0;
+  const redMap = new Map<string, number>();
+  const blueMap = new Map<string, number>();
+  const combinedMap = new Map<string, { redCount: number; blueCount: number }>();
+
+  for (const event of ledger.events) {
+    if (event.kind !== 'launch') continue;
+    const qty = event.quantity ?? 1;
+    if (event.side === 'RED') redTotal += qty;
+    else if (event.side === 'BLUE') blueTotal += qty;
+
+    if (!event.weaponId || (event.side !== 'RED' && event.side !== 'BLUE')) continue;
+    const sideMap = event.side === 'RED' ? redMap : blueMap;
+    sideMap.set(event.weaponId, (sideMap.get(event.weaponId) ?? 0) + qty);
+
+    const entry = combinedMap.get(event.weaponId) ?? { redCount: 0, blueCount: 0 };
+    if (event.side === 'RED') entry.redCount += qty;
+    else entry.blueCount += qty;
+    combinedMap.set(event.weaponId, entry);
+  }
+
+  const sortMap = (map: Map<string, number>): [string, number][] =>
+    [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  const topWeapons: WeaponExpenditureItem[] = [...combinedMap.entries()]
+    .map(([weaponId, counts]) => ({
+      weaponId,
+      redCount: counts.redCount,
+      blueCount: counts.blueCount,
+      totalCount: counts.redCount + counts.blueCount,
+    }))
+    .sort((a, b) => b.totalCount - a.totalCount || a.weaponId.localeCompare(b.weaponId));
+
+  return {
+    forceSurvival: {
+      RED: summarizeForce('RED'),
+      BLUE: summarizeForce('BLUE'),
+    },
+    ammunition: {
+      redTotal,
+      blueTotal,
+      total: redTotal + blueTotal,
+      redWeapons: sortMap(redMap),
+      blueWeapons: sortMap(blueMap),
+      topWeapons,
+    },
+  };
+}
