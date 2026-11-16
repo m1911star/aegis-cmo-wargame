@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
 import { instantiateScenarioUnits, SCENARIO_EAST_SEA_THUNDER as east } from '../../../src/scenarios/builtinScenarios';
 import { projectTacticalState } from '../../../src/map/tacticalProjection';
+import { installTacticalLayers } from '../../../src/map/tacticalLayers';
 import type { TacticalContact } from '../../../src/types/wargame';
 
 test('pure tactical projection builds every GeoJSON family without exposing hidden unit IDs', () => {
@@ -84,4 +85,58 @@ test('pure tactical projection builds every GeoJSON family without exposing hidd
     .map((f) => f.properties?.id)
     .sort();
   expect(selectedIcons).toEqual(['red_055_nanchang', 'red_j20_alpha']);
+});
+
+test('terrain ridges expose numeric elevationM and installTacticalLayers registers terrain-extrusion-layer', () => {
+  const units = instantiateScenarioUnits(east);
+  const projection = projectTacticalState({
+    units,
+    contacts: {},
+    weaponsInFlight: {},
+    explosions: [],
+    missions: [],
+    referencePoints: [],
+    activePerspective: 'RED',
+    selectedUnitId: null,
+    selectedContactId: null,
+    mapLayers: {
+      showRadarRings: true,
+      showWeaponRings: true,
+      showSonarRings: true,
+      showWaypoints: true,
+      showMissions: true,
+      showAouPolygons: true,
+      showReferencePoints: true,
+      show3dTerrain: false,
+    },
+    catalog,
+    simTime: 0,
+    environment: east.environment,
+  });
+
+  expect(projection.terrainRidges.length).toBeGreaterThan(0);
+  for (const ridge of projection.terrainRidges) {
+    expect(typeof ridge.properties?.elevationM).toBe('number');
+    expect(Number(ridge.properties?.elevationM)).toBeGreaterThan(0);
+  }
+
+  const sources = new Map<string, unknown>();
+  const layers = new Map<string, { id: string; type: string; layout?: Record<string, unknown> }>();
+  installTacticalLayers({
+    getSource: (id: string) => sources.get(id) as never,
+    addSource: (id: string, spec: unknown) => {
+      sources.set(id, spec);
+      return undefined as never;
+    },
+    getLayer: (id: string) => layers.get(id) as never,
+    addLayer: (layer: unknown) => {
+      const typed = layer as { id: string; type: string; layout?: Record<string, unknown> };
+      layers.set(typed.id, typed);
+      return undefined as never;
+    },
+  });
+  const extrusion = layers.get('terrain-extrusion-layer');
+  expect(extrusion).toBeDefined();
+  expect(extrusion?.type).toBe('fill-extrusion');
+  expect(extrusion?.layout?.visibility).toBe('none');
 });

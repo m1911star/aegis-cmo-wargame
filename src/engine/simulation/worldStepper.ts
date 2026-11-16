@@ -96,6 +96,7 @@ function cloneWorldForStepping(world: SimulationWorldState): WorkingWorldState {
       ...weapon,
       position: [...weapon.position],
       trail: [...weapon.trail],
+      altitudeTrail: weapon.altitudeTrail ? [...weapon.altitudeTrail] : undefined,
       waypoints: weapon.waypoints ? weapon.waypoints.map((wp) => [...wp] as [number, number]) : undefined,
     };
   }

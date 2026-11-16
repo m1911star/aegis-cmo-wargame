@@ -142,6 +142,10 @@ export function advanceWeaponPhysics({
         missile.seekerState = 'terminal_searching';
         missile.searchElapsedSec = 0;
         missile.trail.push([...missile.position]);
+        if (missile.trail.length > 18) missile.trail.shift();
+        missile.altitudeTrail ??= Array(Math.max(0, missile.trail.length - 1)).fill(missile.altitudeM);
+        missile.altitudeTrail.push(missile.altitudeM);
+        while (missile.altitudeTrail.length > missile.trail.length) missile.altitudeTrail.shift();
         logs.push({
           id: `water_entry_${nextSimTime}_${missile.id}`,
           simTime: nextSimTime,
@@ -162,6 +166,9 @@ export function advanceWeaponPhysics({
         missile.distanceRemainingKm = getDistanceKm(missile.position, missile.aimPosition);
         missile.trail.push([...missile.position]);
         if (missile.trail.length > 18) missile.trail.shift();
+        missile.altitudeTrail ??= Array(Math.max(0, missile.trail.length - 1)).fill(missile.altitudeM);
+        missile.altitudeTrail.push(missile.altitudeM);
+        while (missile.altitudeTrail.length > missile.trail.length) missile.altitudeTrail.shift();
       }
       continue;
     }
@@ -283,6 +290,9 @@ export function advanceWeaponPhysics({
     }
     if (terrainCheck.terrainFollowAltitudeM !== undefined) {
       missile.altitudeM = terrainCheck.terrainFollowAltitudeM;
+      if (missile.altitudeTrail && missile.altitudeTrail.length > 0) {
+        missile.altitudeTrail[missile.altitudeTrail.length - 1] = missile.altitudeM;
+      }
     }
     if (flight.expired) {
       logs.push({
@@ -331,6 +341,7 @@ export function advanceWeaponPhysics({
             title: `成功拦截来袭导弹: ${missile.name} 击毁 ${targetMissile.name}`,
             message: `${missile.shooterName} 发射的 ${missile.name} 在空中成功凌空打爆敌方 ${targetMissile.name}！`,
             position: [...targetMissile.position],
+            altitudeM: targetMissile.altitudeM,
             unitId: missile.shooterId,
             weaponId: weapon.id,
             quantity: 1,
@@ -408,6 +419,7 @@ export function advanceWeaponPhysics({
         title: `${targetUnit.callsign} 软杀伤诱骗 ${missile.name}`,
         message: '已投放的有限诱饵使来袭武器末段脱锁。',
         position: [...targetUnit.position],
+        altitudeM: targetUnit.altitudeM,
         unitId: targetUnit.id,
         targetUnitId: targetUnit.id,
         weaponId: weapon.id,
@@ -440,6 +452,7 @@ export function advanceWeaponPhysics({
         title: `${targetUnit.callsign} 末端近防系统成功拦截 ${missile.name}`,
         message: `${targetUnit.name} 通过近防炮/海拉姆与电子诱饵成功挫败 ${missile.name} 末端攻击！`,
         position: [...targetUnit.position],
+        altitudeM: targetUnit.altitudeM,
         unitId: targetUnit.id,
         targetUnitId: targetUnit.id,
         weaponId: weapon.id,
@@ -515,6 +528,7 @@ export function advanceWeaponPhysics({
           title: `本方损失: ${targetUnit.name} 被击毁`,
           message: `${targetUnit.name} 遭受致命毁伤，失去战斗力。`,
           position: [...targetUnit.position],
+          altitudeM: targetUnit.altitudeM,
           unitId: targetUnit.id,
           targetUnitId: targetUnit.id,
           weaponId: weapon.id,
@@ -557,6 +571,7 @@ export function advanceWeaponPhysics({
             subsystemNotes.length > 0 ? `（子系统受损：${subsystemNotes.join('、')}）` : ''
           }。`,
           position: [...targetUnit.position],
+          altitudeM: targetUnit.altitudeM,
           unitId: targetUnit.id,
           targetUnitId: targetUnit.id,
           weaponId: weapon.id,
@@ -590,6 +605,7 @@ export function advanceWeaponPhysics({
         title: `${missile.name} 末段脱靶`,
         message: `${missile.shooterName} 发射的 ${missile.name} 末段未能命中目标。`,
         position: [...targetUnit.position],
+        altitudeM: targetUnit.altitudeM,
         unitId: missile.shooterId,
         targetUnitId: targetUnit.id,
         weaponId: weapon.id,

@@ -802,6 +802,7 @@ export function createCommandSlice(set: StoreSet) {
           targetId: areaAttack ? contact.id : contact.actualUnitId,
           targetType: areaAttack ? 'area' : 'unit',
           position: [...attacker.position], launchPosition: [...attacker.position], trail: [[...attacker.position]],
+          altitudeTrail: [attacker.altitudeM],
           altitudeM: weapon.launchMedium === 'air_drop' ? attacker.altitudeM : weapon.cruiseAltitudeM,
           heading: getBearingDeg(attacker.position, firstAimTarget),
           speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
@@ -843,7 +844,7 @@ export function createCommandSlice(set: StoreSet) {
       const log: CombatLogEntry = { id: `manual_log_${s.tick}_${s.commandSequence}`, simTime: s.simTime,
         side: attacker.side, category: 'LAUNCH', severity: 'warning', title: `${attacker.callsign} 发射 ${salvo} 枚 ${weapon.codeName}`,
         message: `${areaAttack ? '按最近辐射方位/AOU发射，不绑定隐藏平台' : `瞄准 ${contact.displayName}`}（${validDogleg ? `含 ${validDogleg.length} 个转折点 · ` : ''}估计航程 ${solution.distanceKm!.toFixed(1)} km）。${solution.riskWarnings.join('；')}`,
-        unitId: attacker.id, position: [...attacker.position], weaponId: weapon.id,
+        unitId: attacker.id, position: [...attacker.position], altitudeM: attacker.altitudeM, weaponId: weapon.id,
         targetUnitId: areaAttack ? undefined : contact.actualUnitId, quantity: salvo };
       return { units: { ...s.units, [attacker.id]: updatedAttacker }, score, weaponsInFlight,
         pendingRiskEngagement: null, pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [], interactionMode: 'select', logs: [log, ...s.logs].slice(0, 250) };

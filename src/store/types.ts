@@ -90,6 +90,7 @@ export interface MapLayerVisibility {
   showMissions: boolean;
   showAouPolygons: boolean;
   showReferencePoints: boolean;
+  show3dTerrain?: boolean;
 }
 
 export interface WargameStoreState {
@@ -185,6 +186,7 @@ export interface WargameStoreState {
     parentGroupId: string;
   } | null;
   mapLayers: MapLayerVisibility;
+  tacview3dOpen: boolean;
   cameraFlyToRequest: {
     center: [number, number];
     zoom?: number;
@@ -235,6 +237,7 @@ export interface WargameStoreState {
   }) => void;
   startForcePackageSpawnOnMap: (config: NonNullable<WargameStoreState['pendingForcePackageConfig']>) => void;
   toggleMapLayer: (layer: keyof MapLayerVisibility) => void;
+  toggleTacview3d: (open?: boolean) => void;
   flyToPosition: (center: [number, number], zoom?: number) => void;
   setActiveModal: (modal: WargameStoreState['activeModal']) => void;
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database,
+  Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database, Box,
   FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler, Shuffle, History, Swords,
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
@@ -58,6 +58,8 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
   const setPlayMode = useWargameStore((s) => s.setPlayMode);
+  const tacview3dOpen = useWargameStore((s) => s.tacview3dOpen);
+  const toggleTacview3d = useWargameStore((s) => s.toggleTacview3d);
   const [randomizeSpawns, setRandomizeSpawns] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<
     | { type: 'reset'; randomize: boolean }
@@ -373,6 +375,16 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
               className={`toolbar-button toolbar-button-subtle ${rightOpen ? 'panel-active' : ''}`}
             >
               <PanelRight /><span>详情</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleTacview3d()}
+              aria-expanded={tacview3dOpen}
+              aria-controls="tacview-3d-floating-window"
+              title="快捷键 [F4]：打开/关闭可拖拽独立 3D 空海剖面视窗"
+              className={`toolbar-button toolbar-button-subtle ${tacview3dOpen ? 'panel-active text-cyan-300' : ''}`}
+            >
+              <Box /><span>3D视窗</span>
             </button>
             <button
               type="button"

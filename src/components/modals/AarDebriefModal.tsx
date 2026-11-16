@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
-import { ChartColumn, Check, Download, Play } from 'lucide-react';
+import React, { Suspense, useMemo, useState } from 'react';
+import { Box, ChartColumn, Check, Download, Play } from 'lucide-react';
+import { buildAarBoxSlice } from '../../tacview3d/boxSlice';
 import { summarizeAar, summarizeAarBreakdowns } from '../../engine/aar';
 import { captureBattleRecording, captureShareableAarPackage } from '../../store/battleRecording';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ModalHeader, ModalShell } from '../ui/dialog';
+
+const LazyLocalAirSeaBox3D = React.lazy(() => import('../tacview/LocalAirSeaBox3D'));
 
 const OUTCOME_BADGES = {
   hit: '命中受损',
@@ -28,6 +31,30 @@ export const AarDebriefModal: React.FC = () => {
   const currentScenario = useWargameStore((s) => s.currentScenario);
   const replayPlayer = useWargameStore((s) => s.replayPlayer);
   const [exported, setExported] = useState(false);
+  const environment = useWargameStore((s) => s.environment);
+  const [show3dAar, setShow3dAar] = useState(false);
+  const [aarFocusCenter, setAarFocusCenter] = useState<[number, number] | undefined>(undefined);
+  const [aarFocusLabel, setAarFocusLabel] = useState('交战空域复盘');
+  const maxAarTick = useMemo(() => {
+    let maxT = tick;
+    for (const tr of aar.tracks) if (tr.tick > maxT) maxT = tr.tick;
+    for (const ev of aar.events) if (ev.tick > maxT) maxT = ev.tick;
+    return Math.max(0, maxT);
+  }, [aar.tracks, aar.events, tick]);
+  const [aarReplayTick, setAarReplayTick] = useState<number>(maxAarTick);
+  const effectiveReplayTick = Math.min(aarReplayTick, maxAarTick);
+  const aarSlice = useMemo(() => {
+    if (!show3dAar) return null;
+    return buildAarBoxSlice({
+      aar,
+      units,
+      upToTick: effectiveReplayTick,
+      anchorCenter: aarFocusCenter,
+      anchorLabel: aarFocusLabel,
+      radiusKm: 130,
+      environment,
+    });
+  }, [show3dAar, aar, units, effectiveReplayTick, aarFocusCenter, aarFocusLabel, environment]);
   const aarSummary = summarizeAar(aar);
   const breakdowns = summarizeAarBreakdowns(aar, units);
 
@@ -254,6 +281,50 @@ export const AarDebriefModal: React.FC = () => {
             )}
           </section>
 
+          <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-2.5" aria-label="3D 交战轨迹复盘">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-cyan-300 font-semibold flex items-center gap-1.5">
+                <Box className="w-4 h-4" />
+                <span>3D 交战轨迹复盘</span>
+              </h3>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  setAarReplayTick(maxAarTick);
+                  setShow3dAar((prev) => !prev);
+                }}
+                className="text-cyan-300 border-cyan-500/35 hover:bg-cyan-500/15"
+              >
+                <span>{show3dAar ? '收起 3D 复盘' : '展开 3D 交战轨迹'}</span>
+              </Button>
+            </div>
+            {show3dAar && aarSlice && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 text-[11px] font-mono">
+                  <span className="text-muted-foreground shrink-0">复盘时刻: T+{effectiveReplayTick}</span>
+                  <input
+                    type="range"
+                    aria-label="3D 复盘时间轴"
+                    min={0}
+                    max={Math.max(1, maxAarTick)}
+                    value={effectiveReplayTick}
+                    onChange={(e) => setAarReplayTick(Number(e.target.value))}
+                    className="flex-1 accent-cyan-400"
+                  />
+                </div>
+                <Suspense
+                  fallback={
+                    <div className="h-[300px] rounded-md border border-cyan-500/35 bg-[#040813] flex items-center justify-center text-xs text-cyan-300 font-mono">
+                      正在按需加载 3D 复盘视窗...
+                    </div>
+                  }
+                >
+                  <LazyLocalAirSeaBox3D slice={aarSlice} heightClassName="h-[300px]" />
+                </Suspense>
+              </div>
+            )}
+          </section>
           <section className="p-3.5 rounded-lg bg-muted/35 border border-border">
             <h3 className="text-primary font-semibold mb-2">单发战果与战役事件时间线 ({aar.events.length})</h3>
             {aar.events.length === 0 ? (
@@ -278,6 +349,23 @@ export const AarDebriefModal: React.FC = () => {
                         <Badge variant="warning">
                           {OUTCOME_BADGES[event.outcome]}
                         </Badge>
+                      )}
+                      {event.position && (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => {
+                            setAarFocusCenter(event.position);
+                            setAarFocusLabel(event.title);
+                            setAarReplayTick(event.tick);
+                            setShow3dAar(true);
+                          }}
+                          className="text-cyan-300 border-cyan-500/35 hover:bg-cyan-500/15"
+                          title="在 3D 剖面盒中定位此交战事件"
+                        >
+                          <Box className="w-2.5 h-2.5" />
+                          <span>3D 定位</span>
+                        </Button>
                       )}
                       {canJumpToReplay && (
                         <Button

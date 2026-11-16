@@ -283,7 +283,9 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       showMissions: true,
       showAouPolygons: true,
       showReferencePoints: true,
+      show3dTerrain: false,
     },
+    tacview3dOpen: false,
     cameraFlyToRequest: null,
     activeModal: 'none' as const,
 
@@ -748,6 +750,10 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     toggleMapLayer: (layer: keyof WargameStoreState['mapLayers']) =>
       set((s) => ({
         mapLayers: { ...s.mapLayers, [layer]: !s.mapLayers[layer] },
+      })),
+    toggleTacview3d: (open?: boolean) =>
+      set((s) => ({
+        tacview3dOpen: open ?? !s.tacview3dOpen,
       })),
 
     flyToPosition: (center: [number, number], zoom?: number) =>

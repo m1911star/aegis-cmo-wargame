@@ -258,3 +258,47 @@ test('generates and launches a custom skirmish battle from theater and force pac
   await page.getByRole('button', { name: '生成遭遇战并开局' }).click();
   await expect(page.getByText(/战役想定已载入: 自由遭遇战 \/\/ 海峡浅海封锁区/)).toBeVisible();
 });
+
+test('toggles 3D terrain extrusion, drags independent 3D air-sea viewport, and renders 3D replay in AAR', async ({ page }) => {
+  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
+
+  // 1. Toggle 3D terrain extrusion in MapLayersTab
+  await page.getByRole('button', { name: '图层' }).click();
+  const terrain3dSwitch = page.getByLabel('立体山脊遮蔽 (3D Pitch)');
+  await expect(terrain3dSwitch).toBeVisible();
+  await terrain3dSwitch.click();
+  await expect(terrain3dSwitch).toHaveAttribute('aria-checked', 'true');
+
+  // 2. Open independent 3D Air-Sea Viewport from Inspector or Header and drag it
+  const inspectorBoxBtn = page.locator('#inspector-panel').getByRole('button', { name: /打开独立 3D 空海剖面视窗/ });
+  await expect(inspectorBoxBtn).toBeVisible();
+  await inspectorBoxBtn.click();
+
+  const floatingWin = page.locator('#tacview-3d-floating-window');
+  await expect(floatingWin).toBeVisible();
+  await expect(floatingWin.getByText(/3D 空海剖面 \/\/ DRAGON-01/)).toBeVisible();
+  await expect(floatingWin.locator('canvas')).toBeVisible();
+
+  const beforeBox = await floatingWin.boundingBox();
+  expect(beforeBox).not.toBeNull();
+  await page.mouse.move(beforeBox!.x + 80, beforeBox!.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(beforeBox!.x - 90, beforeBox!.y - 60, { steps: 5 });
+  await page.mouse.up();
+  const afterBox = await floatingWin.boundingBox();
+  expect(afterBox).not.toBeNull();
+  expect(afterBox!.x).toBeLessThan(beforeBox!.x - 40);
+  expect(afterBox!.y).toBeLessThan(beforeBox!.y - 30);
+
+  await floatingWin.getByTitle('放大 3D 视窗').click();
+  await expect(floatingWin.getByTitle('恢复标准视窗')).toBeVisible();
+  await floatingWin.getByLabel('关闭 3D 视窗').click();
+  await expect(floatingWin).toHaveCount(0);
+
+  // 3. Open AAR modal in sandbox mode and verify 3D replay section
+  await page.getByRole('button', { name: '指挥模式' }).click();
+  await page.getByRole('button', { name: '战后复盘' }).click();
+  await expect(page.getByText('3D 交战轨迹复盘')).toBeVisible();
+  await page.getByRole('button', { name: '展开 3D 交战轨迹' }).click();
+  await expect(page.getByLabel('3D 复盘时间轴')).toBeVisible();
+});

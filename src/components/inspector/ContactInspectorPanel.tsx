@@ -2,6 +2,7 @@ import React from 'react';
 import { classificationLabels, threatLabels } from '../../ui/labels';
 import type { TacticalContact } from '../../types/wargame';
 import { sanitizeMilsymbolSvg } from '../../validation/wargameSchemas';
+import { InspectorTacviewCard } from '../tacview/InspectorTacviewCard';
 import { FireControlDiagnostics } from '../FireControlDiagnostics';
 
 interface Props {
@@ -79,6 +80,8 @@ export const ContactInspectorPanel: React.FC<Props> = ({ contact, symbolSvgHtml 
         探测传感器: {contact.detectedBySources.join(' , ')}
       </div>
     </div>
+
+    <InspectorTacviewCard anchorLabel={contact.displayName} />
 
     <FireControlDiagnostics key={contact.id} contact={contact} />
   </aside>

@@ -51,6 +51,20 @@ export function installTacticalLayers(map: TacticalLayerHost) {
     },
   });
   addLayer({
+    id: 'terrain-extrusion-layer',
+    type: 'fill-extrusion',
+    source: 'terrain-source',
+    layout: {
+      visibility: 'none',
+    },
+    paint: {
+      'fill-extrusion-color': '#b45309',
+      'fill-extrusion-height': ['*', ['coalesce', ['get', 'elevationM'], 0], 4],
+      'fill-extrusion-base': 0,
+      'fill-extrusion-opacity': 0.38,
+    },
+  });
+  addLayer({
     id: 'weather-zones-fill-layer',
     type: 'fill',
     source: 'weather-zones-source',

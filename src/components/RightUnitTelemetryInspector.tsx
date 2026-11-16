@@ -17,6 +17,7 @@ import { Select } from './ui/select';
 import { ContactInspectorPanel } from './inspector/ContactInspectorPanel';
 import { UnitDoctrineWraPanel } from './inspector/UnitDoctrineWraPanel';
 import { UnitKinematicsPanel } from './inspector/UnitKinematicsPanel';
+import { InspectorTacviewCard } from './tacview/InspectorTacviewCard';
 import { UnitWeaponsHangarPanel } from './inspector/UnitWeaponsHangarPanel';
 
 const EMPTY_MISSIONS: never[] = [];
@@ -242,6 +243,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
       </div>
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 inspector-content">
+        <InspectorTacviewCard anchorLabel={selectedUnit.callsign} />
         {selectedUnitIds.length > 1 && (
           <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-400/35 space-y-2 text-[11px]">
             <div className="flex items-center justify-between gap-2">

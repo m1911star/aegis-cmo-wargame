@@ -12,6 +12,7 @@ import { TutorialChecklistOverlay } from './components/TutorialChecklistOverlay'
 import { ActionFeedbackToast } from './components/ActionFeedbackToast';
 import { ReplayPlayerBar } from './components/ReplayPlayerBar';
 import { BattleResultOverlay } from './components/modals/BattleResultOverlay';
+import { DraggableTacviewViewport } from './components/tacview/DraggableTacviewViewport';
 
 export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
@@ -177,6 +178,9 @@ export default function App() {
             });
           }
         }
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        state.toggleTacview3d();
       } else if (e.key === 'Tab') {
         e.preventDefault();
         const next = !(leftOpenRef.current || rightOpenRef.current);
@@ -235,6 +239,7 @@ export default function App() {
           <RightUnitTelemetryInspector />
         </div>
       </div>
+      <DraggableTacviewViewport />
 
       {/* 底栏：可折叠 C4ISR 实时战报事件流与战损积分大盘 */}
       <BottomCombatLogDock />

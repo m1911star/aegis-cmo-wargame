@@ -212,6 +212,9 @@ export function advanceGuidance(
   }
   missile.trail.push([...missile.position]);
   if (missile.trail.length > 18) missile.trail.shift();
+  missile.altitudeTrail ??= Array(Math.max(0, missile.trail.length - 1)).fill(missile.altitudeM);
+  missile.altitudeTrail.push(missile.altitudeM);
+  while (missile.altitudeTrail.length > missile.trail.length) missile.altitudeTrail.shift();
   const targetEnd = target && !('platformId' in target)
     ? move(target.position, target.speedKts * 1.852 * dtSec / 3600, target.heading) : target?.position;
   const reached = !!locked && !!target && !!targetEnd &&

@@ -77,7 +77,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     if (cursorReadoutRef.current) {
       cursorReadoutRef.current.textContent = `${initialScenario.initialCamera.center[1].toFixed(3)}°N, ${initialScenario.initialCamera.center[0].toFixed(3)}°E`;
     }
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-left');
     const basemapLoader = new BasemapLoader({
       applyStyle: (style) => { map.setStyle(style, { diff: false }); },
       onState: setBasemapState,
@@ -286,6 +286,13 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       (map.getSource('terrain-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.terrainRidges,
       });
+      if (map.getLayer('terrain-extrusion-layer')) {
+        map.setLayoutProperty(
+          'terrain-extrusion-layer',
+          'visibility',
+          state.mapLayers.show3dTerrain ? 'visible' : 'none'
+        );
+      }
       (map.getSource('weather-zones-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.weatherZones,
       });
@@ -638,6 +645,20 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
     if (initialBasemapMode !== 'offline') {
       void basemapLoader.select(initialBasemapMode);
     }
+    const unsubscribeTerrain3d = useWargameStore.subscribe(
+      (s) => Boolean(s.mapLayers.show3dTerrain),
+      (enabled) => {
+        if (!mapRef.current) return;
+        if (mapRef.current.getLayer('terrain-extrusion-layer')) {
+          mapRef.current.setLayoutProperty('terrain-extrusion-layer', 'visibility', enabled ? 'visible' : 'none');
+        }
+        if (enabled && mapRef.current.getPitch() < 20) {
+          mapRef.current.easeTo({ pitch: 45, duration: 450 });
+        } else if (!enabled && mapRef.current.getPitch() > 0) {
+          mapRef.current.easeTo({ pitch: 0, bearing: 0, duration: 400 });
+        }
+      }
+    );
 
     // Panel toggles and the log dock resize the canvas without a window resize.
     const resizeObserver = new ResizeObserver(() => map.resize());
@@ -659,6 +680,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       unsubscribeData();
       unsubscribeCamera();
       unsubscribeBasemap();
+      unsubscribeTerrain3d();
       basemapLoader.dispose();
       basemapLoaderRef.current = null;
       map.remove();

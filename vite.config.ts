@@ -16,6 +16,7 @@ export default defineConfig({
           if (id.includes('node_modules/maplibre-gl')) return 'vendor-maplibre';
           if (id.includes('node_modules/milsymbol')) return 'vendor-milsymbol';
           if (id.includes('node_modules/@turf')) return 'vendor-turf';
+          if (id.includes('node_modules/three')) return 'vendor-three';
           if (
             id.includes('node_modules/react') ||
             id.includes('node_modules/zustand') ||

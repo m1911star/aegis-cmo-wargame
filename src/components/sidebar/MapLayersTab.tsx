@@ -16,6 +16,7 @@ const LAYER_ITEMS: {
   { key: 'showAouPolygons', label: '情报误差范围', desc: '显示ESM/声呐测向误差范围' },
   { key: 'showMissions', label: '自动巡逻任务区多边形', desc: '显示防空、反舰与反潜巡逻区' },
   { key: 'showReferencePoints', label: '战术参考点', desc: '显示海图基准坐标点' },
+  { key: 'show3dTerrain', label: '立体山脊遮蔽 (3D Pitch)', desc: '倾斜主图视角并将山脊高地拉伸为半透明立体块' },
 ];
 
 export const MapLayersTab: React.FC = () => {
@@ -41,7 +42,7 @@ export const MapLayersTab: React.FC = () => {
       </label>
       <div className="text-[10px] text-muted-foreground font-medium px-1 pt-0.5">地图显示设置</div>
       {LAYER_ITEMS.map((item) => {
-        const active = mapLayers[item.key];
+        const active = Boolean(mapLayers[item.key]);
         return (
           <div
             key={item.key}

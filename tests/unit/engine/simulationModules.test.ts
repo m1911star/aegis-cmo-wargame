@@ -7,6 +7,7 @@ import { seekerCanObserve } from '../../../src/engine/guidance';
 import { advanceWeaponPhysics } from '../../../src/engine/simulation/weaponPhysics';
 import { computeMissileEnergyFactor } from '../../../src/engine/guidance';
 import { deriveMissionAssignments } from '../../../src/engine/missions';
+import { createAarLedger, recordAarTick } from '../../../src/engine/aar';
 import { evaluateBattleAssessment } from '../../../src/engine/simulation/battleAssessment';
 import { createRuntimeUnitFromPlacement } from '../../../src/engine/simulation/unitFactory';
 import { advanceSimulation, type SimulationWorldState } from '../../../src/engine/simulationEngine';
@@ -548,6 +549,104 @@ describe('modular simulation boundaries', () => {
       { weaponId: 'aim120d_aam', redCount: 0, blueCount: 2, totalCount: 2 },
       { weaponId: 'yj18_ashm', redCount: 1, blueCount: 0, totalCount: 1 },
     ]);
+  });
+
+  test('weapon guidance and air-drop torpedoes advance and cap altitudeTrail in lockstep with trail', () => {
+    const shooter = createRuntimeUnitFromPlacement(
+      { id: 's1', name: 'S1', callsign: 'S1', side: 'RED', platformId: 'j20_mighty_dragon', parentGroupId: 'g1', position: [122.0, 25.0], heading: 90, altitudeM: 11000 },
+      catalog
+    );
+    const target = createRuntimeUnitFromPlacement(
+      { id: 't1', name: 'T1', callsign: 'T1', side: 'BLUE', platformId: 'e2d_hawkeye', parentGroupId: 'g2', position: [123.2, 25.0], heading: 270, altitudeM: 8500 },
+      catalog
+    );
+    const weapon = catalog.weapons.pl15_aam;
+    const missile: WeaponInFlight = {
+      id: 'm_loft_1',
+      weaponId: weapon.id,
+      name: weapon.codeName,
+      side: 'RED',
+      shooterId: shooter.id,
+      shooterName: shooter.callsign,
+      targetId: target.id,
+      targetType: 'unit',
+      position: [122.0, 25.0],
+      launchPosition: [122.0, 25.0],
+      trail: [[122.0, 25.0]],
+      altitudeTrail: [11000],
+      altitudeM: 11000,
+      heading: 90,
+      speedKts: weapon.speedKts,
+      distanceRemainingKm: 120,
+      maxRangeKm: weapon.maxRangeKm,
+      traveledKm: 0,
+      basePk: weapon.basePk,
+      warheadDamage: weapon.warheadDamage,
+      aimPosition: [...target.position],
+      aimHeading: target.heading,
+      aimSpeedKts: target.speedKts,
+      aimAltitudeM: target.altitudeM,
+      targetDomain: 'air',
+      seekerState: 'midcourse_datalink',
+    };
+
+    const world: SimulationWorldState = {
+      simTime: 0,
+      units: { [shooter.id]: shooter, [target.id]: target },
+      contacts: {},
+      weaponsInFlight: { [missile.id]: missile },
+      explosions: [],
+      missions: [],
+      score: emptyScore(),
+    };
+
+    const stepped = advanceSimulation(
+      world,
+      catalog,
+      6.0, // 24 ticks -> exceeds 18-point trail cap
+      { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false },
+      'GOD'
+    );
+    const updated = stepped.nextState.weaponsInFlight[missile.id];
+    expect(updated).toBeDefined();
+    expect(updated.trail.length).toBe(18);
+    expect(updated.altitudeTrail).toBeDefined();
+    expect(updated.altitudeTrail?.length).toBe(updated.trail.length);
+    expect(updated.altitudeTrail?.[updated.altitudeTrail.length - 1]).toBe(updated.altitudeM);
+  });
+
+  test('recordAarTick preserves spatial position and altitudeM on combat events', () => {
+    const unit = createRuntimeUnitFromPlacement(
+      { id: 'u1', name: 'U1', callsign: 'U1', side: 'BLUE', platformId: 'f35c_lightning', parentGroupId: 'g1', position: [124.5, 25.5], heading: 0 },
+      catalog
+    );
+    const ledger = createAarLedger();
+    recordAarTick(
+      ledger,
+      12,
+      3000,
+      { [unit.id]: unit },
+      [
+        {
+          id: 'log_int_1',
+          simTime: 3000,
+          side: 'BLUE',
+          category: 'INTERCEPT',
+          severity: 'info',
+          title: 'SM-6 intercept',
+          message: 'Splash one',
+          position: [124.8, 25.7],
+          altitudeM: 14200,
+          unitId: unit.id,
+          weaponId: 'sm6_dual2',
+          quantity: 1,
+        },
+      ],
+      true
+    );
+    expect(ledger.events).toHaveLength(1);
+    expect(ledger.events[0].position).toEqual([124.8, 25.7]);
+    expect(ledger.events[0].altitudeM).toBe(14200);
   });
 });
 

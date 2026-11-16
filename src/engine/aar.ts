@@ -56,6 +56,8 @@ export function recordAarTick(
         quantity: log.quantity ?? 1,
         shooterId: log.aarShooterId,
         outcome: log.aarOutcome,
+        position: log.position ? [...log.position] : undefined,
+        altitudeM: log.altitudeM,
       });
     }
     if (ledger.events.length > 50_000) {

@@ -173,6 +173,7 @@ export function runAutoDefense({
             position: [...shooter.position],
             launchPosition: [...shooter.position],
             trail: [[...shooter.position]],
+            altitudeTrail: [shooter.altitudeM],
             altitudeM: samSpec.cruiseAltitudeM,
             heading: getBearingDeg(shooter.position, incoming.position),
             speedKts: samSpec.speedKts,
@@ -203,6 +204,7 @@ export function runAutoDefense({
             hasFriendlyAwacsCec && distanceToIncomingKm > ownHorizonKm ? '（预警机CEC超视距引导）' : ''
           }。`,
           position: [...shooter.position],
+          altitudeM: shooter.altitudeM,
           unitId: shooter.id,
           weaponId: samSpec.id,
           quantity: interceptCount,
@@ -308,6 +310,7 @@ export function runAutoDefense({
           position: [...shooter.position],
           launchPosition: [...shooter.position],
           trail: [[...shooter.position]],
+          altitudeTrail: [shooter.altitudeM],
           altitudeM: isAirDrop ? shooter.altitudeM : weapon.cruiseAltitudeM,
           heading: getBearingDeg(
             shooter.position,
@@ -388,6 +391,7 @@ export function runAutoDefense({
           1
         )} km）发起火力打击！`,
         position: [...shooter.position],
+        altitudeM: shooter.altitudeM,
         unitId: shooter.id,
         targetUnitId: targetId,
         weaponId: weapon.id,
@@ -505,6 +509,7 @@ export function processPendingTotStrikeOrders(
         position: [...shooter.position],
         launchPosition: [...shooter.position],
         trail: [[...shooter.position]],
+        altitudeTrail: [shooter.altitudeM],
         altitudeM: weapon.launchMedium === 'air_drop' ? shooter.altitudeM : weapon.cruiseAltitudeM,
         heading: getBearingDeg(shooter.position, firstLegTarget),
         speedKts: weapon.launchMedium === 'air_drop' ? weapon.airDropSpeedKts! : weapon.speedKts,
@@ -535,6 +540,7 @@ export function processPendingTotStrikeOrders(
       title: `[TOT同时弹着升空] ${shooter.callsign} 按计划释放 ${salvo} 枚 ${weapon.codeName}`,
       message: `预定弹着窗口 T+${Math.round((order.plannedImpactSimTime - nextSimTime) / 1000)}s，与友邻波次同步突防。`,
       position: [...shooter.position],
+      altitudeM: shooter.altitudeM,
       unitId: shooter.id,
       weaponId: weapon.id,
       targetUnitId: areaAttack ? undefined : contact.actualUnitId,
