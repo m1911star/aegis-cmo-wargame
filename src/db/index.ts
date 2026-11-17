@@ -123,7 +123,10 @@ export function resolveEquipmentCatalog(
 /**
  * 校验装备数据库内部所有外键引用完整性 (Platforms -> Sensors, Weapons, Loadouts, Hangar)
  */
-export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
+export function validateCatalogIntegrity(
+  catalog: EquipmentCatalog,
+  options?: { validateForcePackages?: boolean }
+): {
   valid: boolean;
   errors: string[];
 } {
@@ -320,7 +323,15 @@ export function validateCatalogIntegrity(catalog: EquipmentCatalog): {
     }
   }
 
-  errors.push(...validateForcePackageIntegrity(FORCE_PACKAGES, catalog).errors);
+  const shouldValidateForcePackages =
+    options?.validateForcePackages ??
+    (catalog === MASTER_EQUIPMENT_CATALOG ||
+      Object.keys(catalog.platforms).some((id) =>
+        Object.hasOwn(MASTER_EQUIPMENT_CATALOG.platforms, id)
+      ));
+  if (shouldValidateForcePackages) {
+    errors.push(...validateForcePackageIntegrity(FORCE_PACKAGES, catalog).errors);
+  }
 
   return {
     valid: errors.length === 0,

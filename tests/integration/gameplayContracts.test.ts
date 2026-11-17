@@ -163,7 +163,7 @@ describe('One fire-control solution, bounded observations', () => {
   test('a team track without a receiving datalink is not usable midcourse support', () => {
     const a = unit('a'); const observer = unit('eye', { platformId: 'kj500_awacs' });
     const b = unit('b', { side: 'BLUE' }); const c = contact(b, observer);
-    const local = structuredClone(catalog); local.platforms[a.platformId].hasDatalink = false;
+    const local = structuredClone(catalog); local.platforms[a.platformId].hasDatalink = false; local.platforms[a.platformId].commIds = [];
     expect(trackSupport(a, c, local.weapons.yj18_ashm, { a, eye: observer, b }, local, 0)).toEqual([]);
     c.sourceUnitIds = [a.id];
     expect(trackSupport(a, c, local.weapons.yj18_ashm, { a, b }, local, 0)).toEqual([a.id]);

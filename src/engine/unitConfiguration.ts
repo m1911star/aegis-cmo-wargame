@@ -95,13 +95,15 @@ export function resolveUnitConfiguration(
     throw new Error(`Loadout ${loadout.id} is incompatible with platform ${platformId}`);
   }
 
-  const sensorMountsMap = new Map<string, PlatformSensorMount>();
+  const mountMetaBySensorId = new Map<string, PlatformSensorMount>();
   for (const sm of platform.sensorMounts ?? []) {
-    sensorMountsMap.set(sm.sensorId, { ...sm });
+    mountMetaBySensorId.set(sm.sensorId, sm);
   }
+  const sensorMountsMap = new Map<string, PlatformSensorMount>();
   for (const id of platform.sensorIds) {
     if (!sensorMountsMap.has(id)) {
-      sensorMountsMap.set(id, { sensorId: id });
+      const meta = mountMetaBySensorId.get(id);
+      sensorMountsMap.set(id, meta ? { ...meta } : { sensorId: id });
     }
   }
   for (const id of loadout?.additionalSensorIds ?? []) {
