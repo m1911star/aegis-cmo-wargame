@@ -1,3 +1,4 @@
+import * as turf from '../../engine/turfGeo';
 import { createAarLedger } from '../../engine/aar';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
 import { createRandomStream, DEFAULT_SEED, SNAPSHOT_INTERVAL_TICKS } from '../../engine/determinism';
@@ -7,6 +8,7 @@ import {
   initializeWorldContacts,
   type SimulationWorldState,
 } from '../../engine/simulationEngine';
+import { resolveUnitConfiguration } from '../../engine/unitConfiguration';
 import { BASEMAP_PRESETS, DEFAULT_BASEMAP } from '../../map/basemaps';
 import {
   BUILTIN_SCENARIOS,
@@ -23,9 +25,10 @@ import {
   type CampaignResupplyChoice,
   type CampaignState,
 } from '../../scenarios/campaign';
-import { FORCE_PACKAGES } from '../../db';
+import { FORCE_PACKAGES, resolveEquipmentCatalog, validateCatalogIntegrity } from '../../db';
 import { compileScenario } from '../../scenarios/compileScenario';
-import type { ScenarioDefinition } from '../../types/wargame';
+import type { EquipmentCatalog, ScenarioDefinition } from '../../types/wargame';
+import { assertCatalogOverlayShape } from '../../validation/wargameSchemas';
 import { emitActionFeedback } from '../actionFeedbackBus';
 import {
   AUTOSAVE_STORAGE_KEY,
@@ -275,6 +278,106 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     clearPendingStrikeWaypoints: () => set({ pendingStrikeWaypoints: [] }),
     pendingSpawnConfig: null,
     pendingForcePackageConfig: null,
+    pendingPolygonDraft: null,
+    startPolygonDraw: (config: Omit<NonNullable<WargameStoreState['pendingPolygonDraft']>, 'vertices'>) => {
+      const s = get();
+      if (s.playMode !== 'sandbox') {
+        emitActionFeedback('warning', '请先切换至沙盒模式再在地图上标绘多边形');
+        return;
+      }
+      set({
+        pendingPolygonDraft: { ...config, vertices: [] },
+        interactionMode: 'draw_polygon',
+        activeModal: 'none',
+      });
+      emitActionFeedback('info', `已进入地图多边形标绘：依次左键点击海图添加顶点（≥3），点击顶部「闭合保存」完成`);
+    },
+    appendPolygonDrawVertex: (coord: [number, number]) =>
+      set((s) => {
+        if (!s.pendingPolygonDraft || !Array.isArray(coord) || coord.length !== 2 ||
+            !Number.isFinite(coord[0]) || !Number.isFinite(coord[1])) return s;
+        if (s.pendingPolygonDraft.vertices.length >= 64) return s;
+        return {
+          pendingPolygonDraft: {
+            ...s.pendingPolygonDraft,
+            vertices: [...s.pendingPolygonDraft.vertices, [Number(coord[0].toFixed(4)), Number(coord[1].toFixed(4))]],
+          },
+        };
+      }),
+    undoPolygonDrawVertex: () =>
+      set((s) => {
+        if (!s.pendingPolygonDraft || s.pendingPolygonDraft.vertices.length === 0) return s;
+        return {
+          pendingPolygonDraft: {
+            ...s.pendingPolygonDraft,
+            vertices: s.pendingPolygonDraft.vertices.slice(0, -1),
+          },
+        };
+      }),
+    cancelPolygonDraw: () =>
+      set({
+        pendingPolygonDraft: null,
+        interactionMode: 'select',
+      }),
+    commitPolygonDraw: () => {
+      const s = get();
+      const draft = s.pendingPolygonDraft;
+      if (!draft || draft.vertices.length < 3) {
+        emitActionFeedback('warning', '多边形至少需要标绘 3 个顶点');
+        return false;
+      }
+      const poly = turf.polygon([[...draft.vertices, draft.vertices[0]]]);
+      if (turf.area(poly) <= 1 || turf.kinks(poly).features.length > 0) {
+        emitActionFeedback('warning', '多边形存在自相交或退化边，请撤销调整顶点');
+        return false;
+      }
+      const beforeSeq = get().commandSequence;
+      if (draft.targetKind === 'control_area') {
+        get().upsertObjective({
+          title: draft.name.trim() || '新建夺控区',
+          side: draft.side ?? 'RED',
+          type: 'control_area',
+          unitIds: [],
+          areaPolygon: draft.vertices,
+          controlDomains: ['land', 'surface'],
+          holdDurationSec: draft.holdDurationSec,
+          required: true,
+          points: draft.pointsScore ?? 200,
+        });
+      } else if (draft.targetKind === 'land') {
+        get().upsertEnvironmentPolygon({
+          kind: 'land',
+          name: draft.name.trim() || '高地/岛屿遮蔽区',
+          areaPolygon: draft.vertices,
+          elevationM: draft.elevationM ?? 600,
+        });
+      } else if (draft.targetKind === 'acoustic_shallow' || draft.targetKind === 'acoustic_deep') {
+        get().upsertEnvironmentPolygon({
+          kind: 'acoustic',
+          name: draft.name.trim() || (draft.targetKind === 'acoustic_shallow' ? '浅海声学杂波区' : '深海汇聚声道区'),
+          areaPolygon: draft.vertices,
+          acousticKind: draft.targetKind === 'acoustic_shallow' ? 'shallow' : 'deep',
+        });
+      } else {
+        get().upsertEnvironmentPolygon({
+          kind: 'weather',
+          name: draft.name.trim() || (draft.targetKind === 'weather_rain' ? '雷暴强降雨区' : '海雾低能见区'),
+          areaPolygon: draft.vertices,
+          condition: draft.targetKind === 'weather_rain' ? 'rain_storm' : 'heavy_fog',
+          seaStateOverride: draft.seaStateOverride,
+        });
+      }
+      if (get().commandSequence <= beforeSeq) {
+        return false;
+      }
+      set({
+        pendingPolygonDraft: null,
+        interactionMode: 'select',
+        activeModal: 'builder',
+      });
+      emitActionFeedback('info', `已完成标绘并保存：${draft.name}`);
+      return true;
+    },
     mapLayers: {
       showRadarRings: true,
       showWeaponRings: true,
@@ -289,6 +392,90 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     cameraFlyToRequest: null,
     activeModal: 'none' as const,
 
+    importCatalogJson: (rawInput: unknown, mode: 'merge' | 'replace' = 'merge') => {
+      try {
+        const parsed = typeof rawInput === 'string' ? JSON.parse(rawInput) : rawInput;
+        assertCatalogOverlayShape(parsed);
+        const s = get();
+        const prevOverlay = mode === 'merge' ? s.currentScenario.customCatalogOverlay : undefined;
+        const mergeSection = <T>(
+          a: Record<string, T> | undefined,
+          b: Record<string, T> | undefined
+        ): Record<string, T> | undefined => {
+          if (!a && !b) return undefined;
+          return { ...(a ?? {}), ...(b ?? {}) };
+        };
+        const nextOverlay: Partial<EquipmentCatalog> = {
+          version: parsed.version || prevOverlay?.version || 'cmo_hotload_overlay',
+          sensors: mergeSection(prevOverlay?.sensors, parsed.sensors),
+          weapons: mergeSection(prevOverlay?.weapons, parsed.weapons),
+          loadouts: mergeSection(prevOverlay?.loadouts, parsed.loadouts),
+          platforms: mergeSection(prevOverlay?.platforms, parsed.platforms),
+          warheads: mergeSection(prevOverlay?.warheads, parsed.warheads),
+          mounts: mergeSection(prevOverlay?.mounts, parsed.mounts),
+          magazines: mergeSection(prevOverlay?.magazines, parsed.magazines),
+          propulsions: mergeSection(prevOverlay?.propulsions, parsed.propulsions),
+          comms: mergeSection(prevOverlay?.comms, parsed.comms),
+        };
+        const nextCatalog = resolveEquipmentCatalog(nextOverlay);
+        const integrity = validateCatalogIntegrity(nextCatalog);
+        if (!integrity.valid) {
+          const err = integrity.errors.slice(0, 3).join('；');
+          emitActionFeedback('error', `装备目录引用校验失败：${err}`);
+          return { ok: false, error: err };
+        }
+        for (const unit of Object.values(s.units)) {
+          resolveUnitConfiguration(nextCatalog, unit.platformId, unit.activeLoadoutId);
+        }
+        const summary = [
+          parsed.platforms && `${Object.keys(parsed.platforms).length} 平台`,
+          parsed.weapons && `${Object.keys(parsed.weapons).length} 武器`,
+          parsed.sensors && `${Object.keys(parsed.sensors).length} 传感器`,
+          parsed.loadouts && `${Object.keys(parsed.loadouts).length} 挂载`,
+        ]
+          .filter(Boolean)
+          .join(' / ') || '0 新增条目';
+        set({
+          catalog: nextCatalog,
+          currentScenario: {
+            ...s.currentScenario,
+            customCatalogOverlay: nextOverlay,
+          },
+        });
+        emitActionFeedback('info', `已热加载装备目录 (${mode === 'merge' ? '合并' : '替换覆盖'})：${summary}`);
+        return { ok: true, importedSummary: summary };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '无效的 Catalog JSON';
+        emitActionFeedback('error', `导入装备目录失败：${msg}`);
+        return { ok: false, error: msg };
+      }
+    },
+
+    resetCatalogToDefault: () => {
+      const s = get();
+      const builtinMatch = BUILTIN_SCENARIOS.find((sc) => sc.id === s.currentScenario.id);
+      const baseOverlay = builtinMatch?.customCatalogOverlay;
+      const baseCatalog = resolveEquipmentCatalog(baseOverlay);
+      try {
+        for (const unit of Object.values(s.units)) {
+          resolveUnitConfiguration(baseCatalog, unit.platformId, unit.activeLoadoutId);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '当前战场存在依赖热加载目录的已部署单位';
+        emitActionFeedback('warning', `无法重置：当前战场仍有算子依赖外挂装备（${msg}）`);
+        return { ok: false, error: msg };
+      }
+      set({
+        catalog: baseCatalog,
+        currentScenario: {
+          ...s.currentScenario,
+          customCatalogOverlay: baseOverlay ? structuredClone(baseOverlay) : undefined,
+        },
+      });
+      emitActionFeedback('info', '已重置为内置标准装备目录');
+      return { ok: true };
+    },
+
     loadScenario: (scenario: ScenarioDefinition, randomizeSpawns = false, seed?: number) => {
       const boot = createInitialStateFromScenario(scenario, randomizeSpawns, seed);
       set((state) => {
@@ -301,7 +488,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           seed: boot.seed, rngState: boot.rngState, tick: 0, pendingSimSeconds: 0,
           commandSequence: 0, commandHistory: [], replaySnapshots: [], objectiveProgress: {}, objectiveHoldProgress: {}, battleResult: undefined,
           creditedDamage: {}, detectedMissileIds: [], aar: boot.aar, pendingRiskEngagement: null,
-          pendingSpawnConfig: null, pendingForcePackageConfig: null,
+          pendingSpawnConfig: null, pendingForcePackageConfig: null, pendingPolygonDraft: null,
           pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [],
           currentScenario: boot.scenario,
           availableScenarios: exists

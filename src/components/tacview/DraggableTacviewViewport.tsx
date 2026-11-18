@@ -14,6 +14,7 @@ export const DraggableTacviewViewport: React.FC = () => {
   const contacts = useWargameStore((s) => (isOpen ? s.contacts : null));
   const weaponsInFlight = useWargameStore((s) => (isOpen ? s.weaponsInFlight : null));
   const detectedMissileIds = useWargameStore((s) => (isOpen ? s.detectedMissileIds : null));
+  const aarTracks = useWargameStore((s) => (isOpen ? s.aar.tracks : undefined));
   const activePerspective = useWargameStore((s) => s.activePerspective);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
@@ -113,6 +114,7 @@ export const DraggableTacviewViewport: React.FC = () => {
       contacts,
       weaponsInFlight,
       detectedMissileIds: detectedMissileIds ?? [],
+      aarTracks,
       catalog,
       simTime,
       environment,
@@ -125,6 +127,7 @@ export const DraggableTacviewViewport: React.FC = () => {
     contacts,
     weaponsInFlight,
     detectedMissileIds,
+    aarTracks,
     activePerspective,
     playerSide,
     playMode,

@@ -1,5 +1,6 @@
 import * as turf from '../turfGeo';
-import { resolveUnitConfiguration } from '../unitConfiguration';
+import { resolvePropulsionAtAltitude } from '../cmoUnits';
+import { resolveMagazineReloadCycleSec, resolveUnitConfiguration } from '../unitConfiguration';
 import type {
   ActivePerspective,
   CombatLogEntry,
@@ -152,12 +153,46 @@ export function advanceUnitPhysics({
       }
     }
 
+    const canReloadMag = unit.magazineStores && getUnitCapabilities(unit).canFire;
     for (const mount of unit.mounts) {
       if (mount.cooldownRemainingSec > 0) {
         mount.cooldownRemainingSec = Math.max(
           0,
           mount.cooldownRemainingSec - dtSec
         );
+      }
+      if (canReloadMag && unit.magazineStores) {
+        const storeQty = unit.magazineStores[mount.weaponId] ?? 0;
+        if (mount.currentAmmo < mount.maxAmmo && storeQty > 0 && mount.cooldownRemainingSec <= 0) {
+          const cycleSec = resolveMagazineReloadCycleSec(unit, mount, catalog);
+          const nextRem = (mount.magazineReloadRemainingSec ?? cycleSec) - dtSec;
+          if (nextRem <= 1e-6) {
+            const wasDepleted = mount.currentAmmo === 0;
+            mount.currentAmmo += 1;
+            const leftInStore = storeQty - 1;
+            unit.magazineStores[mount.weaponId] = leftInStore;
+            mount.magazineReloadRemainingSec =
+              mount.currentAmmo < mount.maxAmmo && leftInStore > 0 ? cycleSec : undefined;
+            if (wasDepleted || mount.currentAmmo === mount.maxAmmo || leftInStore === 0) {
+              logs.push({
+                id: `mag_reload_${unit.id}_${mount.mountId}_${nextSimTime}`,
+                simTime: nextSimTime,
+                side: unit.side,
+                category: 'DOCTRINE',
+                severity: 'info',
+                title: `${unit.callsign} 弹药库自动补弹 (${mount.weaponName})`,
+                message: `挂架就绪弹药恢复至 ${mount.currentAmmo}/${mount.maxAmmo} 发，弹药库余量 ${leftInStore} 发。`,
+                position: [...unit.position],
+                unitId: unit.id,
+                weaponId: mount.weaponId,
+              });
+            }
+          } else {
+            mount.magazineReloadRemainingSec = Number(nextRem.toFixed(3));
+          }
+        } else {
+          mount.magazineReloadRemainingSec = undefined;
+        }
       }
     }
 
@@ -178,8 +213,31 @@ export function advanceUnitPhysics({
     );
     if (!isActiveUnit(unit)) continue;
 
+    const propPerf =
+      unit.throttleSetting !== undefined || configuration.platform.dbid !== undefined
+        ? resolvePropulsionAtAltitude(
+            configuration.platform,
+            catalog,
+            unit.altitudeM,
+            unit.throttleSetting ?? 2,
+            configuration.maxSpeedKts,
+            configuration.cruiseSpeedKts,
+            configuration.loadout?.speedPenaltyKts ?? 0
+          )
+        : undefined;
     const speedLimit =
-      configuration.maxSpeedKts * getUnitCapabilities(unit).speedFactor;
+      (propPerf ? propPerf.bandMaxSpeedKts : configuration.maxSpeedKts) *
+      getUnitCapabilities(unit).speedFactor;
+    if (
+      propPerf &&
+      unit.throttleSetting !== undefined &&
+      unit.status !== 'returning' &&
+      unit.status !== 'evading' &&
+      !unit.airRefuelState &&
+      (unit.waypoints.length === 0 || unit.waypoints[0].speedKts === undefined)
+    ) {
+      unit.targetSpeedKts = Math.min(speedLimit, propPerf.targetSpeedKts);
+    }
     if (unit.navigationMode === 'formation' && unit.status !== 'returning') {
       const leader = unit.formationLeaderId ? units[unit.formationLeaderId] : undefined;
       if (leader && isActiveUnit(leader) && leader.status !== 'returning' && unit.formationOffset) {

@@ -1,8 +1,10 @@
 import * as turf from './turfGeo';
 import type { ActivePerspective, CombatLogEntry, EquipmentCatalog, MissionDefinition, RuntimeHangarSlot, RuntimeUnit, ScenarioEnvironment, ScoreLedger, TacticalContact, WeaponInFlight } from '../types/wargame';
+import { resolvePropulsionAtAltitude } from './cmoUnits';
+import { deployCarriedUnitFromLauncher } from './carrierOperations';
 import { resolveUnitConfiguration } from './unitConfiguration';
-import { getCompiledPolygon, isRouteAllowed, pointInBbox } from './environment';
-import { guidanceProfile } from './fireControl';
+import { computeNavigationBypassWaypoints, getCompiledPolygon, isPointOnLand, isRouteAllowed, pointInBbox } from './environment';
+import { guidanceProfile, weaponLaunchRangeKm } from './fireControl';
 import { getBearingDeg, getDistanceKm } from './geometry';
 import {
   assessStrikeCoordination,
@@ -247,7 +249,7 @@ export function updateUnitOperations(
     }
   }
   const targetDomains: RuntimeUnit['domain'][] = mission?.type === 'aaw_patrol' ? ['air']
-    : mission?.type === 'asuw_patrol' ? ['surface']
+    : mission?.type === 'asuw_patrol' || mission?.type === 'maritime_strike' ? ['surface']
     : mission?.type === 'asw_patrol' ? ['subsurface']
     : mission?.type === 'land_strike' ? ['land']
     : mission?.type === 'sead' ? ['surface', 'land'] : [];
@@ -260,13 +262,134 @@ export function updateUnitOperations(
     unit.waypoints.length > 0 ||
     !!unit.missionTargetId;
   if (unit.domain === 'air') {
+    const airConfig = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
+
+    // ASW automatic sonobuoy barrier deployment
+    if (
+      unitEffDoctrine.autoDeploySonobuoys &&
+      isActiveUnit(unit) &&
+      unit.status !== 'returning' &&
+      !unit.airRefuelState &&
+      simTime >= (unit.nextAutoSonobuoyTime ?? 0) &&
+      !isPointOnLand(unit.position, environment)
+    ) {
+      const buoyEntry = Object.entries(unit.deployableInventory).find(
+        ([pid, count]) => count > 0 && catalog.platforms[pid]?.category === 'sonobuoy'
+      );
+      if (buoyEntry) {
+        let inDropZone = true;
+        if (mission?.type === 'asw_patrol' && mission.areaPolygon.length >= 3) {
+          const compiledAsw = getCompiledPolygon(mission.areaPolygon);
+          inDropZone =
+            (pointInBbox(unit.position, compiledAsw.bbox) &&
+              turf.booleanPointInPolygon(unit.position, compiledAsw.feature)) ||
+            turf.pointToLineDistance(unit.position, compiledAsw.boundary, { units: 'kilometers' }) <= 20;
+        }
+        const nearbyFriendlyBuoy = Object.values(units).some(
+          (other) =>
+            other.side === unit.side &&
+            other.category === 'sonobuoy' &&
+            isActiveUnit(other) &&
+            getDistanceKm(other.position, unit.position) < 18
+        );
+        if (inDropZone && !nearbyFriendlyBuoy) {
+          const [buoyPlatformId, remaining] = buoyEntry;
+          const seqNum = Math.floor(simTime / 1000);
+          const deployedRes = deployCarriedUnitFromLauncher(
+            units,
+            unit,
+            buoyPlatformId,
+            catalog,
+            environment,
+            simTime,
+            `auto_${seqNum}`,
+            remaining
+          );
+          if (deployedRes.deployed) {
+            units[deployedRes.deployed.id] = deployedRes.deployed;
+            unit.deployableInventory[buoyPlatformId] = Math.max(0, remaining - 1);
+            unit.nextAutoSonobuoyTime = simTime + 45_000;
+            if (deployedRes.log) logs.push(deployedRes.log);
+          }
+        }
+      }
+    }
+
     if (unit.category !== 'decoy') {
       const recovery = recoverySolution(unit, units, catalog);
+
+      // Low-fuel automatic air refueling request before hitting emergency RTB reserve
+      if (
+        unitEffDoctrine.autoAirRefuel &&
+        unit.category !== 'tanker' &&
+        airConfig.platform.canReceiveAar !== false &&
+        !unit.airRefuelState &&
+        unit.status !== 'returning' &&
+        unit.fuelRemainingSec <= Math.max(recovery.reserveSec * 1.45, airConfig.maxFuelSec * 0.35)
+      ) {
+        const bestTanker = Object.values(units)
+          .filter(
+            (candidate) =>
+              candidate.side === unit.side &&
+              isActiveUnit(candidate) &&
+              candidate.domain === 'air' &&
+              candidate.category === 'tanker' &&
+              candidate.status !== 'returning' &&
+              candidate.aarFuelRemainingSec > 60 &&
+              candidate.aarQueue.length < 4 &&
+              !candidate.aarQueue.includes(unit.id)
+          )
+          .sort(
+            (a, b) =>
+              getDistanceKm(unit.position, a.position) - getDistanceKm(unit.position, b.position) ||
+              a.id.localeCompare(b.id)
+          )[0];
+        if (bestTanker) {
+          const distToTankerKm = getDistanceKm(unit.position, bestTanker.position);
+          const timeToTankerSec = distToTankerKm / ((Math.max(1, recovery.cruise) * 1.852) / 3600);
+          if (unit.fuelRemainingSec > timeToTankerSec * 1.15 + 30) {
+            unit.airRefuelState = {
+              tankerId: bestTanker.id,
+              phase: 'rendezvous',
+              managedWaypointPosition: [...bestTanker.position],
+              resumeNavigationMode: unit.navigationMode,
+              resumeWaypoints: unit.waypoints.map((wp) => ({
+                ...wp,
+                position: [...wp.position] as [number, number],
+              })),
+              resumeMissionTargetId: unit.missionTargetId,
+              resumeMissionState: unit.missionState,
+            };
+            unit.navigationMode = 'manual';
+            unit.missionTargetId = undefined;
+            unit.waypoints = [
+              {
+                position: [...bestTanker.position],
+                speedKts: bestTanker.targetSpeedKts,
+                altitudeM: bestTanker.targetAltitudeM,
+              },
+            ];
+            bestTanker.aarQueue.push(unit.id);
+            logs.push({
+              id: `auto_aar_${unit.id}_${simTime}`,
+              simTime,
+              side: unit.side,
+              category: 'DOCTRINE',
+              severity: 'info',
+              title: `${unit.callsign} 低油量自动请求空中加油`,
+              message: `自动加入 ${bestTanker.callsign} 受油队列（距离 ${distToTankerKm.toFixed(1)} km），完成后恢复原任务。`,
+              position: [...unit.position],
+              unitId: unit.id,
+            });
+          }
+        }
+      }
+
       const combatMounts = targetDomains.length > 0
         ? unit.mounts.filter((mount) => targetDomains.some((domain) => catalog.weapons[mount.weaponId]?.targetDomains.includes(domain)))
         : [];
       const empty = combatMounts.length > 0 && combatMounts.every((mount) => mount.currentAmmo === 0);
-      const fuelLow = unit.fuelRemainingSec <= recovery.reserveSec;
+      const fuelLow = !unit.airRefuelState && unit.fuelRemainingSec <= recovery.reserveSec;
       const damageRtb = aiControlled && hpCritical && isAirborneOrUnderway;
       if (unit.status !== 'returning' && (fuelLow || empty || damageRtb)) {
         unit.status = 'returning';
@@ -313,8 +436,29 @@ export function updateUnitOperations(
         }
       }
     }
-    const cruise = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId).cruiseSpeedKts;
-    const burnRate = Math.max(0.6, Math.pow(unit.speedKts / Math.max(1, cruise), 1.5));
+    const cruise = airConfig.cruiseSpeedKts;
+    let burnRate: number;
+    if (unit.throttleSetting !== undefined || airConfig.platform.dbid !== undefined) {
+      const propPerf = resolvePropulsionAtAltitude(
+        airConfig.platform,
+        catalog,
+        unit.altitudeM,
+        unit.throttleSetting ?? 2,
+        airConfig.maxSpeedKts,
+        cruise,
+        airConfig.loadout?.speedPenaltyKts ?? 0
+      );
+      burnRate =
+        unit.throttleSetting !== undefined
+          ? propPerf.fuelBurnMultiplier
+          : Math.max(
+              0.55,
+              propPerf.fuelBurnMultiplier *
+                Math.pow(unit.speedKts / Math.max(1, propPerf.bandCruiseSpeedKts || cruise), 1.35)
+            );
+    } else {
+      burnRate = Math.max(0.6, Math.pow(unit.speedKts / Math.max(1, cruise), 1.5));
+    }
     unit.fuelRemainingSec = Math.max(0, unit.fuelRemainingSec - dtSec * burnRate);
     if (unit.fuelRemainingSec <= 0) {
       unit.hp = 0; unit.status = 'destroyed'; unit.speedKts = unit.targetSpeedKts = 0;
@@ -420,7 +564,10 @@ export function updateUnitOperations(
     (mount) => mount.currentAmmo > 0 && catalog.weapons[mount.weaponId]?.targetDomains.includes('air')
   );
   const strikeCoordination =
-    !seadPrioritized && (mission.type === 'land_strike' || mission.type === 'asuw_patrol')
+    !seadPrioritized &&
+    (mission.type === 'land_strike' ||
+      mission.type === 'asuw_patrol' ||
+      mission.type === 'maritime_strike')
       ? assessStrikeCoordination(unit, mission, units, contacts, missions, catalog, simTime, weaponsInFlight)
       : undefined;
   const candidatePriority = (contact: TacticalContact): number => {
@@ -527,7 +674,61 @@ export function updateUnitOperations(
     if (!inFlight) {
       unit.missionTargetId = target.id;
       unit.missionState = 'engaging';
-      unit.waypoints = [{ position: [...target.estimatedPosition] }];
+      const useStandoffStation = mission.type === 'maritime_strike' || mission.standoffStrike === true;
+      if (useStandoffStation) {
+        let maxReadyRangeKm = 0;
+        for (const m of unit.mounts) {
+          if (m.currentAmmo <= doctrine.minimumWeaponReserve) continue;
+          const w = catalog.weapons[m.weaponId];
+          if (!w || !w.targetDomains.includes(target.domain)) continue;
+          const eff = weaponLaunchRangeKm(w) * doctrine.automaticFireRangeFraction;
+          if (eff > maxReadyRangeKm) maxReadyRangeKm = eff;
+        }
+        if (maxReadyRangeKm > 15) {
+          const distToTargetKm = getDistanceKm(unit.position, target.estimatedPosition);
+          if (distToTargetKm > maxReadyRangeKm * 0.94) {
+            const awayFromTarget = getBearingDeg(target.estimatedPosition, unit.position);
+            const standoffPt = turf.destination(
+              target.estimatedPosition,
+              maxReadyRangeKm * 0.88,
+              awayFromTarget,
+              { units: 'kilometers' }
+            ).geometry.coordinates as [number, number];
+            const routePts = computeNavigationBypassWaypoints(
+              unit.domain,
+              unit.altitudeM,
+              unit.position,
+              standoffPt,
+              environment
+            );
+            unit.waypoints = routePts.map((position) => ({ position }));
+          } else {
+            const orbitBearing = (getBearingDeg(unit.position, target.estimatedPosition) + 90) % 360;
+            const orbitPt = turf.destination(
+              unit.position,
+              unit.domain === 'air' ? 14 : 5,
+              orbitBearing,
+              { units: 'kilometers' }
+            ).geometry.coordinates as [number, number];
+            unit.waypoints = isRouteAllowed(unit.domain, unit.position, orbitPt, environment)
+              ? [{ position: orbitPt }]
+              : [];
+          }
+          return;
+        }
+      }
+      if (doctrine.autoTerrainDogleg) {
+        const routePts = computeNavigationBypassWaypoints(
+          unit.domain,
+          unit.altitudeM,
+          unit.position,
+          target.estimatedPosition,
+          environment
+        );
+        unit.waypoints = routePts.map((position) => ({ position }));
+      } else {
+        unit.waypoints = [{ position: [...target.estimatedPosition] }];
+      }
     } else {
       unit.missionTargetId = undefined;
       unit.missionState = 'egress';

@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GripHorizontal, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
 import type { TacticalBoxSlice } from '../../tacview3d/boxSlice';
-import type { ProjectedHudLabel, ThreeBoxSceneController } from '../../tacview3d/ThreeBoxScene';
-import { ThreeBoxSceneController as ControllerClass } from '../../tacview3d/ThreeBoxScene';
+import {
+  DEFAULT_TACVIEW_LAYERS,
+  ThreeBoxSceneController as ControllerClass,
+  type ProjectedHudLabel,
+  type TacviewLayerVisibility,
+  type ThreeBoxSceneController,
+} from '../../tacview3d/ThreeBoxScene';
 
 interface LocalAirSeaBox3DProps {
   slice: TacticalBoxSlice;
@@ -32,7 +37,14 @@ export const LocalAirSeaBox3D: React.FC<LocalAirSeaBox3DProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ThreeBoxSceneController | null>(null);
   const [scalePreset, setScalePreset] = useState<ScalePresetKey>('balanced');
+  const [layerVisibility, setLayerVisibility] = useState<TacviewLayerVisibility>(() => ({
+    ...DEFAULT_TACVIEW_LAYERS,
+  }));
   const [labels, setLabels] = useState<ProjectedHudLabel[]>([]);
+
+  const toggleLayer = (key: keyof TacviewLayerVisibility) => {
+    setLayerVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -55,8 +67,9 @@ export const LocalAirSeaBox3D: React.FC<LocalAirSeaBox3DProps> = ({
     if (!controller) return;
     const preset = SCALE_PRESETS[scalePreset];
     controller.setScales({ airScale: preset.airScale, subScale: preset.subScale });
+    controller.setLayerVisibility(layerVisibility);
     controller.updateSlice(slice);
-  }, [slice, scalePreset]);
+  }, [slice, scalePreset, layerVisibility]);
 
   return (
     <div className="relative w-full rounded-lg border border-cyan-500/40 bg-[#040813]/95 shadow-2xl overflow-hidden select-none backdrop-blur-xs">
@@ -119,6 +132,31 @@ export const LocalAirSeaBox3D: React.FC<LocalAirSeaBox3DProps> = ({
             </button>
           )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1 px-2.5 py-1 border-b border-white/10 bg-slate-950/80 text-[10px]">
+        {(
+          [
+            { key: 'showRadarEnvelopes', label: '雷达包络' },
+            { key: 'showSeekerCones', label: '导引头锥' },
+            { key: 'showSonobuoyCylinders', label: '浮标声柱' },
+            { key: 'showTrails', label: '机动尾迹' },
+          ] as Array<{ key: keyof TacviewLayerVisibility; label: string }>
+        ).map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={layerVisibility[item.key]}
+            onClick={() => toggleLayer(item.key)}
+            className={`px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
+              layerVisibility[item.key]
+                ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-200'
+                : 'border-white/10 bg-slate-900/60 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
       <div ref={containerRef} className={`relative w-full ${heightClassName}`}>

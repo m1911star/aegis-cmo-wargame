@@ -189,6 +189,8 @@ export default function App() {
       } else if (e.key === 'Escape') {
         if (state.activeModal !== 'none') {
           state.setActiveModal('none');
+        } else if (state.interactionMode === 'draw_polygon') {
+          state.cancelPolygonDraw();
         } else if (state.interactionMode !== 'select') {
           state.setInteractionMode('select');
         }

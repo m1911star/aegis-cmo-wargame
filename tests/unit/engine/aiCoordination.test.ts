@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
+import { computeMissileTerrainDogleg } from '../../../src/engine/environment';
 import { getBearingDeg, getDistanceKm } from '../../../src/engine/geometry';
+import { isUnitRadarEmittingAtTime } from '../../../src/engine/unitCapabilities';
 import { updateUnitOperations } from '../../../src/engine/operations';
 import { createRuntimeUnitFromPlacement, stepSimulationWorld, type SimulationWorldState } from '../../../src/engine/simulationEngine';
 import type {
@@ -414,5 +416,172 @@ describe('AI tactical coordination and force preservation', () => {
     expect(striker.missionTargetId as string | undefined).toBe(cSam.id);
     expect(striker.missionState).toBe('engaging');
     expect(getDistanceKm(striker.waypoints[0].position, cSam.estimatedPosition)).toBeLessThan(0.1);
+  });
+
+  test('maritime_strike prioritizes carrier HVUs, holds standoff launch station, and generates ridge doglegs', () => {
+    const bomber = makeUnit('red_h6_ms', {
+      platformId: 'j15t_flanker',
+      loadoutId: 'loadout_j15t_maritime_strike',
+      assignedMissionId: 'm_ms',
+      position: [121.0, 25.0],
+      doctrine: { roe: 'free', automaticFireRangeFraction: 0.8 },
+    });
+    const blueFfg = makeUnit('blue_ffg_escort', {
+      side: 'BLUE',
+      platformId: 'constellation_ffg',
+      position: [122.6, 25.0], // closer escort
+    });
+    const cvnPlatformId =
+      Object.values(catalog.platforms).find((p) => p.category === 'carrier' && p.origin === 'BLUE')?.id ??
+      'america_lha';
+    const blueCvn = makeUnit('blue_cvn_hvu', {
+      side: 'BLUE',
+      platformId: cvnPlatformId,
+      position: [123.0, 25.0], // farther carrier HVU (~200 km)
+    });
+    const cFfg = makeContact('RED', blueFfg);
+    const cCvn = makeContact('RED', blueCvn);
+    const msMission: MissionDefinition = {
+      id: 'm_ms',
+      name: 'Maritime Strike',
+      side: 'RED',
+      type: 'maritime_strike',
+      isActive: true,
+      areaPolygon: [[122.4, 24.6], [123.4, 24.6], [123.4, 25.4], [122.4, 25.4]],
+      prosecuteOutsideAreaKm: 60,
+      description: '',
+    };
+
+    updateUnitOperations(
+      bomber,
+      { [bomber.id]: bomber, [blueFfg.id]: blueFfg, [blueCvn.id]: blueCvn },
+      { [cFfg.id]: cFfg, [cCvn.id]: cCvn },
+      [msMission],
+      catalog,
+      5000,
+      1,
+      emptyScore(),
+      []
+    );
+    // Prioritizes CVN/LHA over closer frigate, and holds standoff orbit instead of flying onto CVN
+    expect(bomber.missionTargetId).toBe(cCvn.id);
+    expect(bomber.waypoints.length).toBeGreaterThan(0);
+    expect(getDistanceKm(bomber.waypoints[0].position, cCvn.estimatedPosition)).toBeGreaterThan(80);
+
+    // Mountain ridge blocking sea-skimming AShM produces a valid bypass dogleg
+    const ashmSpec = Object.values(catalog.weapons).find((w) => w.category === 'ashm' && w.cruiseAltitudeM < 100)!;
+    const ridgeEnv = {
+      landPolygons: [
+        {
+          id: 'island_ridge',
+          name: 'Central Ridge',
+          elevationM: 1200,
+          areaPolygon: [
+            [121.95, 24.92],
+            [122.05, 24.92],
+            [122.05, 25.08],
+            [121.95, 25.08],
+          ] as [number, number][],
+        },
+      ],
+      acousticZones: [],
+    };
+    const dogleg = computeMissileTerrainDogleg(
+      [121.5, 25.0],
+      [122.5, 25.0],
+      ashmSpec,
+      ridgeEnv
+    );
+    expect(dogleg).toBeDefined();
+    expect(dogleg!.length).toBe(1);
+
+    // Distant maritime_strike striker approaches standoff release point via terrain-bypassing route
+    bomber.position = [119.5, 25.0];
+    bomber.altitudeM = 400;
+    bomber.nextMissionDecisionTime = 0;
+    bomber.waypoints = [];
+    updateUnitOperations(
+      bomber,
+      { [bomber.id]: bomber, [blueCvn.id]: blueCvn },
+      { [cCvn.id]: cCvn },
+      [msMission],
+      catalog,
+      10000,
+      1,
+      emptyScore(),
+      [],
+      {},
+      ridgeEnv
+    );
+    expect(bomber.waypoints.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('executes intermittent EMCON radar duty-cycle, auto ASW sonobuoy drops, and low-fuel auto AAR', () => {
+    const fighterA = makeUnit('blink_alpha', {
+      doctrine: { roe: 'free', emconRadar: true, emconRadarIntermittent: true },
+    });
+    const samples: boolean[] = [];
+    for (let t = 0; t < 60_000; t += 5_000) {
+      samples.push(isUnitRadarEmittingAtTime(fighterA, t));
+    }
+    // 15s ON out of 60s = 3 of 12 samples true
+    expect(samples.filter(Boolean).length).toBe(3);
+
+    // Auto sonobuoy drop on ASW aircraft over open water
+    const aswPlatformId = Object.values(catalog.platforms).find(
+      (p) => p.domain === 'air' && p.deployables?.some((d) => catalog.platforms[d.platformId]?.category === 'sonobuoy')
+    )!.id;
+    const mpa = makeUnit('red_mpa_asw', {
+      platformId: aswPlatformId,
+      assignedMissionId: 'm_asw',
+      position: [122.5, 25.0],
+      doctrine: { roe: 'free', autoDeploySonobuoys: true },
+    });
+    const startBuoys = Object.values(mpa.deployableInventory).reduce((s, v) => s + v, 0);
+    expect(startBuoys).toBeGreaterThan(0);
+    const unitsMap: Record<string, RuntimeUnit> = { [mpa.id]: mpa };
+    const aswMission: MissionDefinition = {
+      id: 'm_asw',
+      name: 'ASW Barrier',
+      side: 'RED',
+      type: 'asw_patrol',
+      isActive: true,
+      areaPolygon: [[122.2, 24.8], [122.8, 24.8], [122.8, 25.2], [122.2, 25.2]],
+      prosecuteOutsideAreaKm: 20,
+      description: '',
+    };
+    updateUnitOperations(mpa, unitsMap, {}, [aswMission], catalog, 5000, 1, emptyScore(), []);
+    const spawnedBuoys = Object.values(unitsMap).filter((u) => u.category === 'sonobuoy');
+    expect(spawnedBuoys).toHaveLength(1);
+
+    // Low-fuel auto AAR joins nearest friendly tanker queue
+    const tanker = makeUnit('red_tanker', {
+      platformId: 'y20u_tanker',
+      position: [122.15, 25.0],
+      speedKts: 420,
+      altitudeM: 8000,
+    });
+    const thirstyJet = makeUnit('red_thirsty', {
+      platformId: 'j15t_flanker',
+      position: [122.0, 25.0],
+      recoveryPosition: [119.0, 25.0],
+      doctrine: { roe: 'free', autoAirRefuel: true },
+    });
+    thirstyJet.fuelRemainingSec = Math.round(thirstyJet.maxFuelSec * 0.28);
+    const aarWorld: SimulationWorldState = {
+      startTime: 0,
+      tick: 0,
+      simTime: 5000,
+      rngState: 99,
+      units: { [tanker.id]: tanker, [thirstyJet.id]: thirstyJet },
+      contacts: {},
+      weaponsInFlight: {},
+      explosions: [],
+      missions: [],
+      score: emptyScore(),
+    };
+    const stepped = stepSimulationWorld(aarWorld, catalog, 0.25, pausesOff, 'RED');
+    expect(stepped.nextState.units[thirstyJet.id].airRefuelState?.tankerId).toBe(tanker.id);
+    expect(stepped.nextState.units[tanker.id].aarQueue).toContain(thirstyJet.id);
   });
 });

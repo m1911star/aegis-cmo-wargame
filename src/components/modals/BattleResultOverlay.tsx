@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
-  applyCampaignResupplyChoice,
   CAMPAIGN_RESUPPLY_OPTIONS,
+  computeCampaignResupplyDiff,
   computeNextCampaignCarryover,
   type CampaignResupplyChoice,
 } from '../../scenarios/campaign';
-import { Award, ChartColumn, RotateCcw } from 'lucide-react';
+import { Award, ChartColumn, Compass, RotateCcw } from 'lucide-react';
 import { evaluateBattleAssessment } from '../../engine/simulation/battleAssessment';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Button } from '../ui/button';
@@ -49,8 +49,8 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
       ownLosses,
       units
     );
-    const afterResupply = applyCampaignResupplyChoice(postBattle, resupplyChoice);
-    return { postBattle, afterResupply };
+    const diff = computeCampaignResupplyDiff(postBattle, resupplyChoice);
+    return { postBattle, afterResupply: diff.afterCarryover, diff };
   }, [campaignState, battleResult, score, units, resupplyChoice]);
 
   if (!battleResult) return null;
@@ -176,8 +176,36 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
                       );
                     })}
                   </div>
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 font-mono text-[10px]">
+                    <div className="px-2 py-1 rounded bg-background/60 border border-border/50">
+                      战备: {campaignPreview.diff.readinessPct.before}% →{' '}
+                      <span className="text-cyan-200 font-semibold">{campaignPreview.diff.readinessPct.after}%</span>
+                    </div>
+                    <div className="px-2 py-1 rounded bg-background/60 border border-border/50">
+                      机场: {campaignPreview.diff.airbaseIntegrityPct.before}% →{' '}
+                      <span className="text-emerald-300 font-semibold">{campaignPreview.diff.airbaseIntegrityPct.after}%</span>
+                    </div>
+                    <div className="px-2 py-1 rounded bg-background/60 border border-border/50">
+                      弹药缺口: {campaignPreview.diff.totalScarceAmmoDebt.before} →{' '}
+                      <span className="text-amber-300 font-semibold">{campaignPreview.diff.totalScarceAmmoDebt.after}</span>
+                    </div>
+                  </div>
                 </div>
               )}
+              <div className="pt-1 flex justify-end">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    onDismiss();
+                    setActiveModal('campaign');
+                  }}
+                  className="text-cyan-300 border-cyan-500/35"
+                >
+                  <Compass className="w-3 h-3" />
+                  <span>打开战区完整后勤态势</span>
+                </Button>
+              </div>
             </div>
           )}
         </div>

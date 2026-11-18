@@ -1,12 +1,20 @@
 import React, { Suspense, useMemo, useState } from 'react';
 import { Box, ChartColumn, Check, Download, Play } from 'lucide-react';
 import { buildAarBoxSlice } from '../../tacview3d/boxSlice';
-import { summarizeAar, summarizeAarBreakdowns } from '../../engine/aar';
+import {
+  buildAarTimelineBuckets,
+  summarizeAar,
+  summarizeAarBreakdowns,
+  summarizeWeaponEffectivenessMatrix,
+} from '../../engine/aar';
+import { FIXED_DT_SEC } from '../../engine/determinism';
 import { captureBattleRecording, captureShareableAarPackage } from '../../store/battleRecording';
 import { useWargameStore } from '../../store/useWargameStore';
+import type { AarEventKind, SideId } from '../../types/wargame';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ModalHeader, ModalShell } from '../ui/dialog';
+import { Select } from '../ui/select';
 
 const LazyLocalAirSeaBox3D = React.lazy(() => import('../tacview/LocalAirSeaBox3D'));
 
@@ -42,6 +50,9 @@ export const AarDebriefModal: React.FC = () => {
     return Math.max(0, maxT);
   }, [aar.tracks, aar.events, tick]);
   const [aarReplayTick, setAarReplayTick] = useState<number>(maxAarTick);
+  const [eventSideFilter, setEventSideFilter] = useState<'ALL' | SideId>('ALL');
+  const [eventKindFilter, setEventKindFilter] = useState<'ALL' | AarEventKind>('ALL');
+  const [eventWeaponFilter, setEventWeaponFilter] = useState<string>('ALL');
   const effectiveReplayTick = Math.min(aarReplayTick, maxAarTick);
   const aarSlice = useMemo(() => {
     if (!show3dAar) return null;
@@ -55,8 +66,24 @@ export const AarDebriefModal: React.FC = () => {
       environment,
     });
   }, [show3dAar, aar, units, effectiveReplayTick, aarFocusCenter, aarFocusLabel, environment]);
-  const aarSummary = summarizeAar(aar);
-  const breakdowns = summarizeAarBreakdowns(aar, units);
+  const aarSummary = useMemo(() => summarizeAar(aar), [aar]);
+  const breakdowns = useMemo(() => summarizeAarBreakdowns(aar, units), [aar, units]);
+  const timelineBuckets = useMemo(() => buildAarTimelineBuckets(aar, maxAarTick, 24), [aar, maxAarTick]);
+  const maxBucketIntensity = useMemo(
+    () => Math.max(1, ...timelineBuckets.map((b) => b.totalIntensity)),
+    [timelineBuckets]
+  );
+  const weaponMatrix = useMemo(() => summarizeWeaponEffectivenessMatrix(aar), [aar]);
+  const filteredEvents = useMemo(
+    () =>
+      aar.events.filter(
+        (ev) =>
+          (eventSideFilter === 'ALL' || ev.side === eventSideFilter) &&
+          (eventKindFilter === 'ALL' || ev.kind === eventKindFilter) &&
+          (eventWeaponFilter === 'ALL' || ev.weaponId === eventWeaponFilter)
+      ),
+    [aar.events, eventSideFilter, eventKindFilter, eventWeaponFilter]
+  );
 
   const canJumpToReplay = Boolean(
     currentScenario && (commandHistory.length > 0 || tick > 0 || replayPlayer || Object.keys(units).length > 0)
@@ -281,6 +308,112 @@ export const AarDebriefModal: React.FC = () => {
             )}
           </section>
 
+          <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-2.5" aria-label="交战密度时间轴">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-primary font-semibold">交战密度时间轴 (点击柱条定位复盘时刻)</h3>
+              <span className="text-[10px] text-muted-foreground font-mono">
+                总时长 {Math.round(maxAarTick * FIXED_DT_SEC)}s · 共 {timelineBuckets.length} 个时间窗
+              </span>
+            </div>
+            <div className="h-20 flex items-end gap-1 pt-2 px-2 rounded-md bg-background/60 border border-border/60">
+              {timelineBuckets.map((bucket) => {
+                const heightPct = bucket.totalIntensity > 0
+                  ? Math.max(12, Math.round((bucket.totalIntensity / maxBucketIntensity) * 100))
+                  : 4;
+                const redShare = bucket.redLaunches + bucket.blueLaunches > 0
+                  ? (bucket.redLaunches / (bucket.redLaunches + bucket.blueLaunches)) * 100
+                  : 50;
+                const startSec = Math.round(bucket.startTick * FIXED_DT_SEC);
+                return (
+                  <button
+                    key={bucket.index}
+                    type="button"
+                    onClick={() => {
+                      setAarReplayTick(bucket.endTick);
+                      setShow3dAar(true);
+                    }}
+                    title={`T+${startSec}s (Tick ${bucket.startTick}~${bucket.endTick}) · 红发射 ${bucket.redLaunches} / 蓝发射 ${bucket.blueLaunches} · 命中 ${bucket.hits} · 拦截 ${bucket.interceptions} · 战损 ${bucket.losses}`}
+                    className="flex-1 h-full flex flex-col justify-end group cursor-pointer"
+                  >
+                    <div
+                      style={{ height: `${heightPct}%` }}
+                      className={`w-full rounded-t-xs overflow-hidden flex flex-col transition-opacity group-hover:opacity-100 ${
+                        bucket.losses > 0
+                          ? 'ring-1 ring-amber-400/80 opacity-95'
+                          : bucket.totalIntensity > 0
+                            ? 'opacity-85'
+                            : 'bg-zinc-800/60 opacity-45'
+                      }`}
+                    >
+                      {bucket.totalIntensity > 0 && (
+                        <>
+                          <div style={{ height: `${redShare}%` }} className="w-full bg-rose-500" />
+                          <div style={{ height: `${100 - redShare}%` }} className="w-full bg-sky-500" />
+                        </>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+              <span>T+0s</span>
+              <span>琥珀描边 = 发生平台战损 · 红/蓝高度 = 火力投射密度</span>
+              <span>T+{Math.round(maxAarTick * FIXED_DT_SEC)}s</span>
+            </div>
+          </section>
+
+          {weaponMatrix.length > 0 && (
+            <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-2" aria-label="单弹种效能与拦截率矩阵">
+              <h3 className="text-primary font-semibold">单弹种效能与拦截率矩阵</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse font-mono text-[11px] tabular-nums">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-1.5 pr-2">武器型号</th>
+                      <th className="py-1.5 px-2">发射(红/蓝)</th>
+                      <th className="py-1.5 px-2">命中/拦弹</th>
+                      <th className="py-1.5 px-2">击毁</th>
+                      <th className="py-1.5 px-2">被拦(硬/软)</th>
+                      <th className="py-1.5 px-2">脱靶</th>
+                      <th className="py-1.5 px-2">有效率</th>
+                      <th className="py-1.5 pl-2">被拦截率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weaponMatrix.map((row) => {
+                      const wSpec = catalog.weapons[row.weaponId];
+                      return (
+                        <tr key={row.weaponId} className="border-b border-border/40 last:border-0">
+                          <td className="py-1.5 pr-2 font-sans font-medium text-foreground">
+                            {wSpec?.codeName ?? row.weaponId}
+                          </td>
+                          <td className="py-1.5 px-2">
+                            {row.launched} (<span className="text-rose-300">{row.redLaunched}</span>/<span className="text-sky-300">{row.blueLaunched}</span>)
+                          </td>
+                          <td className="py-1.5 px-2 text-emerald-300">
+                            {row.hits}{row.samKills > 0 ? `+${row.samKills}拦` : ''}
+                          </td>
+                          <td className="py-1.5 px-2 text-amber-300">{row.kills}</td>
+                          <td className="py-1.5 px-2 text-cyan-300">
+                            {row.hardIntercepted + row.softKilled} ({row.hardIntercepted}/{row.softKilled})
+                          </td>
+                          <td className="py-1.5 px-2 text-muted-foreground">{row.missed}</td>
+                          <td className="py-1.5 px-2 font-semibold text-emerald-300">
+                            {(row.effectivenessRate * 100).toFixed(0)}%
+                          </td>
+                          <td className="py-1.5 pl-2 text-cyan-300">
+                            {(row.interceptedRate * 100).toFixed(0)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-2.5" aria-label="3D 交战轨迹复盘">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-cyan-300 font-semibold flex items-center gap-1.5">
@@ -325,13 +458,58 @@ export const AarDebriefModal: React.FC = () => {
               </div>
             )}
           </section>
-          <section className="p-3.5 rounded-lg bg-muted/35 border border-border">
-            <h3 className="text-primary font-semibold mb-2">单发战果与战役事件时间线 ({aar.events.length})</h3>
-            {aar.events.length === 0 ? (
-              <p className="text-muted-foreground">暂无交战事件记录</p>
+          <section className="p-3.5 rounded-lg bg-muted/35 border border-border space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-primary font-semibold">
+                单发战果与战役事件时间线 ({filteredEvents.length} / {aar.events.length})
+              </h3>
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <Select
+                  aria-label="AAR阵营筛选"
+                  value={eventSideFilter}
+                  onChange={(e) => setEventSideFilter(e.target.value as 'ALL' | SideId)}
+                  className="h-7 w-auto min-w-[96px] text-[11px]"
+                >
+                  <option value="ALL">全部阵营</option>
+                  <option value="RED">红方 RED</option>
+                  <option value="BLUE">蓝方 BLUE</option>
+                  <option value="SYSTEM">系统事件</option>
+                </Select>
+                <Select
+                  aria-label="AAR事件类别筛选"
+                  value={eventKindFilter}
+                  onChange={(e) => setEventKindFilter(e.target.value as 'ALL' | AarEventKind)}
+                  className="h-7 w-auto min-w-[110px] text-[11px]"
+                >
+                  <option value="ALL">全部类别</option>
+                  <option value="launch">武器发射</option>
+                  <option value="hit">目标命中</option>
+                  <option value="intercept">防空拦截</option>
+                  <option value="loss">平台战损</option>
+                  <option value="miss">末段脱靶</option>
+                  <option value="sortie">舰机出动</option>
+                  <option value="recovery">安全回收</option>
+                </Select>
+                <Select
+                  aria-label="AAR弹种筛选"
+                  value={eventWeaponFilter}
+                  onChange={(e) => setEventWeaponFilter(e.target.value)}
+                  className="h-7 w-auto min-w-[120px] text-[11px]"
+                >
+                  <option value="ALL">全部弹种</option>
+                  {weaponMatrix.map((w) => (
+                    <option key={w.weaponId} value={w.weaponId}>
+                      {catalog.weapons[w.weaponId]?.codeName ?? w.weaponId}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+            {filteredEvents.length === 0 ? (
+              <p className="text-muted-foreground">当前筛选条件下暂无交战事件记录</p>
             ) : (
               <div className="max-h-56 overflow-y-auto space-y-1">
-                {aar.events.slice(-80).reverse().map((event) => (
+                {filteredEvents.slice(-80).reverse().map((event) => (
                   <div key={event.id} className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-background/60 border border-border/50 text-[11px]">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-muted-foreground font-mono">T+{event.tick}</span>

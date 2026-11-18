@@ -26,6 +26,13 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
   const loadoutLocked = tick > 0 && playMode !== 'sandbox';
   const unitDead = unit.hp <= 0 || unit.status === 'destroyed';
   const jammingCap = resolveUnitJammingCapability(unit, catalog);
+  const hasSonobuoyDeployable =
+    unit.domain === 'air' &&
+    Object.keys(unit.deployableInventory).some((pid) => catalog.platforms[pid]?.category === 'sonobuoy');
+  const canAutoRefuel =
+    unit.domain === 'air' &&
+    !['tanker', 'decoy', 'sonobuoy'].includes(unit.category) &&
+    platformSpec.canReceiveAar !== false;
   return (
     <div className="space-y-3">
       <div className="stat-line telemetry-heading flex items-center justify-between text-[11px] text-foreground font-semibold">
@@ -157,6 +164,64 @@ export const UnitDoctrineWraPanel: React.FC<Props> = ({ unit, platformSpec, elig
             onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { requireIdentifiedForAutoFire: checked })}
           />
         </div>
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+          <span className="text-foreground">雷达间歇闪烁 (EMCON轮巡)</span>
+          <Switch
+            aria-label="雷达间歇闪烁"
+            disabled={unitDead}
+            checked={!!unit.doctrine.emconRadarIntermittent}
+            onCheckedChange={(checked) =>
+              updateUnitDoctrine(unit.id, {
+                emconRadarIntermittent: checked,
+                ...(checked ? { emconRadar: true } : {}),
+              })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+          <span className="text-foreground">山脊遮蔽自动绕障 (Dogleg)</span>
+          <Switch
+            aria-label="山脊遮蔽自动绕障"
+            disabled={unitDead}
+            checked={!!unit.doctrine.autoTerrainDogleg}
+            onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { autoTerrainDogleg: checked })}
+          />
+        </div>
+        {platformSpec.ooda && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+            <span className="text-foreground">
+              OODA 反应延迟 ({platformSpec.ooda.detectionSec}/{platformSpec.ooda.targetingSec}/{platformSpec.ooda.evasionSec}s)
+            </span>
+            <Switch
+              aria-label="OODA反应周期延迟"
+              disabled={unitDead || platformSpec.dbid !== undefined}
+              checked={platformSpec.dbid !== undefined || !!unit.doctrine.enforceOoda}
+              onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { enforceOoda: checked })}
+            />
+          </div>
+        )}
+        {hasSonobuoyDeployable && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+            <span className="text-foreground">反潜自动布放声呐浮标</span>
+            <Switch
+              aria-label="反潜自动布放声呐浮标"
+              disabled={unitDead}
+              checked={!!unit.doctrine.autoDeploySonobuoys}
+              onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { autoDeploySonobuoys: checked })}
+            />
+          </div>
+        )}
+        {canAutoRefuel && (
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+            <span className="text-foreground">低油量自动请求空中加油</span>
+            <Switch
+              aria-label="低油量自动请求空中加油"
+              disabled={unitDead}
+              checked={!!unit.doctrine.autoAirRefuel}
+              onCheckedChange={(checked) => updateUnitDoctrine(unit.id, { autoAirRefuel: checked })}
+            />
+          </div>
+        )}
         {unit.domain === 'land' && platformSpec.maxSpeedKts > 0 && (
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
             <span className="text-foreground">发射后机动规避</span>

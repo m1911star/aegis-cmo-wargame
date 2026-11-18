@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { Database, Search } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Database, RotateCcw, Search, Upload } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
 import { ModalHeader, ModalShell } from '../ui/dialog';
 import { Select } from '../ui/select';
+import { Textarea } from '../ui/textarea';
 import { FORCE_PACKAGES } from '../../db';
 import { m2ToDbsm } from '../../engine/cmoUnits';
 
@@ -20,11 +22,37 @@ type CatalogTab =
 
 export const CatalogViewerModal: React.FC = () => {
   const catalog = useWargameStore((s) => s.catalog);
+  const customOverlay = useWargameStore((s) => s.currentScenario.customCatalogOverlay);
+  const importCatalogJson = useWargameStore((s) => s.importCatalogJson);
+  const resetCatalogToDefault = useWargameStore((s) => s.resetCatalogToDefault);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const [catalogTab, setCatalogTab] = useState<CatalogTab>('platforms');
   const [query, setQuery] = useState('');
   const [domainFilter, setDomainFilter] = useState('ALL');
+  const [showHotloadPanel, setShowHotloadPanel] = useState(false);
+  const [hotloadJsonText, setHotloadJsonText] = useState('');
+  const [hotloadMessage, setHotloadMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingFileModeRef = useRef<'merge' | 'replace'>('merge');
   const normalizedQuery = query.trim().toLowerCase();
+
+  const handleCatalogFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = importCatalogJson(text, pendingFileModeRef.current);
+      setHotloadMessage({
+        ok: res.ok,
+        text: res.ok
+          ? `${pendingFileModeRef.current === 'merge' ? '合并导入成功' : '覆盖导入成功'}：${res.importedSummary}`
+          : `导入失败：${res.error}`,
+      });
+    } catch {
+      setHotloadMessage({ ok: false, text: '读取本地 JSON 文件失败' });
+    }
+  };
 
   const matchesText = (text: string) => !normalizedQuery || text.toLowerCase().includes(normalizedQuery);
   const platforms = useMemo(
@@ -186,7 +214,117 @@ export const CatalogViewerModal: React.FC = () => {
           <option value="subsurface">水下域 (SUBSURFACE)</option>
           <option value="land">陆基域 (LAND)</option>
         </Select>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          aria-label="上传 CMO Catalog JSON"
+          onChange={handleCatalogFileUpload}
+          className="hidden"
+        />
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => {
+            pendingFileModeRef.current = 'merge';
+            fileInputRef.current?.click();
+          }}
+          className="text-emerald-300 border-emerald-500/35 hover:bg-emerald-500/15"
+          title="读取 importCmoDb.ts 导出的 JSON 并合并进当前装备库"
+        >
+          <Upload className="w-3 h-3" />
+          <span>合并导入 JSON</span>
+        </Button>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => setShowHotloadPanel((prev) => !prev)}
+          className="text-cyan-300 border-cyan-500/35 hover:bg-cyan-500/15"
+        >
+          <span>{showHotloadPanel ? '收起热加载' : 'JSON 热加载管理'}</span>
+        </Button>
+        {customOverlay && (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              const res = resetCatalogToDefault();
+              setHotloadMessage({
+                ok: res.ok,
+                text: res.ok ? '已恢复内置装备目录' : `重置失败：${res.error}`,
+              });
+            }}
+            className="text-amber-300 border-amber-500/35 hover:bg-amber-500/15"
+            title="清除自定义装备目录热加载覆盖层"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>重置目录</span>
+          </Button>
+        )}
       </div>
+
+      {showHotloadPanel && (
+        <div className="px-4 py-3 bg-emerald-950/20 border-b border-emerald-500/25 space-y-2 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold text-emerald-300">
+              CMO JSON 目录热加载（兼容 <code>scripts/importCmoDb.ts</code> 输出格式）
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  pendingFileModeRef.current = 'replace';
+                  fileInputRef.current?.click();
+                }}
+              >
+                上传并替换覆盖层
+              </Button>
+              <Button
+                size="xs"
+                variant="success"
+                disabled={!hotloadJsonText.trim()}
+                onClick={() => {
+                  const res = importCatalogJson(hotloadJsonText, 'merge');
+                  setHotloadMessage({
+                    ok: res.ok,
+                    text: res.ok ? `合并热加载成功：${res.importedSummary}` : `导入失败：${res.error}`,
+                  });
+                }}
+              >
+                粘贴合并热加载
+              </Button>
+              <Button
+                size="xs"
+                variant="secondary"
+                disabled={!hotloadJsonText.trim()}
+                onClick={() => {
+                  const res = importCatalogJson(hotloadJsonText, 'replace');
+                  setHotloadMessage({
+                    ok: res.ok,
+                    text: res.ok ? `覆盖热加载成功：${res.importedSummary}` : `导入失败：${res.error}`,
+                  });
+                }}
+              >
+                粘贴替换覆盖层
+              </Button>
+            </div>
+          </div>
+          <Textarea
+            aria-label="粘贴 CMO Catalog JSON"
+            rows={3}
+            placeholder='粘贴包含 "platforms" / "weapons" / "sensors" / "mounts" / "magazines" / "propulsions" 的 JSON...'
+            value={hotloadJsonText}
+            onChange={(e) => setHotloadJsonText(e.target.value)}
+            className="font-mono text-[11px]"
+          />
+          {hotloadMessage && (
+            <div className={`text-[11px] font-medium ${hotloadMessage.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {hotloadMessage.text}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="p-4 max-h-[62vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
         {catalogTab === 'platforms' &&

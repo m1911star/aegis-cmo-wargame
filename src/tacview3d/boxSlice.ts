@@ -1,11 +1,16 @@
+import { CMO_SECTOR_ARCS } from '../engine/cmoUnits';
 import { THERMOCLINE } from '../engine/constants';
+import { guidanceProfile } from '../engine/fireControl';
 import { getDistanceKm } from '../engine/geometry';
 import { observeMissile } from '../engine/sensors';
-import { isActiveUnit } from '../engine/unitCapabilities';
+import { getUnitCapabilities, isActiveUnit, isUnitRadarEmittingAtTime } from '../engine/unitCapabilities';
+import { resolveUnitConfiguration } from '../engine/unitConfiguration';
 import type {
   ActivePerspective,
   AarEventKind,
+  AarTrackSample,
   BattleAarLedger,
+  CmoArcMask,
   Domain,
   EquipmentCatalog,
   RuntimeUnit,
@@ -63,6 +68,17 @@ export interface BoxEntity3D {
   speedKts: number;
   isAnchor: boolean;
   uncertaintyRadiusKm?: number;
+  radarEnvelope?: {
+    rangeKm: number;
+    startAngleDeg: number;
+    sweepAngleDeg: number;
+  };
+  sonobuoyCylinder?: {
+    radiusKm: number;
+    maxDepthM: number;
+    isActivePing: boolean;
+  };
+  trail3d?: Array<{ xKm: number; zKm: number; altM: number }>;
 }
 
 export interface BoxMissile3D {
@@ -76,6 +92,11 @@ export interface BoxMissile3D {
   headingDeg: number;
   speedKts: number;
   seekerState?: WeaponInFlight['seekerState'];
+  seekerCone?: {
+    rangeKm: number;
+    fovDeg: number;
+    locked: boolean;
+  };
   trail3d: Array<{ xKm: number; zKm: number; altM: number }>;
 }
 
@@ -190,6 +211,32 @@ function extractClouds(environment?: ScenarioEnvironment): BoxSliceCommon['cloud
   };
 }
 
+function deriveArcSpanFromCmoMask(arcs?: CmoArcMask): { startAngleDeg: number; sweepAngleDeg: number } | undefined {
+  if (!arcs) return undefined;
+  const enabled = CMO_SECTOR_ARCS.map((s) => Boolean(arcs[s]));
+  const count = enabled.filter(Boolean).length;
+  if (count === 0 || count === 8) return undefined;
+  // Find longest contiguous disabled gap so enabled span wraps cleanly across 0°
+  let bestGapStart = 0;
+  let bestGapLen = 0;
+  for (let i = 0; i < 8; i++) {
+    let len = 0;
+    while (len < 8 && !enabled[(i + len) % 8]) len++;
+    if (len > bestGapLen) {
+      bestGapLen = len;
+      bestGapStart = i;
+    }
+  }
+  const enabledStartIdx = (bestGapStart + bestGapLen) % 8;
+  const enabledCount = 8 - bestGapLen;
+  const startDeg = enabledStartIdx * 45;
+  const normalizedStart = startDeg > 180 ? startDeg - 360 : startDeg;
+  return {
+    startAngleDeg: normalizedStart,
+    sweepAngleDeg: enabledCount * 45,
+  };
+}
+
 export interface BuildLiveBoxSliceInput {
   anchorCenter: [number, number];
   anchorLabel: string;
@@ -200,6 +247,7 @@ export interface BuildLiveBoxSliceInput {
   contacts: Record<string, TacticalContact>;
   weaponsInFlight: Record<string, WeaponInFlight>;
   detectedMissileIds?: readonly string[];
+  aarTracks?: readonly AarTrackSample[];
   catalog: EquipmentCatalog;
   simTime: number;
   environment?: ScenarioEnvironment;
@@ -215,18 +263,85 @@ export function buildLiveBoxSlice({
   contacts,
   weaponsInFlight,
   detectedMissileIds = [],
+  aarTracks,
   catalog,
   simTime,
   environment,
 }: BuildLiveBoxSliceInput): LiveBoxSlice {
   const entities: BoxEntity3D[] = [];
   const detectedSet = new Set(detectedMissileIds);
+  const recentTracksByUnit = new Map<string, AarTrackSample[]>();
+  if (aarTracks && aarTracks.length > 0) {
+    for (const sample of aarTracks) {
+      let list = recentTracksByUnit.get(sample.unitId);
+      if (!list) {
+        list = [];
+        recentTracksByUnit.set(sample.unitId, list);
+      }
+      list.push(sample);
+    }
+  }
 
   for (const unit of Object.values(units)) {
     if (!isActiveUnit(unit)) continue;
     if (activePerspective !== 'GOD' && unit.side !== activePerspective) continue;
     if (getDistanceKm(anchorCenter, unit.position) > radiusKm) continue;
     const pt = lonLatAltToLocalBox(unit.position, unit.altitudeM, anchorCenter);
+    const cfg = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
+    const caps = getUnitCapabilities(unit);
+
+    let radarEnvelope: BoxEntity3D['radarEnvelope'];
+    if (isUnitRadarEmittingAtTime(unit, simTime, weaponsInFlight, catalog) && caps.radarFactor > 0) {
+      let bestRange = 0;
+      let bestSensorMount: (typeof cfg.sensorMounts)[number] | undefined;
+      for (const sm of cfg.sensorMounts) {
+        const s = catalog.sensors[sm.sensorId];
+        if (!s || (s.type !== 'radar_air_surface' && s.type !== 'radar_oth')) continue;
+        const r = s.maxRangeKm * caps.radarFactor;
+        if (r > bestRange) {
+          bestRange = r;
+          bestSensorMount = sm;
+        }
+      }
+      if (bestRange > 0 && bestSensorMount) {
+        const s = catalog.sensors[bestSensorMount.sensorId]!;
+        const cmoSpan = deriveArcSpanFromCmoMask(bestSensorMount.arcs);
+        const cov = s.coverageArcDeg ?? 360;
+        radarEnvelope = {
+          rangeKm: Number(Math.min(radiusKm * 0.92, bestRange).toFixed(1)),
+          startAngleDeg: cmoSpan ? cmoSpan.startAngleDeg : cov < 360 ? -cov * 0.5 : -180,
+          sweepAngleDeg: cmoSpan ? cmoSpan.sweepAngleDeg : cov < 360 ? cov : 360,
+        };
+      }
+    }
+
+    let sonobuoyCylinder: BoxEntity3D['sonobuoyCylinder'];
+    if (unit.category === 'sonobuoy') {
+      let maxSonarKm = 14;
+      for (const sId of cfg.sensorIds) {
+        const s = catalog.sensors[sId];
+        if (s && (s.type === 'sonar_passive' || s.type === 'sonar_active')) {
+          if (s.maxRangeKm > maxSonarKm) maxSonarKm = s.maxRangeKm;
+        }
+      }
+      sonobuoyCylinder = {
+        radiusKm: Number(Math.min(radiusKm * 0.5, maxSonarKm).toFixed(1)),
+        maxDepthM: -220,
+        isActivePing: Boolean(unit.doctrine.emconSonar),
+      };
+    }
+
+    let trail3d: BoxEntity3D['trail3d'];
+    const unitHistory = recentTracksByUnit.get(unit.id);
+    if (unitHistory && unitHistory.length > 0) {
+      const tail = unitHistory.slice(-16);
+      trail3d = tail.map((s) => {
+        const p = lonLatAltToLocalBox(s.position, s.altitudeM, anchorCenter);
+        return { xKm: p.xKm, zKm: p.zKm, altM: s.altitudeM };
+      });
+      trail3d.push({ xKm: pt.xKm, zKm: pt.zKm, altM: unit.altitudeM });
+    }
+
     entities.push({
       id: unit.id,
       kind: 'unit',
@@ -240,6 +355,9 @@ export function buildLiveBoxSlice({
       headingDeg: unit.heading,
       speedKts: unit.speedKts,
       isAnchor: unit.id === anchorId,
+      radarEnvelope,
+      sonobuoyCylinder,
+      trail3d,
     });
   }
 
@@ -294,6 +412,22 @@ export function buildLiveBoxSlice({
       trail3d.push({ xKm: headPt.xKm, zKm: headPt.zKm, altM: missile.altitudeM });
     }
 
+    let seekerCone: BoxMissile3D['seekerCone'];
+    if (
+      isOwnOrGod &&
+      (missile.seekerState === 'terminal_searching' || missile.seekerState === 'terminal_locked')
+    ) {
+      const wSpec = catalog.weapons[missile.weaponId];
+      if (wSpec) {
+        const prof = guidanceProfile(wSpec);
+        seekerCone = {
+          rangeKm: Number(Math.max(4, Math.min(35, prof.seekerRangeKm)).toFixed(1)),
+          fovDeg: Math.max(12, Math.min(120, prof.seekerFovDeg)),
+          locked: missile.seekerState === 'terminal_locked',
+        };
+      }
+    }
+
     missiles.push({
       id: missile.id,
       name: isOwnOrGod ? missile.name : '来袭武器',
@@ -305,6 +439,7 @@ export function buildLiveBoxSlice({
       headingDeg: missile.heading,
       speedKts: missile.speedKts,
       seekerState: isOwnOrGod ? missile.seekerState : undefined,
+      seekerCone,
       trail3d,
     });
   }

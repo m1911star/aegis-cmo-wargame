@@ -195,6 +195,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
       pendingRiskEngagement: null,
       pendingSpawnConfig: null,
       pendingForcePackageConfig: null,
+      pendingPolygonDraft: null,
       pendingWeaponIdForEngage: null,
       pendingStrikeWaypoints: [],
       interactionMode: 'select',
@@ -252,6 +253,7 @@ export function advanceReplayRecordingIncremental(
       pendingRiskEngagement: null,
       pendingSpawnConfig: null,
       pendingForcePackageConfig: null,
+      pendingPolygonDraft: null,
       pendingWeaponIdForEngage: null,
       pendingStrikeWaypoints: [],
       interactionMode: 'select',
@@ -358,7 +360,7 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
     useWargameStore.setState({ autoPause: previous.autoPause, timeScale: 0,
       replaySnapshots: collectedSnapshots.length ? collectedSnapshots : useWargameStore.getState().replaySnapshots,
       pendingRiskEngagement: null, pendingSpawnConfig: null, pendingForcePackageConfig: null,
-      pendingWeaponIdForEngage: null, interactionMode: 'select' });
+      pendingPolygonDraft: null, pendingWeaponIdForEngage: null, interactionMode: 'select' });
     return canonicalBattleState();
   } catch (error) {
     useWargameStore.setState(previous, true);

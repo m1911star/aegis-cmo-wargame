@@ -1,6 +1,6 @@
 import * as turf from './turfGeo';
 import type { BearingObservation, CombatLogEntry, Domain, EquipmentCatalog, PlatformSensorMount, PlatformSpec, RuntimeUnit, ScenarioEnvironment, SensorSpec, SideId, TacticalContact, WeaponInFlight } from '../types/wargame';
-import { isBearingInCmoArcs, resolvePlatformAcousticDb, resolvePlatformRcsProfile } from './cmoUnits';
+import { isBearingInCmoArcs, resolvePlatformAcousticDb, resolvePlatformRcsProfile, shouldEnforceOoda } from './cmoUnits';
 import { resolveUnitConfiguration } from './unitConfiguration';
 import {
   acousticRangeFactor,
@@ -9,7 +9,7 @@ import {
   isPointInCompiledPolygon,
 } from './environment';
 import { calculateRadarHorizonKm, getBearingDeg, getDistanceKm } from './geometry';
-import { compareRuntimeUnits, getUnitCapabilities, isActiveUnit, isRadioEmitting } from './unitCapabilities';
+import { compareRuntimeUnits, getUnitCapabilities, isActiveUnit, isRadioEmitting, isUnitRadarEmittingAtTime } from './unitCapabilities';
 import {
   REFERENCE_RCS_M2,
   RCS_ASPECT_ANGLE,
@@ -366,7 +366,7 @@ export function hasDirectReconBdaCoverage(
         const mods = evaluateWeatherModifiers(observer.position, observer.altitudeM, position, Math.max(0, altitudeM), environment);
         if (distKm <= Math.min(35, sensor.maxRangeKm * mods.opticalFactor)) return true;
       }
-      if (sensor.type === 'radar_air_surface' && observer.doctrine.emconRadar && getUnitCapabilities(observer).radarFactor > 0 && distKm <= 35) {
+      if (sensor.type === 'radar_air_surface' && isUnitRadarEmittingAtTime(observer, elapsedSec * 1000) && getUnitCapabilities(observer).radarFactor > 0 && distKm <= 35) {
         return true;
       }
     }
@@ -414,7 +414,7 @@ export function computeContactsOnly(
   const getIsEmitting = (unit: RuntimeUnit): boolean => {
     let val = emittingCache.get(unit.id);
     if (val === undefined) {
-      val = isRadioEmitting(unit, catalog);
+      val = isRadioEmitting(unit, catalog, nextSimTime);
       emittingCache.set(unit.id, val);
     }
     return val;
@@ -454,6 +454,9 @@ export function computeContactsOnly(
       let bestClassification: TacticalContact['classification'] = 'unknown';
       let emitterObserved = false;
 
+      const contactKey = `${observerSide}_CONTACT_${target.id}`;
+      const prevContact = previousContacts[contactKey];
+
       for (const observer of friendlyUnits) {
         const obsSpec = catalog.platforms[observer.platformId];
         if (!obsSpec) continue;
@@ -461,6 +464,20 @@ export function computeContactsOnly(
         if (!obsMeta || !obsMeta.domains.has(target.domain)) continue;
 
         const obsCaps = capabilitiesById.get(observer.id)!;
+        const obsRadarActive = isUnitRadarEmittingAtTime(observer, nextSimTime);
+        const oodaDetectPending =
+          shouldEnforceOoda(obsSpec, observer.doctrine) &&
+          (obsSpec.ooda?.detectionSec ?? 0) > 0 &&
+          (prevContact
+            ? (nextSimTime - prevContact.firstDetectedTime) / 1000 + 1e-6 < obsSpec.ooda!.detectionSec
+            : startTime !== undefined && nextSimTime > startTime);
+        const promoteClassification = (candidate: TacticalContact['classification']) => {
+          if (oodaDetectPending) return;
+          if (candidate === 'identified') bestClassification = 'identified';
+          else if (candidate === 'classified' && bestClassification === 'unknown') {
+            bestClassification = 'classified';
+          }
+        };
         const distKm = getDistanceKm(observer.position, target.position);
         let cachedLos: boolean | undefined;
         const hasLineOfSight = () => (cachedLos ??= hasRadarLineOfSight(
@@ -499,7 +516,7 @@ export function computeContactsOnly(
             sensor.type === 'radar_air_surface' ||
             sensor.type === 'radar_oth'
           ) {
-            if (!observer.doctrine.emconRadar || obsCaps.radarFactor === 0) continue;
+            if (!obsRadarActive || obsCaps.radarFactor === 0) continue;
             if (sensor.type === 'radar_air_surface' && !hasLineOfSight()) continue;
 
             const baseEffRangeKm = calculateEffectiveRadarRangeKm(
@@ -526,9 +543,9 @@ export function computeContactsOnly(
                 bestUncertaintyKm = uncertainty;
               }
               if (ratio < 0.55) {
-                bestClassification = 'identified';
-              } else if (bestClassification === 'unknown') {
-                bestClassification = 'classified';
+                promoteClassification('identified');
+              } else {
+                promoteClassification('classified');
               }
             }
           }
@@ -568,9 +585,7 @@ export function computeContactsOnly(
               if (esmUncertaintyKm < bestUncertaintyKm) {
                 bestUncertaintyKm = esmUncertaintyKm;
               }
-              if (bestClassification === 'unknown') {
-                bestClassification = 'classified';
-              }
+              promoteClassification('classified');
             }
           }
 
@@ -586,12 +601,10 @@ export function computeContactsOnly(
               hasNonEsmDetection = true;
               detectingSources.push(`${observer.callsign} (${sensor.codeName})`);
               if (distKm <= effRangeKm * 0.65) {
-                bestClassification = 'identified';
+                promoteClassification('identified');
                 bestUncertaintyKm = Math.min(bestUncertaintyKm, 0.2);
               } else {
-                if (bestClassification === 'unknown') {
-                  bestClassification = 'classified';
-                }
+                promoteClassification('classified');
                 bestUncertaintyKm = Math.min(bestUncertaintyKm, 1.5);
               }
             }
@@ -641,9 +654,9 @@ export function computeContactsOnly(
                 sensor.type === 'sonar_active' ||
                 distKm < sonarRangeKm * 0.55
               ) {
-                bestClassification = 'identified';
-              } else if (bestClassification === 'unknown') {
-                bestClassification = 'classified';
+                promoteClassification('identified');
+              } else {
+                promoteClassification('classified');
               }
             }
           }
@@ -673,7 +686,7 @@ export function computeContactsOnly(
               bestUncertaintyKm = Math.min(bestUncertaintyKm, 0.25);
               bestClassification = 'identified';
             }
-          } else if (pass.sensorKind === 'elint_esm' && isRadioEmitting(target, catalog)) {
+          } else if (pass.sensorKind === 'elint_esm' && isRadioEmitting(target, catalog, nextSimTime)) {
             emitterObserved = true;
             hasNonEsmDetection = true;
             detectingSources.push(`${pass.name} (天基ELINT电子截获)`);
@@ -684,9 +697,6 @@ export function computeContactsOnly(
           }
         }
       }
-
-      const contactKey = `${observerSide}_CONTACT_${target.id}`;
-      const prevContact = previousContacts[contactKey];
 
       if (detectingSources.length > 0) {
         const uniqueEsmObservations = esmObservations.filter((observation, index, all) =>
@@ -926,6 +936,7 @@ export function observeMissile(
       observer.position, observer.altitudeM, config.platform.radarAntennaHeightM,
       missile.position, missile.altitudeM, environment
     ));
+    const obsRadarOn = isUnitRadarEmittingAtTime(observer, simTime);
     const detected = config.sensorIds.some((id) => {
       const sensor = catalog.sensors[id];
       if (!sensor?.detectDomains.includes(missileDomain)) return false;
@@ -936,14 +947,14 @@ export function observeMissile(
         const torpedoNoiseRangeKm = sensor.maxRangeKm * (sensor.type === 'sonar_active' ? 1 : 0.65);
         return distance <= torpedoNoiseRangeKm;
       }
-      if (allowPassiveWarning && observer.doctrine.emconRadar && sensor.type === 'irst_optical') {
+      if (allowPassiveWarning && obsRadarOn && sensor.type === 'irst_optical') {
         const horizonKm = calculateRadarHorizonKm(
           observer.altitudeM, config.platform.radarAntennaHeightM, missile.altitudeM
         );
         return distance <= Math.min(sensor.maxRangeKm * 0.45, horizonKm) && hasLos();
       }
       if (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth') return false;
-      if (!observer.doctrine.emconRadar || obsCaps.radarFactor === 0) return false;
+      if (!obsRadarOn || obsCaps.radarFactor === 0) return false;
       if (sensor.type === 'radar_air_surface' && !hasLos()) return false;
       return distance <= calculateEffectiveRadarRangeKm(
         sensor,

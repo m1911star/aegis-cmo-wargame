@@ -10,6 +10,7 @@ import { Select } from '../ui/select';
 const MISSION_TYPE_OPTIONS: Array<{ value: MissionType; label: string }> = [
   { value: 'aaw_patrol', label: '防空巡逻' },
   { value: 'asuw_patrol', label: '反舰巡逻' },
+  { value: 'maritime_strike', label: '防区外对海打击' },
   { value: 'asw_patrol', label: '反潜巡逻' },
   { value: 'land_strike', label: '对陆打击' },
   { value: 'aew_support', label: '预警支援' },
@@ -132,8 +133,13 @@ export const MissionsTab: React.FC = () => {
                   <p className="text-[11px] text-muted-foreground leading-relaxed">{m.description}</p>
                 )}
 
-                {(m.coordinatedPackageId || m.packageTotSec !== undefined) && (
+                {(m.coordinatedPackageId || m.packageTotSec !== undefined || m.type === 'maritime_strike' || m.standoffStrike) && (
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    {(m.type === 'maritime_strike' || m.standoffStrike) && (
+                      <Badge variant="outline" className="border-emerald-500/40 text-emerald-300 bg-emerald-500/10">
+                        防区外发射点保持 + 绕障
+                      </Badge>
+                    )}
                     {m.coordinatedPackageId && (
                       <Badge variant="outline" className="border-amber-500/40 text-amber-300 bg-amber-500/10">
                         任务包: {m.coordinatedPackageId}

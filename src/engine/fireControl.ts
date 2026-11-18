@@ -1,8 +1,8 @@
-import type { EquipmentCatalog, GuidanceProfile, PlatformSpec, RuntimeUnit, RuntimeWeaponMount, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
-import { resolveWeaponRangeForDomain } from './cmoUnits';
+import type { EquipmentCatalog, GuidanceProfile, PlatformMountTemplate, PlatformSpec, RuntimeUnit, RuntimeWeaponMount, TacticalContact, WeaponInFlight, WeaponSpec } from '../types/wargame';
+import { isBearingInCmoArcs, resolveWeaponRangeForDomain, shouldEnforceOoda } from './cmoUnits';
 import { resolveUnitConfiguration } from './unitConfiguration';
-import { getDistanceKm } from './geometry';
-import { getUnitCapabilities, isActiveUnit } from './unitCapabilities';
+import { getBearingDeg, getDistanceKm } from './geometry';
+import { getUnitCapabilities, isActiveUnit, isUnitRadarEmittingAtTime } from './unitCapabilities';
 import { GUIDANCE_DEFAULTS } from './constants';
 
 export function resolveMaxGuidanceChannels(platform: PlatformSpec | undefined): number {
@@ -36,6 +36,14 @@ export function weaponUsesGuidanceChannel(weapon: WeaponSpec): boolean {
   return profile.requiresSupport || profile.receivesUpdates;
 }
 
+export function mountUsesGuidanceChannel(
+  weapon: WeaponSpec,
+  mount?: Pick<PlatformMountTemplate, 'autonomous'>
+): boolean {
+  if (mount?.autonomous) return false;
+  return weaponUsesGuidanceChannel(weapon);
+}
+
 export function countActiveGuidanceChannels(
   shooterId: string,
   weaponsInFlight: Record<string, WeaponInFlight> | undefined,
@@ -44,7 +52,7 @@ export function countActiveGuidanceChannels(
   if (!weaponsInFlight) return 0;
   let active = 0;
   for (const missile of Object.values(weaponsInFlight)) {
-    if (missile.shooterId !== shooterId || missile.isIntercepted) continue;
+    if (missile.shooterId !== shooterId || missile.isIntercepted || missile.launchedFromAutonomousMount) continue;
     const w = catalog.weapons[missile.weaponId];
     if (!w || !weaponUsesGuidanceChannel(w)) continue;
     const holdsUntilImpact = guidanceProfile(w).requiresSupport;
@@ -98,7 +106,7 @@ export function trackSupport(
   return (ids ?? []).filter((id) => {
     const source = units[id];
     if (!source || !isActiveUnit(source) || source.side !== attacker.side) return false;
-    if (profile.requiresSupport && (!source.doctrine.emconRadar || !getUnitCapabilities(source).radarFactor)) return false;
+    if (profile.requiresSupport && (!isUnitRadarEmittingAtTime(source, simTime) || !getUnitCapabilities(source).radarFactor)) return false;
     const attackerHasDatalink = resolveUnitConfiguration(catalog, attacker.platformId, attacker.activeLoadoutId).hasDatalink;
     const sourceHasDatalink = resolveUnitConfiguration(catalog, source.platformId, source.activeLoadoutId).hasDatalink;
     return id === attacker.id || (attackerHasDatalink && sourceHasDatalink);
@@ -224,11 +232,33 @@ export function evaluateFireControl(
           : '已知瞄准点不在武器射程内'
       );
     }
+    const initialAimPoint = doglegWaypoints && doglegWaypoints.length > 0 ? doglegWaypoints[0] : contact.estimatedPosition;
+    if (
+      mount.arcs &&
+      getDistanceKm(attacker.position, initialAimPoint) > 0.05 &&
+      !isBearingInCmoArcs(attacker.heading, getBearingDeg(attacker.position, initialAimPoint), mount.arcs)
+    ) {
+      hardBlockReasons.push('目标方位处于挂架射界盲区 (CMO 8扇区遮蔽)');
+    }
+    const attackerSpec = catalog.platforms[attacker.platformId];
+    if (
+      mode !== 'manual' &&
+      shouldEnforceOoda(attackerSpec, attacker.doctrine) &&
+      (attackerSpec?.ooda?.targetingSec ?? 0) > 0
+    ) {
+      const lockStart = attacker.oodaLocks?.[contact.id];
+      const elapsedLockSec = lockStart !== undefined ? Math.max(0, (simTime - lockStart) / 1000) : 0;
+      if (elapsedLockSec + 1e-6 < attackerSpec!.ooda!.targetingSec) {
+        hardBlockReasons.push(
+          `OODA 瞄准锁定延迟中 (${elapsedLockSec.toFixed(1)}/${attackerSpec!.ooda!.targetingSec}s)`
+        );
+      }
+    }
     if (trackAgeSec > profile.maxTrackAgeSec) riskWarnings.push(`情报已陈旧（${trackAgeSec.toFixed(1)} 秒未更新）`);
     if (contact.uncertaintyRadiusKm > profile.maxUncertaintyKm) riskWarnings.push(`定位误差 ±${contact.uncertaintyRadiusKm.toFixed(1)} km，存在搜索失败风险`);
     if (contact.classification === 'unknown') riskWarnings.push('目标尚未分类');
   }
-  if (weaponUsesGuidanceChannel(weapon) && availableChannels <= 0) {
+  if (mountUsesGuidanceChannel(weapon, mount) && availableChannels <= 0) {
     if (profile.requiresSupport || mode !== 'manual') {
       hardBlockReasons.push(`平台火控/制导通道已饱和 (${activeChannels}/${maxChannels})`);
     } else {

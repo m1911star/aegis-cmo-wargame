@@ -1,4 +1,5 @@
 import { deployCarriedUnitFromLauncher, evaluateCarrierSortieAvailability, launchCarrierSortie } from '../../engine/carrierOperations';
+import { resolvePropulsionAtAltitude } from '../../engine/cmoUnits';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
 import { findShootAndScootDestination, isRouteAllowed } from '../../engine/environment';
 import { evaluateFireControl } from '../../engine/fireControl';
@@ -21,6 +22,7 @@ import type {
   ScenarioEnvironment,
   SideId,
   ThreatLevel,
+  ThrottleSetting,
   UnitDoctrine,
 } from '../../types/wargame';
 import type { StoreSet } from '../types';
@@ -530,6 +532,11 @@ export function createCommandSlice(set: StoreSet) {
             patch.minimumAutomaticThreat !== undefined && !THREAT_LEVELS.includes(patch.minimumAutomaticThreat) ||
             patch.bvrTactics !== undefined && !['standard', 'crank_pump'].includes(patch.bvrTactics) ||
             patch.baffleClearPeriodic !== undefined && typeof patch.baffleClearPeriodic !== 'boolean' ||
+            patch.emconRadarIntermittent !== undefined && typeof patch.emconRadarIntermittent !== 'boolean' ||
+            patch.enforceOoda !== undefined && typeof patch.enforceOoda !== 'boolean' ||
+            patch.autoDeploySonobuoys !== undefined && typeof patch.autoDeploySonobuoys !== 'boolean' ||
+            patch.autoAirRefuel !== undefined && typeof patch.autoAirRefuel !== 'boolean' ||
+            patch.autoTerrainDogleg !== undefined && typeof patch.autoTerrainDogleg !== 'boolean' ||
             patch.automaticTargetDomains !== undefined && (!Array.isArray(patch.automaticTargetDomains) ||
               new Set(patch.automaticTargetDomains).size !== patch.automaticTargetDomains.length ||
               patch.automaticTargetDomains.some((domain) => !TARGET_DOMAINS.includes(domain)))) return s;
@@ -574,6 +581,11 @@ export function createCommandSlice(set: StoreSet) {
             patch.minimumAutomaticThreat !== undefined && !THREAT_LEVELS.includes(patch.minimumAutomaticThreat) ||
             patch.bvrTactics !== undefined && !['standard', 'crank_pump'].includes(patch.bvrTactics) ||
             patch.baffleClearPeriodic !== undefined && typeof patch.baffleClearPeriodic !== 'boolean' ||
+            patch.emconRadarIntermittent !== undefined && typeof patch.emconRadarIntermittent !== 'boolean' ||
+            patch.enforceOoda !== undefined && typeof patch.enforceOoda !== 'boolean' ||
+            patch.autoDeploySonobuoys !== undefined && typeof patch.autoDeploySonobuoys !== 'boolean' ||
+            patch.autoAirRefuel !== undefined && typeof patch.autoAirRefuel !== 'boolean' ||
+            patch.autoTerrainDogleg !== undefined && typeof patch.autoTerrainDogleg !== 'boolean' ||
             patch.automaticTargetDomains !== undefined && (!Array.isArray(patch.automaticTargetDomains) ||
               new Set(patch.automaticTargetDomains).size !== patch.automaticTargetDomains.length ||
               patch.automaticTargetDomains.some((domain) => !TARGET_DOMAINS.includes(domain)))) return s;
@@ -615,16 +627,24 @@ export function createCommandSlice(set: StoreSet) {
         };
       }),
 
-    updateUnitKinematics: (unitId: string, speedKts?: number, altitudeM?: number) =>
+    updateUnitKinematics: (
+      unitId: string,
+      speedKts?: number,
+      altitudeM?: number,
+      throttleSetting?: ThrottleSetting | null
+    ) =>
       set((s) => {
         const unit = s.units[unitId];
         if (!canCommandUnit(s, unit)) return s;
+        if (
+          throttleSetting !== undefined &&
+          throttleSetting !== null &&
+          ![1, 2, 3, 4].includes(throttleSetting)
+        ) {
+          return s;
+        }
         const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
         const spec = configuration.platform;
-        const clampedSpeed =
-          speedKts !== undefined && spec
-            ? Math.max(0, Math.min(configuration.maxSpeedKts, speedKts))
-            : unit.targetSpeedKts;
         const clampedAlt =
           altitudeM !== undefined && spec
             ? Math.max(
@@ -632,6 +652,33 @@ export function createCommandSlice(set: StoreSet) {
                 Math.min(spec.maxAltitudeM, altitudeM)
               )
             : unit.targetAltitudeM;
+        const nextThrottle =
+          throttleSetting === null
+            ? undefined
+            : throttleSetting !== undefined
+              ? throttleSetting
+              : speedKts !== undefined
+                ? undefined
+                : unit.throttleSetting;
+        const propPerf =
+          nextThrottle !== undefined
+            ? resolvePropulsionAtAltitude(
+                spec,
+                s.catalog,
+                clampedAlt,
+                nextThrottle,
+                configuration.maxSpeedKts,
+                configuration.cruiseSpeedKts,
+                configuration.loadout?.speedPenaltyKts ?? 0
+              )
+            : undefined;
+        const maxCeiling = propPerf ? propPerf.bandMaxSpeedKts : configuration.maxSpeedKts;
+        const clampedSpeed =
+          speedKts !== undefined && spec
+            ? Math.max(0, Math.min(maxCeiling, speedKts))
+            : propPerf
+              ? Math.max(0, Math.min(maxCeiling, propPerf.targetSpeedKts))
+              : unit.targetSpeedKts;
 
         return {
           units: {
@@ -641,6 +688,45 @@ export function createCommandSlice(set: StoreSet) {
               targetSpeedKts: clampedSpeed,
               speedKts: clampedSpeed,
               targetAltitudeM: clampedAlt,
+              throttleSetting: nextThrottle,
+            },
+          },
+        };
+      }),
+
+    setUnitThrottle: (unitId: string, throttle: ThrottleSetting | null) =>
+      set((s) => {
+        const unit = s.units[unitId];
+        if (!canCommandUnit(s, unit)) return s;
+        if (throttle !== null && ![1, 2, 3, 4].includes(throttle)) return s;
+        const configuration = resolveUnitConfiguration(s.catalog, unit.platformId, unit.activeLoadoutId);
+        if (throttle === null) {
+          if (unit.throttleSetting === undefined) return s;
+          return {
+            units: {
+              ...s.units,
+              [unitId]: { ...unit, throttleSetting: undefined },
+            },
+          };
+        }
+        const propPerf = resolvePropulsionAtAltitude(
+          configuration.platform,
+          s.catalog,
+          unit.targetAltitudeM,
+          throttle,
+          configuration.maxSpeedKts,
+          configuration.cruiseSpeedKts,
+          configuration.loadout?.speedPenaltyKts ?? 0
+        );
+        const speed = Math.max(0, Math.min(propPerf.bandMaxSpeedKts, propPerf.targetSpeedKts));
+        return {
+          units: {
+            ...s.units,
+            [unitId]: {
+              ...unit,
+              throttleSetting: throttle,
+              targetSpeedKts: speed,
+              speedKts: speed,
             },
           },
         };
@@ -813,6 +899,7 @@ export function createCommandSlice(set: StoreSet) {
           datalinkSupported: solution.supportSourceIds.length > 0,
           deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
           waypoints: validDogleg ? validDogleg.map((wp) => [...wp] as [number, number]) : undefined,
+          launchedFromAutonomousMount: Boolean(mount.autonomous),
           ...launchGuidance(contact) };
       }
       const updatedAttacker = { ...attacker, status: 'engaged' as const, mounts: attacker.mounts.map((m) =>

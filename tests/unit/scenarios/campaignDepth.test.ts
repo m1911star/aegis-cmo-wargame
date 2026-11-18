@@ -6,11 +6,14 @@ import {
   applyCampaignResupplyChoice,
   applyCampaignRuntimeCarryover,
   buildCampaignStageScenario,
+  computeCampaignResupplyDiff,
   computeNextCampaignCarryover,
   createInitialCampaignState,
 } from '../../../src/scenarios/campaign';
+import { INFORMATION_EXERCISE } from '../../../src/scenarios/informationExercise';
 import { SCENARIO_EAST_SEA_THUNDER } from '../../../src/scenarios/builtinScenarios';
 import { SCENARIO_JOINT_AMPHIBIOUS_ASSAULT } from '../../../src/scenarios/jointAmphibiousScenario';
+import { captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../../src/store/battleRecording';
 import { useWargameStore as store } from '../../../src/store/useWargameStore';
 
 describe('Campaign strategic depth: supplyPoints, airbaseIntegrityPct, modifiers & resupply tradeoffs', () => {
@@ -199,5 +202,59 @@ describe('Campaign strategic depth: supplyPoints, airbaseIntegrityPct, modifiers
     expect(s2?.airbaseIntegrityPct).toBe(s2?.carryover.airbaseIntegrityPct);
     expect(s2?.stageModifiers).toEqual(s2?.carryover.stageModifiers);
     expect(SCENARIO_JOINT_AMPHIBIOUS_ASSAULT.id).toBeTruthy();
+  });
+
+  test('computes resupply before/after diffs, hot-reloads CMO JSON catalog overlays, and replays draw_polygon commands deterministically', () => {
+    const preCarry = {
+      ...createInitialCampaignState(BUILTIN_CAMPAIGN_WESTPAC, 'RED').carryover,
+      completedStages: 2,
+      supplyPoints: 120,
+      airbaseIntegrityPct: 65,
+      readinessMultiplier: 0.88,
+      airframeAttritionDebt: 4,
+      platformDamageDebt: { type055_destroyer: 0.25 },
+      scarceAmmoDebt: { yj21_hypersonic: 8, pl17_ulraam: 4 },
+    };
+    const diff = computeCampaignResupplyDiff(preCarry, 'munitions');
+    expect(diff.supplyPoints).toEqual({ before: 120, after: 80, delta: -40 });
+    expect(diff.totalScarceAmmoDebt.before).toBe(12);
+    expect(diff.totalScarceAmmoDebt.after).toBeLessThan(diff.totalScarceAmmoDebt.before);
+    expect(diff.totalScarceAmmoDebt.delta).toBeLessThan(0);
+
+    // Hot-load & reset CMO JSON overlay in store
+    store.getState().loadScenario(INFORMATION_EXERCISE, false, 777);
+    const samplePlatform = structuredClone(catalog.platforms.type055_destroyer);
+    samplePlatform.id = 'cmo_ship_9999';
+    samplePlatform.dbid = 9999;
+    samplePlatform.name = 'CMO Hotload Cruiser';
+    const importRes = store.getState().importCatalogJson(
+      JSON.stringify({ version: 'cmo_hotload_test', platforms: { cmo_ship_9999: samplePlatform } }),
+      'merge'
+    );
+    expect(importRes.ok).toBe(true);
+    expect(store.getState().catalog.platforms.cmo_ship_9999?.dbid).toBe(9999);
+    const resetRes = store.getState().resetCatalogToDefault();
+    expect(resetRes.ok).toBe(true);
+    expect(store.getState().catalog.platforms.cmo_ship_9999).toBeUndefined();
+
+    // Sandbox draw_polygon flow + deterministic Recording v2 replay
+    store.getState().setPlayMode('sandbox');
+    store.getState().startPolygonDraw({
+      targetKind: 'land',
+      name: 'Drawn Ridge',
+      elevationM: 920,
+    });
+    expect(store.getState().interactionMode).toBe('draw_polygon');
+    store.getState().appendPolygonDrawVertex([124.0, 25.0]);
+    store.getState().appendPolygonDrawVertex([124.3, 25.0]);
+    store.getState().appendPolygonDrawVertex([124.2, 25.3]);
+    expect(store.getState().commitPolygonDraw()).toBe(true);
+    expect(store.getState().environment.landPolygons.some((p) => p.name === 'Drawn Ridge' && p.elevationM === 920)).toBe(true);
+
+    store.getState().stepSingleTick(2);
+    const expectedSnapshot = canonicalBattleState();
+    const rec = captureBattleRecording();
+    const replayed = replayBattleRecording(rec);
+    expect(replayed).toEqual(expectedSnapshot);
   });
 });

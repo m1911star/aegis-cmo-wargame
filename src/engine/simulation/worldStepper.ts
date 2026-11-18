@@ -75,6 +75,9 @@ function cloneUnitForStepping(unit: RuntimeUnit): RuntimeUnit {
         }
       : undefined,
     mounts: unit.mounts.map((mount) => ({ ...mount })),
+    magazineStores: unit.magazineStores ? { ...unit.magazineStores } : undefined,
+    oodaLocks: unit.oodaLocks ? { ...unit.oodaLocks } : undefined,
+    oodaEvasionPending: unit.oodaEvasionPending ? { ...unit.oodaEvasionPending } : undefined,
     hangar: (unit.hangar || []).map((slot) => ({
       ...slot,
       turnaroundQueue: slot.turnaroundQueue.map((entry) => ({ ...entry })),

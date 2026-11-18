@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { PencilRuler } from 'lucide-react';
+import { Map as MapIcon, PencilRuler } from 'lucide-react';
 import { FORCE_PACKAGES } from '../../db';
+import type { PolygonDrawTargetKind } from '../../store/types';
 import { useWargameStore } from '../../store/useWargameStore';
-import type { SideId } from '../../types/wargame';
+import type { SeaStateLevel, SideId } from '../../types/wargame';
 import { Button } from '../ui/button';
 import { ModalHeader, ModalShell } from '../ui/dialog';
 import { Input } from '../ui/input';
@@ -16,10 +17,13 @@ export const ScenarioBuilderModal: React.FC = () => {
   const groups = useWargameStore((s) => s.groups);
   const events = useWargameStore((s) => s.events);
   const objectives = useWargameStore((s) => s.objectives);
+  const environment = useWargameStore((s) => s.environment);
   const referencePoints = useWargameStore((s) => s.referencePoints);
   const selectUnit = useWargameStore((s) => s.selectUnit);
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
   const startForcePackageSpawnOnMap = useWargameStore((s) => s.startForcePackageSpawnOnMap);
+  const startPolygonDraw = useWargameStore((s) => s.startPolygonDraw);
+  const deleteEnvironmentPolygon = useWargameStore((s) => s.deleteEnvironmentPolygon);
   const updateScenarioGroup = useWargameStore((s) => s.updateScenarioGroup);
   const assignUnitGroup = useWargameStore((s) => s.assignUnitGroup);
   const upsertObjective = useWargameStore((s) => s.upsertObjective);
@@ -40,6 +44,11 @@ export const ScenarioBuilderModal: React.FC = () => {
   const [areaEventMessage, setAreaEventMessage] = useState('侦测到单位进入指定区域。');
   const [areaEventSide, setAreaEventSide] = useState<SideId>('RED');
   const [areaEventReferenceIds, setAreaEventReferenceIds] = useState<string[]>([]);
+  const [drawTargetKind, setDrawTargetKind] = useState<PolygonDrawTargetKind>('land');
+  const [drawPolygonName, setDrawPolygonName] = useState('岛屿高地遮蔽山脊');
+  const [drawElevationM, setDrawElevationM] = useState(850);
+  const [drawSeaState, setDrawSeaState] = useState<SeaStateLevel>(5);
+  const [drawControlSide, setDrawControlSide] = useState<'RED' | 'BLUE'>('RED');
 
   const selectedBuilderGroup = groups.find((group) => group.id === builderGroupId) ?? groups[0];
   const selectedBuilderUnit = units[builderUnitId] ?? Object.values(units)[0];
@@ -208,6 +217,168 @@ export const ScenarioBuilderModal: React.FC = () => {
                 <span>{event.name} · {event.trigger.type}</span>
                 <button aria-label={`删除事件 ${event.name}`} onClick={() => deleteScenarioEvent(event.id)} className="text-rose-300 hover:text-rose-200 cursor-pointer">删除</button>
               </div>)}
+            </div>
+          </div>
+        </section>
+
+        <section className="md:col-span-2 p-3.5 rounded-lg bg-muted/35 border border-border space-y-3" aria-label="地图多边形直接标绘">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-emerald-300 font-semibold flex items-center gap-1.5">
+              <MapIcon className="w-4 h-4" />
+              <span>战场环境与夺控多边形地图标绘 (陆地山脊 / 声学区 / 气象区 / 夺控区)</span>
+            </h3>
+            <span className="text-[11px] text-muted-foreground">无需手建参考点，直接在海图连续点击顶点闭合</span>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Select
+                  aria-label="多边形标绘类型"
+                  value={drawTargetKind}
+                  onChange={(e) => {
+                    const kind = e.target.value as PolygonDrawTargetKind;
+                    setDrawTargetKind(kind);
+                    setDrawPolygonName(
+                      kind === 'land'
+                        ? '高程山脊/岛屿'
+                        : kind === 'acoustic_shallow'
+                          ? '浅海声杂波区'
+                          : kind === 'acoustic_deep'
+                            ? '深海汇聚声道区'
+                            : kind === 'weather_rain'
+                              ? '强雷暴降雨锋面'
+                              : kind === 'weather_fog'
+                                ? '浓雾低能见海区'
+                                : '核心夺控海域/滩头'
+                    );
+                  }}
+                >
+                  <option value="land">陆地 / 高程山脊遮蔽</option>
+                  <option value="acoustic_shallow">浅海声学杂波区 (0.65x)</option>
+                  <option value="acoustic_deep">深海汇聚区声道 (1.35x)</option>
+                  <option value="weather_rain">强雷暴降雨锋面</option>
+                  <option value="weather_fog">海雾低能见度区</option>
+                  <option value="control_area">区域夺控目标区</option>
+                </Select>
+                <Input
+                  aria-label="多边形标绘名称"
+                  value={drawPolygonName}
+                  onChange={(e) => setDrawPolygonName(e.target.value)}
+                  placeholder="输入区域名称"
+                />
+              </div>
+
+              {drawTargetKind === 'land' && (
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-muted-foreground shrink-0">山脊高程 (m，0=平坦岛陆):</span>
+                  <Input
+                    aria-label="标绘山脊高程米"
+                    type="number"
+                    min={0}
+                    max={8848}
+                    value={drawElevationM}
+                    onChange={(e) => setDrawElevationM(Number(e.target.value))}
+                    className="w-28 font-mono"
+                  />
+                </div>
+              )}
+
+              {(drawTargetKind === 'weather_rain' || drawTargetKind === 'weather_fog') && (
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-muted-foreground shrink-0">局部海况覆盖 (0~6级):</span>
+                  <Input
+                    aria-label="标绘局部海况等级"
+                    type="number"
+                    min={0}
+                    max={6}
+                    value={drawSeaState}
+                    onChange={(e) => setDrawSeaState(Math.max(0, Math.min(6, Math.round(Number(e.target.value)))) as SeaStateLevel)}
+                    className="w-24 font-mono"
+                  />
+                </div>
+              )}
+
+              {drawTargetKind === 'control_area' && (
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-muted-foreground shrink-0">夺控归属阵营:</span>
+                  <Select
+                    aria-label="标绘夺控区阵营"
+                    value={drawControlSide}
+                    onChange={(e) => setDrawControlSide(e.target.value as 'RED' | 'BLUE')}
+                    className="w-28"
+                  >
+                    <option value="RED">RED</option>
+                    <option value="BLUE">BLUE</option>
+                  </Select>
+                </div>
+              )}
+
+              <Button
+                size="sm"
+                variant="success"
+                disabled={!drawPolygonName.trim()}
+                onClick={() =>
+                  startPolygonDraw({
+                    targetKind: drawTargetKind,
+                    name: drawPolygonName.trim(),
+                    elevationM: drawTargetKind === 'land' ? drawElevationM : undefined,
+                    seaStateOverride:
+                      drawTargetKind === 'weather_rain' || drawTargetKind === 'weather_fog'
+                        ? drawSeaState
+                        : undefined,
+                    side: drawTargetKind === 'control_area' ? drawControlSide : undefined,
+                    pointsScore: 200,
+                  })
+                }
+              >
+                关闭面板并在地图直接标绘多边形
+              </Button>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-1.5 text-[11px]">
+              {environment.landPolygons.map((poly) => (
+                <div key={poly.id} className="flex justify-between items-center gap-2 px-2.5 py-1.5 bg-background/60 border border-border/60 rounded-md">
+                  <span className="truncate">陆地/高程 · {poly.name} ({poly.elevationM ?? 0}m)</span>
+                  <button
+                    type="button"
+                    aria-label={`删除环境区域 ${poly.name}`}
+                    onClick={() => deleteEnvironmentPolygon('land', poly.id)}
+                    className="text-rose-300 hover:text-rose-200 cursor-pointer shrink-0"
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+              {environment.acousticZones.map((zone) => (
+                <div key={zone.id} className="flex justify-between items-center gap-2 px-2.5 py-1.5 bg-background/60 border border-border/60 rounded-md">
+                  <span className="truncate">
+                    {zone.kind === 'shallow' ? '浅海声区' : '深海声道'} · {zone.name} (×{zone.sonarRangeFactor})
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`删除声学区域 ${zone.name}`}
+                    onClick={() => deleteEnvironmentPolygon('acoustic', zone.id)}
+                    className="text-rose-300 hover:text-rose-200 cursor-pointer shrink-0"
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+              {(environment.weatherZones ?? []).map((zone) => (
+                <div key={zone.id} className="flex justify-between items-center gap-2 px-2.5 py-1.5 bg-background/60 border border-border/60 rounded-md">
+                  <span className="truncate">
+                    气象区 · {zone.name} ({zone.condition === 'rain_storm' ? '暴雨' : '海雾'})
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`删除气象区域 ${zone.name}`}
+                    onClick={() => deleteEnvironmentPolygon('weather', zone.id)}
+                    className="text-rose-300 hover:text-rose-200 cursor-pointer shrink-0"
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         </section>

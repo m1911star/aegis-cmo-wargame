@@ -7,6 +7,20 @@ import {
   type TacticalBoxSlice,
 } from './boxSlice';
 
+export interface TacviewLayerVisibility {
+  showRadarEnvelopes: boolean;
+  showSeekerCones: boolean;
+  showSonobuoyCylinders: boolean;
+  showTrails: boolean;
+}
+
+export const DEFAULT_TACVIEW_LAYERS: TacviewLayerVisibility = {
+  showRadarEnvelopes: true,
+  showSeekerCones: true,
+  showSonobuoyCylinders: true,
+  showTrails: true,
+};
+
 export interface ProjectedHudLabel {
   id: string;
   text: string;
@@ -93,6 +107,7 @@ export class ThreeBoxSceneController {
   private rafId: number | null = null;
   private onLabelsUpdate?: (labels: ProjectedHudLabel[]) => void;
   private scales: BoxVerticalScale = DEFAULT_BOX_SCALES;
+  private layers: TacviewLayerVisibility = { ...DEFAULT_TACVIEW_LAYERS };
   private labelTargets: Array<{
     id: string;
     text: string;
@@ -136,6 +151,10 @@ export class ThreeBoxSceneController {
 
   public setScales(scales: BoxVerticalScale): void {
     this.scales = scales;
+  }
+
+  public setLayerVisibility(layers: TacviewLayerVisibility): void {
+    this.layers = { ...layers };
   }
 
   public resetCamera(): void {
@@ -287,6 +306,103 @@ export class ThreeBoxSceneController {
         this.dynamicGroup.add(aouMesh);
       }
 
+      if (this.layers.showRadarEnvelopes && entity.radarEnvelope && entity.radarEnvelope.rangeKm > 1) {
+        const { rangeKm, startAngleDeg, sweepAngleDeg } = entity.radarEnvelope;
+        const segs = Math.max(12, Math.round((sweepAngleDeg / 360) * 48));
+        const perimeter: THREE.Vector3[] = [];
+        const positions: number[] = [];
+        const envY = Math.max(0.08, y);
+        for (let i = 0; i <= segs; i++) {
+          const bearingDeg = entity.headingDeg + startAngleDeg + (sweepAngleDeg * i) / segs;
+          const rad = (bearingDeg * Math.PI) / 180;
+          const px = entity.xKm + rangeKm * Math.sin(rad);
+          const pz = entity.zKm - rangeKm * Math.cos(rad);
+          perimeter.push(new THREE.Vector3(px, envY, pz));
+        }
+        for (let i = 0; i < segs; i++) {
+          const a = perimeter[i];
+          const b = perimeter[i + 1];
+          positions.push(entity.xKm, envY, entity.zKm, a.x, a.y, a.z, b.x, b.y, b.z);
+        }
+        const fanGeom = new THREE.BufferGeometry();
+        fanGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const fanMesh = new THREE.Mesh(
+          fanGeom,
+          new THREE.MeshBasicMaterial({
+            color,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: entity.isAnchor ? 0.11 : 0.06,
+            depthWrite: false,
+          })
+        );
+        this.dynamicGroup.add(fanMesh);
+
+        const outlinePts =
+          sweepAngleDeg < 359.5
+            ? [
+                new THREE.Vector3(entity.xKm, envY, entity.zKm),
+                ...perimeter,
+                new THREE.Vector3(entity.xKm, envY, entity.zKm),
+              ]
+            : perimeter;
+        this.dynamicGroup.add(
+          new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(outlinePts),
+            new THREE.LineBasicMaterial({ color, transparent: true, opacity: entity.isAnchor ? 0.52 : 0.3 })
+          )
+        );
+      }
+
+      if (this.layers.showSonobuoyCylinders && entity.sonobuoyCylinder) {
+        const { radiusKm: buoyRadius, maxDepthM, isActivePing } = entity.sonobuoyCylinder;
+        const bottomY = mapY(maxDepthM, this.scales);
+        const cylHeight = Math.max(0.6, -bottomY);
+        const cylColor = isActivePing ? 0x34d399 : 0x22d3ee;
+        const cylGeom = new THREE.CylinderGeometry(buoyRadius, buoyRadius, cylHeight, 28, 1, true);
+        const cylMesh = new THREE.Mesh(
+          cylGeom,
+          new THREE.MeshBasicMaterial({
+            color: cylColor,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: isActivePing ? 0.14 : 0.08,
+            depthWrite: false,
+          })
+        );
+        cylMesh.position.set(entity.xKm, bottomY * 0.5, entity.zKm);
+        this.dynamicGroup.add(cylMesh);
+
+        for (const ringY of [-0.05, bottomY]) {
+          const rGeom = new THREE.RingGeometry(Math.max(0.3, buoyRadius - 0.25), buoyRadius + 0.25, 32);
+          rGeom.rotateX(-Math.PI / 2);
+          const rMesh = new THREE.Mesh(
+            rGeom,
+            new THREE.MeshBasicMaterial({
+              color: cylColor,
+              side: THREE.DoubleSide,
+              transparent: true,
+              opacity: 0.42,
+              depthWrite: false,
+            })
+          );
+          rMesh.position.set(entity.xKm, ringY, entity.zKm);
+          this.dynamicGroup.add(rMesh);
+        }
+      }
+
+      if (this.layers.showTrails && entity.trail3d && entity.trail3d.length >= 2) {
+        const unitTrailPts = entity.trail3d.map(
+          (p) => new THREE.Vector3(p.xKm, mapY(p.altM, this.scales), p.zKm)
+        );
+        this.dynamicGroup.add(
+          new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(unitTrailPts),
+            new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.65 })
+          )
+        );
+      }
+
       this.labelTargets.push({
         id: entity.id,
         text: entity.label,
@@ -308,6 +424,41 @@ export class ThreeBoxSceneController {
       head.rotation.y = THREE.MathUtils.degToRad(-missile.headingDeg);
       this.dynamicGroup.add(head);
 
+      if (this.layers.showSeekerCones && missile.seekerCone) {
+        const { rangeKm: coneLen, fovDeg, locked } = missile.seekerCone;
+        const halfRad = ((fovDeg * 0.5) * Math.PI) / 180;
+        const coneRadius = Math.max(1.2, Math.min(coneLen * 0.9, coneLen * Math.tan(halfRad)));
+        const coneGeom = new THREE.ConeGeometry(coneRadius, coneLen, 20, 1, true);
+        coneGeom.translate(0, -coneLen * 0.5, 0);
+        coneGeom.rotateX(Math.PI / 2);
+        const coneColor = locked ? 0xfbbf24 : 0x38bdf8;
+        const coneMesh = new THREE.Mesh(
+          coneGeom,
+          new THREE.MeshBasicMaterial({
+            color: coneColor,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: locked ? 0.22 : 0.12,
+            depthWrite: false,
+          })
+        );
+        coneMesh.position.set(missile.xKm, y, missile.zKm);
+        coneMesh.rotation.y = THREE.MathUtils.degToRad(-missile.headingDeg);
+        this.dynamicGroup.add(coneMesh);
+
+        const wireMesh = new THREE.LineSegments(
+          new THREE.EdgesGeometry(coneGeom),
+          new THREE.LineBasicMaterial({
+            color: coneColor,
+            transparent: true,
+            opacity: locked ? 0.7 : 0.42,
+          })
+        );
+        wireMesh.position.set(missile.xKm, y, missile.zKm);
+        wireMesh.rotation.y = THREE.MathUtils.degToRad(-missile.headingDeg);
+        this.dynamicGroup.add(wireMesh);
+      }
+
       // Vertical stalk
       const stalkGeom = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(missile.xKm, 0, missile.zKm),
@@ -317,7 +468,7 @@ export class ThreeBoxSceneController {
         new THREE.Line(stalkGeom, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.38 }))
       );
 
-      if (missile.trail3d.length >= 2) {
+      if (this.layers.showTrails && missile.trail3d.length >= 2) {
         const pts3d = missile.trail3d.map(
           (p) => new THREE.Vector3(p.xKm, mapY(p.altM, this.scales), p.zKm)
         );
@@ -350,7 +501,7 @@ export class ThreeBoxSceneController {
       const latest = track.points[track.points.length - 1];
       const latestY = mapY(latest.altM, this.scales);
 
-      if (track.points.length >= 2) {
+      if (this.layers.showTrails && track.points.length >= 2) {
         const pts3d = track.points.map(
           (p) => new THREE.Vector3(p.xKm, mapY(p.altM, this.scales), p.zKm)
         );

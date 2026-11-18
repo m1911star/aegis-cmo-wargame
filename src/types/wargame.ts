@@ -124,6 +124,8 @@ export interface MountSpec {
   description?: string;
 }
 
+export type ThrottleSetting = 1 | 2 | 3 | 4; // 1=loiter, 2=cruise, 3=full, 4=flank/afterburner
+
 export interface MagazineSpec {
   id: string;
   dbid?: number;
@@ -132,13 +134,15 @@ export interface MagazineSpec {
   capacity: number;
   armorGeneral?: number;
   aviationMagazine?: boolean;
+  isMirrorOnly?: boolean;
+  weaponCounts?: Record<string, number>;
   weaponIds: string[];
   description?: string;
 }
 
 export interface PropulsionSpeedPoint {
   altitudeBand: number; // 1..4
-  throttle: 1 | 2 | 3 | 4; // 1=loiter, 2=cruise, 3=full, 4=flank/afterburner
+  throttle: ThrottleSetting;
   speedKts: number;
   altitudeMinM: number;
   altitudeMaxM: number;
@@ -487,6 +491,7 @@ export type ThreatLevel = 'low' | 'medium' | 'high' | 'critical';
 export interface UnitDoctrine {
   roe: ROEStatus;
   emconRadar: boolean;          // 主动雷达辐射开关
+  emconRadarIntermittent?: boolean; // 雷达间歇闪烁 (EMCON 轮巡 25% 占空比错峰辐射)
   emconSonar: boolean;          // 主动声呐 Ping 开关
   emconJamming: boolean;        // ★ 新增：有源电子干扰 (OECM) 压制开关
   autoEvade: boolean;
@@ -500,12 +505,17 @@ export interface UnitDoctrine {
   shootAndScoot?: boolean;
   bvrTactics?: 'standard' | 'crank_pump';
   baffleClearPeriodic?: boolean;
+  enforceOoda?: boolean;        // 强制启用 OODA 探测/瞄准/规避反应周期延迟
+  autoDeploySonobuoys?: boolean;// 反潜任务自动间隔布放声呐浮标
+  autoAirRefuel?: boolean;      // 低油量自动请求友军空中加油
+  autoTerrainDogleg?: boolean;  // 导弹/打击遇到高地山脊遮蔽时自动生成 Dogleg 绕障航点
 }
 
 export interface RuntimeWeaponMount extends PlatformMountTemplate {
   weaponName: string;
   currentAmmo: number;
   cooldownRemainingSec: number;
+  magazineReloadRemainingSec?: number;
 }
 
 export interface TurnaroundEntry {
@@ -608,6 +618,7 @@ export interface RuntimeUnit {
   heading: number;
   speedKts: number;
   targetSpeedKts: number;
+  throttleSetting?: ThrottleSetting;
   waypoints: RouteLeg[];
 
   hp: number;
@@ -631,10 +642,14 @@ export interface RuntimeUnit {
   airRefuelState?: AirRefuelState;
   deployableInventory: Record<string, number>;
   deployedByUnitId?: string;
+  nextAutoSonobuoyTime?: number;
   completedWithdrawalObjectiveIds: string[];
 
   doctrine: UnitDoctrine;
   mounts: RuntimeWeaponMount[];
+  magazineStores?: Record<string, number>;
+  oodaLocks?: Record<string, number>;
+  oodaEvasionPending?: { threatId: string; detectedAtSimTime: number };
   weaponUsage: Record<string, { expended: number; cooldownUntil: number }>;
   hangar: RuntimeHangarSlot[];   // 母舰机库动态状态
   assignedMissionId?: string;
@@ -718,6 +733,7 @@ export interface WeaponInFlight {
   searchElapsedSec?: number;
   deliveryPhase?: 'air_drop' | 'water_search';
   waypoints?: [number, number][];
+  launchedFromAutonomousMount?: boolean;
 }
 
 export interface PendingTotStrikeOrder {
@@ -754,6 +770,7 @@ export type MissionType =
   | 'asuw_patrol'
   | 'asw_patrol'
   | 'land_strike'
+  | 'maritime_strike'
   | 'aew_support'
   | 'escort'
   | 'sead'
@@ -772,6 +789,7 @@ export interface MissionDefinition {
   stationRadiusKm?: number;
   packageTotSec?: number;
   coordinatedPackageId?: string;
+  standoffStrike?: boolean;
   doctrineOverride?: Partial<UnitDoctrine>;
   description: string;
 }
@@ -810,8 +828,10 @@ export interface InitialUnitPlacement {
   altitudeM?: number;
   heading: number;
   speedKts?: number;
+  throttleSetting?: ThrottleSetting;
   waypoints?: Array<[number, number] | RouteLeg>;
   doctrine?: Partial<UnitDoctrine>;
+  magazineStores?: Record<string, number>;
   assignedMissionId?: string;
   recoveryPosition?: [number, number];
 }

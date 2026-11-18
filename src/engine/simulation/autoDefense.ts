@@ -11,14 +11,16 @@ import type {
   WeaponInFlight,
 } from '../../types/wargame';
 import {
+  computeStrikeRouteDistanceKm,
   countActiveGuidanceChannels,
   evaluateFireControl,
+  mountUsesGuidanceChannel,
   resolveMaxGuidanceChannels,
   weaponLaunchRangeKm,
-  weaponUsesGuidanceChannel,
 } from '../fireControl';
-import { findShootAndScootDestination } from '../environment';
-import { getBearingDeg, getDistanceKm, calculateRadarHorizonKm } from '../geometry';
+import { shouldEnforceOoda } from '../cmoUnits';
+import { computeMissileTerrainDogleg, findShootAndScootDestination } from '../environment';
+import { getBearingDeg, calculateRadarHorizonKm } from '../geometry';
 import { launchGuidance } from '../guidance';
 import { effectiveDoctrine } from '../operations';
 import { observeMissile } from '../sensors';
@@ -64,7 +66,15 @@ export function runAutoDefense({
 
   for (const shooter of aliveUnits) {
     const doctrine = effectiveDoctrine(shooter, missions);
-    const fireUnit = { ...shooter, doctrine };
+    const shooterSpec = catalog.platforms[shooter.platformId];
+    const enforceShooterOoda =
+      shouldEnforceOoda(shooterSpec, doctrine) && (shooterSpec?.ooda?.targetingSec ?? 0) > 0;
+    const ensureOodaLock = (contactKey: string) => {
+      if (!enforceShooterOoda) return;
+      if (shooter.oodaLocks?.[contactKey] === undefined) {
+        shooter.oodaLocks = { ...(shooter.oodaLocks ?? {}), [contactKey]: nextSimTime };
+      }
+    };
     if (doctrine.roe === 'hold' || !getUnitCapabilities(shooter).canFire) {
       continue;
     }
@@ -102,6 +112,8 @@ export function runAutoDefense({
 
         if (!doctrine.automaticTargetDomains.includes(missileContact.domain) ||
             THREAT_RANK[missileContact.threatLevel] < THREAT_RANK[doctrine.minimumAutomaticThreat]) continue;
+        ensureOodaLock(missileContact.id);
+        const fireUnit = { ...shooter, doctrine, oodaLocks: shooter.oodaLocks };
         const existingInterceptors = Object.values(weaponsInFlight).filter(
           (weapon) => weapon.side === shooter.side && weapon.targetType === 'missile' &&
             weapon.targetId === incoming.id && !weapon.isIntercepted
@@ -146,13 +158,15 @@ export function runAutoDefense({
 
         const { mount: samMount, weapon: samSpec, solution } = selected;
         const distanceToIncomingKm = solution.distanceKm!;
-        const maxCh = resolveMaxGuidanceChannels(catalog.platforms[shooter.platformId]);
+        const maxCh = resolveMaxGuidanceChannels(shooterSpec);
         const usedCh = countActiveGuidanceChannels(shooter.id, weaponsInFlight, catalog);
-        const channelCap = weaponUsesGuidanceChannel(samSpec) ? Math.max(0, maxCh - usedCh) : neededInterceptors;
+        const channelCap = mountUsesGuidanceChannel(samSpec, samMount)
+          ? Math.max(0, maxCh - usedCh)
+          : neededInterceptors;
         const interceptCount = Math.min(neededInterceptors, selected.availableAmmo, channelCap);
         if (interceptCount <= 0) continue;
         const hasFriendlyAwacsCec = missileContact.sourceUnitIds?.some((id) => id !== shooter.id);
-        const shooterAntennaM = catalog.platforms[shooter.platformId]?.radarAntennaHeightM ?? 0;
+        const shooterAntennaM = shooterSpec?.radarAntennaHeightM ?? 0;
         const ownHorizonKm = calculateRadarHorizonKm(
           shooter.altitudeM,
           shooterAntennaM,
@@ -184,6 +198,7 @@ export function runAutoDefense({
             warheadDamage: samSpec.warheadDamage,
             requiresDatalinkBeyondHorizon: samSpec.requiresDatalinkBeyondHorizon,
             datalinkSupported: true,
+            launchedFromAutonomousMount: Boolean(samMount.autonomous),
             ...launchGuidance(missileContact),
           };
           samMount.currentAmmo -= 1;
@@ -245,17 +260,25 @@ export function runAutoDefense({
       shooter.coordinatedAttack = undefined;
       continue;
     }
+    const shooterMission = shooter.assignedMissionId
+      ? missions.find((m) => m.id === shooter.assignedMissionId && m.isActive)
+      : undefined;
+    const autoDoglegEnabled =
+      Boolean(doctrine.autoTerrainDogleg) || shooterMission?.type === 'maritime_strike';
+
     for (const contact of sideContacts) {
       if (!doctrine.automaticTargetDomains.includes(contact.domain) ||
           THREAT_RANK[contact.threatLevel] < THREAT_RANK[doctrine.minimumAutomaticThreat]) continue;
+      ensureOodaLock(contact.id);
+      const fireUnit = { ...shooter, doctrine, oodaLocks: shooter.oodaLocks };
       const targetId = contact.actualUnitId;
-      const distanceKm = getDistanceKm(
-        shooter.position,
-        contact.estimatedPosition
-      );
+      let resolvedDoglegs: [number, number][] | undefined;
       const matchingMount = readyMounts.find((mount) => {
         const weapon = catalog.weapons[mount.weaponId];
         if (!weapon) return false;
+        const candidateDoglegs = autoDoglegEnabled
+          ? computeMissileTerrainDogleg(shooter.position, contact.estimatedPosition, weapon, environment)
+          : undefined;
         const solution = evaluateFireControl(
           fireUnit,
           contact,
@@ -265,16 +288,24 @@ export function runAutoDefense({
           units,
           nextSimTime,
           'automatic',
-          weaponsInFlight
+          weaponsInFlight,
+          candidateDoglegs
         );
         if (solution.status !== 'executable' ||
             solution.distanceKm! > weaponLaunchRangeKm(weapon) * doctrine.automaticFireRangeFraction ||
             mount.currentAmmo <= doctrine.minimumWeaponReserve) return false;
-        return !(weapon.canInterceptMissile && mount.currentAmmo <= mount.maxAmmo * 0.4);
+        if (weapon.canInterceptMissile && mount.currentAmmo <= mount.maxAmmo * 0.4) return false;
+        resolvedDoglegs = candidateDoglegs;
+        return true;
       });
       if (!matchingMount) continue;
 
       const weapon = catalog.weapons[matchingMount.weaponId]!;
+      const distanceKm = computeStrikeRouteDistanceKm(
+        shooter.position,
+        contact.estimatedPosition,
+        resolvedDoglegs
+      );
       const inFlightToTarget = Object.values(weaponsInFlight).filter(
         (inFlight) =>
           inFlight.side === shooter.side &&
@@ -284,9 +315,11 @@ export function runAutoDefense({
       );
       if (inFlightToTarget.length >= doctrine.salvoSize) continue;
 
-      const maxCh = resolveMaxGuidanceChannels(catalog.platforms[shooter.platformId]);
+      const maxCh = resolveMaxGuidanceChannels(shooterSpec);
       const usedCh = countActiveGuidanceChannels(shooter.id, weaponsInFlight, catalog);
-      const offChannelCap = weaponUsesGuidanceChannel(weapon) ? Math.max(0, maxCh - usedCh) : doctrine.salvoSize;
+      const offChannelCap = mountUsesGuidanceChannel(weapon, matchingMount)
+        ? Math.max(0, maxCh - usedCh)
+        : doctrine.salvoSize;
       const salvo = Math.min(
         doctrine.salvoSize,
         matchingMount.currentAmmo - doctrine.minimumWeaponReserve,
@@ -296,6 +329,7 @@ export function runAutoDefense({
       const isAirDrop = weapon.launchMedium === 'air_drop';
       const launchSpeedKts = isAirDrop ? (weapon.airDropSpeedKts ?? weapon.speedKts) : weapon.speedKts;
       const launchMaxRangeKm = isAirDrop ? (weapon.airDropRangeKm ?? weapon.maxRangeKm) : weapon.maxRangeKm;
+      const firstAimPos = resolvedDoglegs?.[0] ?? contact.estimatedPosition;
       for (let index = 0; index < salvo; index++) {
         const missileId = `msl_${nextSimTime}_${shooter.id}_${targetId}_${index}`;
         weaponsInFlight[missileId] = {
@@ -314,7 +348,7 @@ export function runAutoDefense({
           altitudeM: isAirDrop ? shooter.altitudeM : weapon.cruiseAltitudeM,
           heading: getBearingDeg(
             shooter.position,
-            contact.estimatedPosition
+            firstAimPos
           ),
           speedKts: launchSpeedKts,
           distanceRemainingKm: distanceKm,
@@ -326,6 +360,8 @@ export function runAutoDefense({
             weapon.requiresDatalinkBeyondHorizon,
           datalinkSupported: true,
           deliveryPhase: isAirDrop ? 'air_drop' : undefined,
+          waypoints: resolvedDoglegs?.map((wp) => [...wp] as [number, number]),
+          launchedFromAutonomousMount: Boolean(matchingMount.autonomous),
           ...launchGuidance(contact),
         };
         matchingMount.currentAmmo -= 1;
@@ -522,6 +558,7 @@ export function processPendingTotStrikeOrders(
         datalinkSupported: solution.supportSourceIds.length > 0,
         deliveryPhase: weapon.launchMedium === 'air_drop' ? 'air_drop' : undefined,
         waypoints: order.doglegWaypoints?.map((wp) => [...wp] as [number, number]),
+        launchedFromAutonomousMount: Boolean(mount.autonomous),
         ...launchGuidance(contact),
       };
       mount.currentAmmo -= 1;

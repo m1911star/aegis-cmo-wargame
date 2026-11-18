@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { Flame, Shield } from 'lucide-react';
+import { Flame, Package, Shield } from 'lucide-react';
+import { CMO_SECTOR_ARCS } from '../../engine/cmoUnits';
+import { isUnitRadarEmittingAtTime } from '../../engine/unitCapabilities';
 import { useWargameStore } from '../../store/useWargameStore';
 import type { RuntimeUnit } from '../../types/wargame';
+import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Select } from '../ui/select';
 
@@ -13,9 +16,15 @@ interface Props {
 
 export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFire }) => {
   const catalog = useWargameStore((s) => s.catalog);
+  const simTime = useWargameStore((s) => s.simTime);
+  const weaponsInFlight = useWargameStore((s) => s.weaponsInFlight);
   const startManualEngage = useWargameStore((s) => s.startManualEngage);
   const launchCarrierAircraft = useWargameStore((s) => s.launchCarrierAircraft);
   const [hangarLoadoutSelections, setHangarLoadoutSelections] = useState<Record<string, string>>({});
+  const radarOnlineNow = isUnitRadarEmittingAtTime(unit, simTime, weaponsInFlight, catalog);
+  const magazineEntries = unit.magazineStores
+    ? Object.entries(unit.magazineStores).filter(([, qty]) => qty > 0)
+    : [];
 
   return (
     <>
@@ -34,7 +43,7 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
                 ? unit.doctrine.emconSonar
                 : sensor.type === 'ecm_jammer'
                   ? unit.doctrine.emconJamming
-                  : unit.doctrine.emconRadar);
+                  : radarOnlineNow);
 
             return (
               <div
@@ -73,12 +82,39 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
             {unit.mounts.map((m) => {
               const wSpec = catalog.weapons[m.weaponId];
               if (!wSpec) return null;
+              const magReserve = unit.magazineStores?.[m.weaponId] ?? 0;
+              const enabledArcs = m.arcs
+                ? CMO_SECTOR_ARCS.filter((sector) => Boolean(m.arcs?.[sector]))
+                : CMO_SECTOR_ARCS;
+              const isSectorRestricted = enabledArcs.length > 0 && enabledArcs.length < 8;
               return (
                 <div key={m.mountId} className="p-2.5 rounded-lg bg-muted/40 border border-border space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-foreground truncate">{wSpec.name}</span>
-                    <span className="text-xs font-semibold text-foreground font-mono tabular-nums shrink-0">{m.currentAmmo} / {m.maxAmmo} 发</span>
+                    <span className="text-xs font-semibold text-foreground font-mono tabular-nums shrink-0">
+                      {m.currentAmmo} / {m.maxAmmo} 发
+                      {magReserve > 0 && <span className="text-cyan-300 ml-1">(弹库 +{magReserve})</span>}
+                    </span>
                   </div>
+                  {(m.autonomous || isSectorRestricted || m.magazineReloadRemainingSec !== undefined) && (
+                    <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                      {m.autonomous && (
+                        <Badge variant="success" className="text-[9px] px-1.5 py-0">
+                          自主近防免占通道
+                        </Badge>
+                      )}
+                      {isSectorRestricted && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 font-mono">
+                          射界 {enabledArcs.join('/')}
+                        </Badge>
+                      )}
+                      {m.magazineReloadRemainingSec !== undefined && (
+                        <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-mono text-cyan-300">
+                          弹库补弹中 ({m.magazineReloadRemainingSec.toFixed(1)}s)
+                        </Badge>
+                      )}
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
                     <span>
                       射程: {wSpec.maxRangeKm}km · 速度: {(wSpec.speedKts / 661).toFixed(1)}马赫 · 基准 Pk: {Math.round(wSpec.basePk * 100)}%
@@ -96,6 +132,22 @@ export const UnitWeaponsHangarPanel: React.FC<Props> = ({ unit, sensorIds, canFi
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {magazineEntries.length > 0 && (
+          <div className="p-2 rounded-lg bg-cyan-500/8 border border-cyan-500/25 space-y-1 text-[10px]">
+            <div className="flex items-center gap-1 text-cyan-300 font-semibold">
+              <Package className="w-3 h-3" />
+              <span>独立弹药库备弹库存 (Magazine Stores)</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 font-mono">
+              {magazineEntries.map(([wId, qty]) => (
+                <span key={wId} className="px-1.5 py-0.5 rounded bg-background/60 border border-border/70 text-foreground">
+                  {catalog.weapons[wId]?.codeName ?? wId}: {qty} 发
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>

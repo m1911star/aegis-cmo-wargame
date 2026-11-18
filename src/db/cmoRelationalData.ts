@@ -206,6 +206,10 @@ export function buildCmoRelationalBundle(input: {
     const enrichedMounts = p.mounts.map((m) => {
       const mountSpecId = m.mountSpecId ?? `mount_${pId}_${m.mountId}`;
       if (!mounts[mountSpecId]) {
+        const wSpec = input.weapons[m.weaponId];
+        const isPointDefenseAutonomous = Boolean(
+          wSpec?.canInterceptMissile && wSpec.maxRangeKm <= 25
+        );
         mounts[mountSpecId] = {
           id: mountSpecId,
           name: `${p.className} ${m.mountId}`,
@@ -215,7 +219,7 @@ export function buildCmoRelationalBundle(input: {
           magazineCapacity: m.maxAmmo,
           damagePoints: Math.max(5, Math.round(p.maxHp * 0.15)),
           trainable: p.domain === 'surface' || p.domain === 'land',
-          autonomous: p.ciwsDefenseProb >= 0.4,
+          autonomous: isPointDefenseAutonomous,
           weaponIds: [m.weaponId],
         };
       }
@@ -235,6 +239,7 @@ export function buildCmoRelationalBundle(input: {
         rofPerMin: 6,
         capacity: p.mounts.reduce((sum, m) => sum + m.maxAmmo, 0),
         aviationMagazine: (p.hangarSlots?.length ?? 0) > 0,
+        isMirrorOnly: true,
         weaponIds: magWeapons,
       };
     }

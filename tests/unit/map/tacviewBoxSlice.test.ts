@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { MASTER_EQUIPMENT_CATALOG as catalog } from '../../../src/db';
+import {
+  buildAarTimelineBuckets,
+  summarizeWeaponEffectivenessMatrix,
+} from '../../../src/engine/aar';
 import { THERMOCLINE } from '../../../src/engine/constants';
+import { createRuntimeUnitFromPlacement } from '../../../src/engine/simulationEngine';
 import { SCENARIO_EAST_SEA_THUNDER, instantiateScenarioUnits } from '../../../src/scenarios/builtinScenarios';
 import {
   buildAarBoxSlice,
@@ -214,5 +219,113 @@ describe('local 3D air-sea box slice projection & FoW isolation', () => {
     expect(sliceAtTick20.eventMarkers).toHaveLength(1);
     expect(sliceAtTick20.eventMarkers[0].id).toBe('ev_intercept');
     expect(sliceAtTick20.eventMarkers[0].altM).toBe(12400);
+  });
+
+  test('projects 3D radar sector envelopes, terminal seeker FOV cones, sonobuoy cylinders, live trails, and AAR weapon matrix', () => {
+    const fighter = createRuntimeUnitFromPlacement(
+      {
+        id: 'red_j20',
+        name: 'J-20',
+        callsign: 'DRAGON-1',
+        side: 'RED',
+        platformId: 'j20_mighty_dragon',
+        parentGroupId: 'g1',
+        position: [123.0, 25.0],
+        altitudeM: 9000,
+        heading: 90,
+        doctrine: { roe: 'free', emconRadar: true },
+      },
+      catalog
+    );
+    const buoyPlatformId = Object.values(catalog.platforms).find((p) => p.category === 'sonobuoy')!.id;
+    const buoy = createRuntimeUnitFromPlacement(
+      {
+        id: 'red_buoy_1',
+        name: 'Sonobuoy',
+        callsign: 'BUOY-1',
+        side: 'RED',
+        platformId: buoyPlatformId,
+        parentGroupId: 'g1',
+        position: [123.05, 25.0],
+        heading: 0,
+      },
+      catalog
+    );
+    const seekerMissile: WeaponInFlight = {
+      id: 'msl_pl15',
+      weaponId: 'pl15_aam',
+      name: 'PL-15',
+      side: 'RED',
+      shooterId: fighter.id,
+      shooterName: fighter.callsign,
+      targetId: 'tgt',
+      targetType: 'unit',
+      position: [123.1, 25.0],
+      launchPosition: [123.0, 25.0],
+      trail: [[123.0, 25.0], [123.1, 25.0]],
+      altitudeM: 9500,
+      heading: 90,
+      speedKts: 2200,
+      distanceRemainingKm: 12,
+      maxRangeKm: 200,
+      traveledKm: 11,
+      basePk: 0.8,
+      warheadDamage: 35,
+      seekerState: 'terminal_locked',
+    };
+
+    const live = buildLiveBoxSlice({
+      anchorCenter: fighter.position,
+      anchorLabel: fighter.callsign,
+      anchorId: fighter.id,
+      radiusKm: 120,
+      activePerspective: 'RED',
+      units: { [fighter.id]: fighter, [buoy.id]: buoy },
+      contacts: {},
+      weaponsInFlight: { [seekerMissile.id]: seekerMissile },
+      aarTracks: [
+        { tick: 0, simTime: 0, unitId: fighter.id, side: 'RED', position: [122.9, 25.0], altitudeM: 8800, status: 'operational' },
+      ],
+      catalog,
+      simTime: 5000,
+    });
+
+    const jetEntity = live.entities.find((e) => e.id === fighter.id)!;
+    const buoyEntity = live.entities.find((e) => e.id === buoy.id)!;
+    expect(jetEntity.radarEnvelope).toBeDefined();
+    expect(jetEntity.radarEnvelope!.rangeKm).toBeGreaterThan(20);
+    expect(jetEntity.trail3d?.length).toBe(2);
+    expect(buoyEntity.sonobuoyCylinder).toBeDefined();
+    expect(buoyEntity.sonobuoyCylinder!.maxDepthM).toBe(-220);
+    expect(live.missiles[0].seekerCone).toEqual(expect.objectContaining({ locked: true }));
+
+    // Verify AAR density buckets and per-weapon effectiveness matrix
+    const aarLedger: BattleAarLedger = {
+      tracks: [],
+      events: [
+        { id: 'l1', tick: 10, simTime: 2500, side: 'RED', kind: 'launch', title: 'Launch', weaponId: 'yj18_ashm', quantity: 4 },
+        { id: 'h1', tick: 40, simTime: 10000, side: 'RED', kind: 'hit', title: 'Hit', weaponId: 'yj18_ashm', quantity: 1, outcome: 'hit' },
+        { id: 'k1', tick: 42, simTime: 10500, side: 'BLUE', kind: 'loss', title: 'Loss', weaponId: 'yj18_ashm', quantity: 1, outcome: 'destroy' },
+        { id: 'i1', tick: 38, simTime: 9500, side: 'BLUE', kind: 'intercept', title: 'CIWS', weaponId: 'yj18_ashm', quantity: 1, outcome: 'intercept' },
+        { id: 's1', tick: 39, simTime: 9750, side: 'BLUE', kind: 'intercept', title: 'Decoy', weaponId: 'yj18_ashm', quantity: 1, outcome: 'softkill' },
+      ],
+    };
+    const buckets = buildAarTimelineBuckets(aarLedger, 48, 4);
+    expect(buckets).toHaveLength(4);
+    expect(buckets.some((b) => b.redLaunches === 4)).toBe(true);
+    expect(buckets.some((b) => b.losses === 1)).toBe(true);
+
+    const matrix = summarizeWeaponEffectivenessMatrix(aarLedger);
+    expect(matrix).toHaveLength(1);
+    expect(matrix[0]).toMatchObject({
+      weaponId: 'yj18_ashm',
+      launched: 4,
+      hits: 2,
+      kills: 1,
+      hardIntercepted: 1,
+      softKilled: 1,
+      effectivenessRate: 0.5,
+      interceptedRate: 0.5,
+    });
   });
 });

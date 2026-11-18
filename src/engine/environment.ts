@@ -1,6 +1,6 @@
 import * as turf from './turfGeo';
 import type { Domain, ScenarioEnvironment, WeaponSpec } from '../types/wargame';
-import { getDistanceKm } from './geometry';
+import { getBearingDeg, getDistanceKm } from './geometry';
 
 export const EMPTY_ENVIRONMENT: ScenarioEnvironment = {
   landPolygons: [],
@@ -462,4 +462,162 @@ export function evaluateWeatherModifiers(
     localSeaState,
     inStormZone,
   };
+}
+
+function generatePolygonFlankCandidates(
+  fromPos: [number, number],
+  toPos: [number, number],
+  polygons: ScenarioEnvironment['landPolygons']
+): [number, number][] {
+  const candidates: [number, number][] = [];
+  const mainBearing = getBearingDeg(fromPos, toPos);
+  const mid: [number, number] = [(fromPos[0] + toPos[0]) * 0.5, (fromPos[1] + toPos[1]) * 0.5];
+
+  for (const poly of polygons) {
+    if (poly.areaPolygon.length < 3) continue;
+    let sumLon = 0;
+    let sumLat = 0;
+    for (const pt of poly.areaPolygon) {
+      sumLon += pt[0];
+      sumLat += pt[1];
+    }
+    const centroid: [number, number] = [
+      sumLon / poly.areaPolygon.length,
+      sumLat / poly.areaPolygon.length,
+    ];
+    for (const vertex of poly.areaPolygon) {
+      const outBearing = getBearingDeg(centroid, vertex);
+      for (const clearanceKm of [8, 16, 28]) {
+        const pt = turf.destination(vertex, clearanceKm, outBearing, {
+          units: 'kilometers',
+        }).geometry.coordinates as [number, number];
+        candidates.push([Number(pt[0].toFixed(4)), Number(pt[1].toFixed(4))]);
+      }
+    }
+  }
+
+  for (const sideSign of [1, -1]) {
+    const perpBearing = (mainBearing + sideSign * 90 + 360) % 360;
+    for (const offsetKm of [15, 30, 50, 80]) {
+      const pt = turf.destination(mid, offsetKm, perpBearing, {
+        units: 'kilometers',
+      }).geometry.coordinates as [number, number];
+      candidates.push([Number(pt[0].toFixed(4)), Number(pt[1].toFixed(4))]);
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Compute a deterministic 1-point dogleg bypass around intervening mountain ridges
+ * when a straight missile path would impact terrain (`elevationM > cruiseAltitudeM`).
+ */
+export function computeMissileTerrainDogleg(
+  launchPos: [number, number],
+  targetPos: [number, number],
+  weapon: WeaponSpec,
+  environment?: ScenarioEnvironment
+): [number, number][] | undefined {
+  if (!environment?.landPolygons?.length || weapon.launchMedium === 'air_drop') {
+    return undefined;
+  }
+  const direct = resolveMissileTerrainInteraction(
+    launchPos,
+    targetPos,
+    launchPos,
+    targetPos,
+    weapon.cruiseAltitudeM,
+    weapon,
+    environment
+  );
+  if (!direct.impacted) return undefined;
+
+  const elevated = environment.landPolygons.filter(
+    (p) => (p.elevationM ?? 0) > weapon.cruiseAltitudeM
+  );
+  const candidates = generatePolygonFlankCandidates(launchPos, targetPos, elevated);
+  let bestWp: [number, number] | undefined;
+  let bestDistKm = Infinity;
+
+  for (const wp of candidates) {
+    const totalKm = getDistanceKm(launchPos, wp) + getDistanceKm(wp, targetPos);
+    if (totalKm > weapon.maxRangeKm * 0.99 || totalKm >= bestDistKm) continue;
+    const leg1 = resolveMissileTerrainInteraction(
+      launchPos,
+      wp,
+      launchPos,
+      targetPos,
+      weapon.cruiseAltitudeM,
+      weapon,
+      environment
+    );
+    if (leg1.impacted) continue;
+    const leg2 = resolveMissileTerrainInteraction(
+      wp,
+      targetPos,
+      launchPos,
+      targetPos,
+      weapon.cruiseAltitudeM,
+      weapon,
+      environment
+    );
+    if (leg2.impacted) continue;
+    bestDistKm = totalKm;
+    bestWp = wp;
+  }
+
+  return bestWp ? [bestWp] : undefined;
+}
+
+/**
+ * Compute unit ingress waypoints that route around coastlines (for sea units)
+ * or terrain ridges higher than `unitAltitudeM` (for low-altitude strike aircraft).
+ */
+export function computeNavigationBypassWaypoints(
+  domain: Domain,
+  unitAltitudeM: number,
+  fromPos: [number, number],
+  toPos: [number, number],
+  environment?: ScenarioEnvironment
+): [number, number][] {
+  const land = environment?.landPolygons;
+  if (!land?.length) return [[...toPos]];
+
+  const checkClear = (a: [number, number], b: [number, number]): boolean => {
+    if (domain === 'surface' || domain === 'subsurface') {
+      return isRouteAllowed(domain, a, b, environment);
+    }
+    if (domain === 'air') {
+      const seg = turf.lineString([a, b]);
+      for (const poly of land) {
+        const elev = poly.elevationM ?? 0;
+        if (elev <= 0 || unitAltitudeM >= elev + 50) continue;
+        const compiled = getCompiledPolygon(poly.areaPolygon);
+        if (!segmentOverlapsBbox(a, b, compiled.bbox)) continue;
+        if (turf.booleanIntersects(seg, compiled.feature)) return false;
+      }
+      return true;
+    }
+    return isRouteAllowed(domain, a, b, environment);
+  };
+
+  if (checkClear(fromPos, toPos)) return [[...toPos]];
+
+  const relevantPolygons =
+    domain === 'air'
+      ? land.filter((p) => (p.elevationM ?? 0) > Math.max(0, unitAltitudeM - 50))
+      : land;
+  const candidates = generatePolygonFlankCandidates(fromPos, toPos, relevantPolygons);
+  let bestWp: [number, number] | undefined;
+  let bestDistKm = Infinity;
+
+  for (const wp of candidates) {
+    const totalKm = getDistanceKm(fromPos, wp) + getDistanceKm(wp, toPos);
+    if (totalKm >= bestDistKm) continue;
+    if (checkClear(fromPos, wp) && checkClear(wp, toPos)) {
+      bestDistKm = totalKm;
+      bestWp = wp;
+    }
+  }
+  return bestWp ? [bestWp, [...toPos]] : [[...toPos]];
 }

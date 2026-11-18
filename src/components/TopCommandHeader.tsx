@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database, Box,
+  Play, Pause, StepForward, RotateCcw, ShieldAlert, Eye, Database, Box, Compass,
   FileJson, PlusCircle, BookOpen, PanelLeft, PanelRight, ChartColumn, PencilRuler, Shuffle, History, Swords,
 } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
@@ -141,6 +141,14 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
                   ? `战役 ${campaignState.currentStageIndex + 1}/${campaignState.totalStages}`
                   : '战役模式'}
               </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveModal('campaign')}
+              className="toolbar-button text-amber-200/90 border-amber-500/30 bg-amber-500/[0.08] hover:bg-amber-500/15"
+              title="打开五阶段战役战区态势、稀缺弹药账本与战间补给差值预览"
+            >
+              <Compass /><span>战区态势</span>
             </button>
             <button
               type="button"

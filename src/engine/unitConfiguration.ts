@@ -228,3 +228,58 @@ export function recordWeaponLaunch(
     },
   };
 }
+
+export function createInitialMagazineStores(
+  configuration: ResolvedUnitConfiguration,
+  catalog: EquipmentCatalog,
+  placementOverride?: Record<string, number>
+): Record<string, number> | undefined {
+  if (placementOverride && Object.keys(placementOverride).length > 0) {
+    return { ...placementOverride };
+  }
+  if (configuration.platform.domain === 'air') return undefined;
+  const stores: Record<string, number> = {};
+  const mountedWeaponIds = new Set(configuration.mounts.map((m) => m.weaponId));
+  for (const magId of configuration.platform.magazineIds ?? []) {
+    const mag = catalog.magazines?.[magId];
+    if (!mag || mag.isMirrorOnly || mag.capacity <= 0) continue;
+    if (mag.weaponCounts && Object.keys(mag.weaponCounts).length > 0) {
+      for (const [wId, qty] of Object.entries(mag.weaponCounts)) {
+        if (qty > 0 && Object.hasOwn(catalog.weapons, wId)) {
+          stores[wId] = (stores[wId] ?? 0) + qty;
+        }
+      }
+      continue;
+    }
+    const relevantWeapons = mag.weaponIds.filter((wId) => mountedWeaponIds.has(wId));
+    const targetWeapons = relevantWeapons.length > 0 ? relevantWeapons : mag.weaponIds;
+    if (targetWeapons.length === 0) continue;
+    const baseQty = Math.floor(mag.capacity / targetWeapons.length);
+    let remainder = mag.capacity - baseQty * targetWeapons.length;
+    for (const wId of targetWeapons) {
+      const add = baseQty + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
+      if (add > 0) stores[wId] = (stores[wId] ?? 0) + add;
+    }
+  }
+  return Object.keys(stores).length > 0 ? stores : undefined;
+}
+
+export function resolveMagazineReloadCycleSec(
+  unit: RuntimeUnit,
+  mount: RuntimeWeaponMount,
+  catalog: EquipmentCatalog
+): number {
+  const mountSpec = mount.mountSpecId ? catalog.mounts?.[mount.mountSpecId] : undefined;
+  const platform = catalog.platforms[unit.platformId];
+  const magSpec = (platform?.magazineIds ?? [])
+    .map((id) => catalog.magazines?.[id])
+    .find((m) => m && !m.isMirrorOnly && m.weaponIds.includes(mount.weaponId));
+  const baseSec =
+    mountSpec && mountSpec.magazineRofPerMin > 0
+      ? 60 / mountSpec.magazineRofPerMin
+      : magSpec && magSpec.rofPerMin > 0
+        ? 60 / magSpec.rofPerMin
+        : Math.max(5, mount.reloadTimeSec || 10);
+  return Number((baseSec * getUnitCapabilities(unit).reloadFactor).toFixed(2));
+}

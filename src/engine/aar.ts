@@ -206,3 +206,138 @@ export function summarizeAarBreakdowns(
     },
   };
 }
+
+export interface AarTimelineBucket {
+  index: number;
+  startTick: number;
+  endTick: number;
+  redLaunches: number;
+  blueLaunches: number;
+  hits: number;
+  interceptions: number;
+  losses: number;
+  totalIntensity: number;
+}
+
+export function buildAarTimelineBuckets(
+  ledger: BattleAarLedger,
+  maxTickOverride?: number,
+  bucketCount = 24
+): AarTimelineBucket[] {
+  let maxTick = maxTickOverride ?? 0;
+  for (const ev of ledger.events) if (ev.tick > maxTick) maxTick = ev.tick;
+  for (const tr of ledger.tracks) if (tr.tick > maxTick) maxTick = tr.tick;
+  const totalTicks = Math.max(1, maxTick);
+  const count = Math.max(1, Math.min(bucketCount, totalTicks));
+  const span = totalTicks / count;
+
+  const buckets: AarTimelineBucket[] = Array.from({ length: count }, (_, idx) => ({
+    index: idx,
+    startTick: Math.round(idx * span),
+    endTick: Math.round((idx + 1) * span),
+    redLaunches: 0,
+    blueLaunches: 0,
+    hits: 0,
+    interceptions: 0,
+    losses: 0,
+    totalIntensity: 0,
+  }));
+
+  for (const ev of ledger.events) {
+    const idx = Math.min(count - 1, Math.max(0, Math.floor(ev.tick / span)));
+    const bucket = buckets[idx];
+    if (ev.kind === 'launch') {
+      if (ev.side === 'RED') bucket.redLaunches += ev.quantity ?? 1;
+      else if (ev.side === 'BLUE') bucket.blueLaunches += ev.quantity ?? 1;
+    } else if (ev.kind === 'hit') {
+      bucket.hits += 1;
+    } else if (ev.kind === 'intercept') {
+      bucket.interceptions += 1;
+    } else if (ev.kind === 'loss') {
+      bucket.losses += 1;
+      if (ev.outcome === 'destroy') bucket.hits += 1;
+    }
+  }
+
+  for (const b of buckets) {
+    b.totalIntensity =
+      b.redLaunches + b.blueLaunches + b.hits * 2 + b.interceptions + b.losses * 3;
+  }
+  return buckets;
+}
+
+export interface WeaponEffectivenessRow {
+  weaponId: string;
+  launched: number;
+  redLaunched: number;
+  blueLaunched: number;
+  hits: number;
+  kills: number;
+  samKills: number;
+  hardIntercepted: number;
+  softKilled: number;
+  missed: number;
+  effectivenessRate: number;
+  interceptedRate: number;
+}
+
+export function summarizeWeaponEffectivenessMatrix(
+  ledger: BattleAarLedger
+): WeaponEffectivenessRow[] {
+  const rows = new Map<string, Omit<WeaponEffectivenessRow, 'effectivenessRate' | 'interceptedRate'>>();
+  const ensure = (weaponId: string) => {
+    let row = rows.get(weaponId);
+    if (!row) {
+      row = {
+        weaponId,
+        launched: 0,
+        redLaunched: 0,
+        blueLaunched: 0,
+        hits: 0,
+        kills: 0,
+        samKills: 0,
+        hardIntercepted: 0,
+        softKilled: 0,
+        missed: 0,
+      };
+      rows.set(weaponId, row);
+    }
+    return row;
+  };
+
+  for (const ev of ledger.events) {
+    if (!ev.weaponId) continue;
+    const row = ensure(ev.weaponId);
+    if (ev.kind === 'launch') {
+      const qty = ev.quantity ?? 1;
+      row.launched += qty;
+      if (ev.side === 'RED') row.redLaunched += qty;
+      else if (ev.side === 'BLUE') row.blueLaunched += qty;
+    } else if (ev.outcome === 'hit') {
+      row.hits += 1;
+    } else if (ev.outcome === 'destroy') {
+      row.hits += 1;
+      row.kills += 1;
+    } else if (ev.outcome === 'intercept') {
+      row.hardIntercepted += 1;
+    } else if (ev.outcome === 'softkill') {
+      row.softKilled += 1;
+    } else if (ev.kind === 'intercept' && !ev.outcome) {
+      row.samKills += ev.quantity ?? 1;
+    } else if (ev.kind === 'miss' || ev.outcome === 'miss') {
+      row.missed += 1;
+    }
+  }
+
+  return [...rows.values()]
+    .filter((r) => r.launched > 0 || r.hits > 0 || r.samKills > 0 || r.hardIntercepted > 0)
+    .map((r) => {
+      const denom = Math.max(1, r.launched);
+      return {
+        ...r,
+        effectivenessRate: r.launched > 0 ? Math.min(1, (r.hits + r.samKills) / denom) : 0,
+        interceptedRate: r.launched > 0 ? Math.min(1, (r.hardIntercepted + r.softKilled) / denom) : 0,
+      };
+    })
+    .sort((a, b) => b.launched - a.launched || a.weaponId.localeCompare(b.weaponId));
+}

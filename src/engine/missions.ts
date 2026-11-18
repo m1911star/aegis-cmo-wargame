@@ -164,7 +164,8 @@ export function assessStrikeCoordination(
     if (
       contact.identifiedCategory &&
       (SAM_RADAR_THREAT_CATEGORIES.has(contact.identifiedCategory) ||
-        (mission.type === 'asuw_patrol' && contact.identifiedCategory === 'destroyer'))
+        ((mission.type === 'asuw_patrol' || mission.type === 'maritime_strike') &&
+          contact.identifiedCategory === 'destroyer'))
     ) {
       hasActiveSamRadarThreats = true;
       break;
@@ -191,7 +192,10 @@ export function isActiveSamRadarContact(
   }
   if (!contact.identifiedCategory) return false;
   if (SAM_RADAR_THREAT_CATEGORIES.has(contact.identifiedCategory)) return true;
-  return missionType === 'asuw_patrol' && contact.identifiedCategory === 'destroyer';
+  return (
+    (missionType === 'asuw_patrol' || missionType === 'maritime_strike') &&
+    contact.identifiedCategory === 'destroyer'
+  );
 }
 
 export function getStrikeTargetPriority(
@@ -199,7 +203,7 @@ export function getStrikeTargetPriority(
   missionType: MissionDefinition['type'],
   coordination: StrikeCoordinationContext
 ): number {
-  if (contact.bdaStatus === 'kill_unconfirmed') return 4;
+  if (contact.bdaStatus === 'kill_unconfirmed') return 5;
   const alreadyTargeted =
     coordination.friendlyTargetedContactIds.has(contact.id) ||
     (coordination.inboundFriendlyMissileCount.get(contact.actualUnitId) ?? 0) > 0 ||
@@ -210,7 +214,15 @@ export function getStrikeTargetPriority(
     isActiveSamRadarContact(contact, missionType);
 
   if (activeSamThreat) {
-    return alreadyTargeted ? 3 : 2;
+    return alreadyTargeted ? 4 : 3;
   }
-  return alreadyTargeted ? 1 : 0;
+  if (
+    missionType === 'maritime_strike' &&
+    (contact.identifiedCategory === 'carrier' || contact.identifiedCategory === 'amphibious')
+  ) {
+    return alreadyTargeted ? 1 : 0;
+  }
+  return missionType === 'maritime_strike'
+    ? alreadyTargeted ? 2 : 1
+    : alreadyTargeted ? 1 : 0;
 }

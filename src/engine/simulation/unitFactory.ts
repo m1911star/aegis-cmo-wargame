@@ -4,7 +4,12 @@ import type {
   InitialUnitPlacement,
   RuntimeUnit,
 } from '../../types/wargame';
-import { createRuntimeWeaponMounts, resolveUnitConfiguration } from '../unitConfiguration';
+import { resolvePropulsionAtAltitude } from '../cmoUnits';
+import {
+  createInitialMagazineStores,
+  createRuntimeWeaponMounts,
+  resolveUnitConfiguration,
+} from '../unitConfiguration';
 
 /** Instantiate one scenario placement without mutating its input. */
 export function createRuntimeUnitFromPlacement(
@@ -34,18 +39,30 @@ export function createRuntimeUnitFromPlacement(
   }
 
   const { maxFuelSec, cruiseSpeedKts: defaultCruiseKts } = configuration;
-  const speedKts = Math.max(
-    0,
-    Math.min(
-      configuration.maxSpeedKts,
-      placement.speedKts ?? defaultCruiseKts
-    )
-  );
   const altitudeM = Math.max(
     spec.minAltitudeM,
     Math.min(
       spec.maxAltitudeM,
       placement.altitudeM ?? spec.defaultAltitudeM
+    )
+  );
+  const initialThrottleSpeedKts =
+    placement.speedKts === undefined && placement.throttleSetting !== undefined
+      ? resolvePropulsionAtAltitude(
+          spec,
+          catalog,
+          altitudeM,
+          placement.throttleSetting,
+          configuration.maxSpeedKts,
+          defaultCruiseKts,
+          configuration.loadout?.speedPenaltyKts ?? 0
+        ).targetSpeedKts
+      : undefined;
+  const speedKts = Math.max(
+    0,
+    Math.min(
+      configuration.maxSpeedKts,
+      placement.speedKts ?? initialThrottleSpeedKts ?? defaultCruiseKts
     )
   );
 
@@ -91,6 +108,7 @@ export function createRuntimeUnitFromPlacement(
     heading: placement.heading,
     speedKts,
     targetSpeedKts: speedKts,
+    throttleSetting: placement.throttleSetting,
     waypoints: placement.waypoints
       ? placement.waypoints.map((waypoint) => Array.isArray(waypoint)
         ? { position: [...waypoint] as [number, number] }
@@ -121,6 +139,7 @@ export function createRuntimeUnitFromPlacement(
     },
     doctrine: { ...defaultDoctrine, automaticTargetDomains: [...defaultDoctrine.automaticTargetDomains] },
     mounts: createRuntimeWeaponMounts(configuration, catalog),
+    magazineStores: createInitialMagazineStores(configuration, catalog, placement.magazineStores),
     weaponUsage: {},
     hangar: (spec.hangarSlots || []).map((slot) => ({
       slotId: slot.slotId,

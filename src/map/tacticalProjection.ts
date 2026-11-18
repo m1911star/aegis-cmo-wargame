@@ -15,7 +15,7 @@ import { evaluateWeatherModifiers } from '../engine/environment';
 import { evaluateFireControl, weaponLaunchRangeKm, weaponNoEscapeRangeKm } from '../engine/fireControl';
 import { calculateRadarHorizonKm } from '../engine/geometry';
 import { observeMissile } from '../engine/sensors';
-import { getUnitCapabilities, isActiveUnit } from '../engine/unitCapabilities';
+import { getUnitCapabilities, isActiveUnit, isUnitRadarEmittingAtTime } from '../engine/unitCapabilities';
 import { resolveUnitConfiguration } from '../engine/unitConfiguration';
 import { estimatedContactThreatRangeKm } from './contactThreat';
 
@@ -53,6 +53,8 @@ export type TacticalProjectionInput = {
 
 export type TacticalProjection = {
   terrainRidges: GeoJSON.Feature[];
+  landZones: GeoJSON.Feature[];
+  acousticZones: GeoJSON.Feature[];
   weatherZones: GeoJSON.Feature[];
   controlZones: GeoJSON.Feature[];
   missions: GeoJSON.Feature[];
@@ -138,6 +140,35 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
       },
     }));
 
+  const landZones: GeoJSON.Feature[] = (environment?.landPolygons ?? [])
+    .filter((polygon) => (polygon.elevationM ?? 0) <= 0 && polygon.areaPolygon.length >= 3)
+    .map((polygon) => ({
+      type: 'Feature',
+      properties: {
+        id: polygon.id,
+        label: polygon.name,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[...polygon.areaPolygon, polygon.areaPolygon[0]]],
+      },
+    }));
+
+  const acousticZones: GeoJSON.Feature[] = (environment?.acousticZones ?? [])
+    .filter((zone) => zone.areaPolygon.length >= 3)
+    .map((zone) => ({
+      type: 'Feature',
+      properties: {
+        id: zone.id,
+        kind: zone.kind,
+        label: `${zone.name} (${zone.kind === 'shallow' ? '浅海声杂波' : '深海汇聚区'} ×${zone.sonarRangeFactor})`,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[...zone.areaPolygon, zone.areaPolygon[0]]],
+      },
+    }));
+
   const weatherZones: GeoJSON.Feature[] = (environment?.weatherZones ?? [])
     .filter((zone) => zone.areaPolygon.length >= 3)
     .map((zone) => ({
@@ -195,7 +226,7 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
     const spec = catalog.platforms[unit.platformId];
     if (!spec) continue;
     const configuration = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
-    if ((mapLayers.showRadarRings || isSelected) && unit.doctrine.emconRadar && getUnitCapabilities(unit).radarFactor > 0) {
+    if ((mapLayers.showRadarRings || isSelected) && isUnitRadarEmittingAtTime(unit, simTime, weaponsInFlight, catalog) && getUnitCapabilities(unit).radarFactor > 0) {
       for (const sensorId of configuration.sensorIds) {
         const sensor = catalog.sensors[sensorId];
         if (!sensor || (sensor.type !== 'radar_air_surface' && sensor.type !== 'radar_oth')) continue;
@@ -466,6 +497,8 @@ export function projectTacticalState(input: TacticalProjectionInput): TacticalPr
 
   return {
     terrainRidges,
+    landZones,
+    acousticZones,
     weatherZones,
     controlZones,
     missions: missionFeatures,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWargameStore } from '../store/useWargameStore';
 import { canCommandUnit } from '../engine/commandPolicy';
+import { computeMissileTerrainDogleg } from '../engine/environment';
 import { evaluateFireControl } from '../engine/fireControl';
 import { effectiveDoctrine } from '../engine/operations';
 import type { TacticalContact } from '../types/wargame';
@@ -13,6 +14,7 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
   const weaponsInFlight = useWargameStore((s) => s.weaponsInFlight);
   const catalog = useWargameStore((s) => s.catalog);
   const missions = useWargameStore((s) => s.missions);
+  const environment = useWargameStore((s) => s.environment);
   const simTime = useWargameStore((s) => s.simTime);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
@@ -45,10 +47,17 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
     return attacker.mounts.flatMap((mount) => {
       const weapon = catalog.weapons[mount.weaponId];
       if (!weapon) return [];
+      const autoDogleg = computeMissileTerrainDogleg(
+        attacker.position,
+        contact.estimatedPosition,
+        weapon,
+        environment
+      );
       return [
         {
           mount,
           weapon,
+          autoDogleg,
           solution: evaluateFireControl(
             attackerWithDoctrine,
             contact,
@@ -58,12 +67,13 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
             units,
             simTime,
             'manual',
-            weaponsInFlight
+            weaponsInFlight,
+            autoDogleg
           ),
         },
       ];
     });
-  }, [attacker, missions, catalog, contact, units, simTime, weaponsInFlight]);
+  }, [attacker, missions, catalog, contact, units, simTime, weaponsInFlight, environment]);
   return <section className="bg-card/85 border border-border space-y-3" aria-label="火控诊断">
     <h3 className="text-xs font-semibold text-primary">火控诊断 · 基于本方情报</h3>
     <p className="text-xs text-muted-foreground">最后观测：{Math.max(0, (simTime - contact.lastDetectedTime) / 1000).toFixed(1)} 秒前 · 误差 ±{contact.uncertaintyRadiusKm.toFixed(1)} km</p>
@@ -83,7 +93,7 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
           </Button>
         </div>
       )}
-      {mountEvaluations.map(({ mount, weapon, solution }) => {
+      {mountEvaluations.map(({ mount, weapon, autoDogleg, solution }) => {
         const blocked = solution.status === 'blocked';
         const risky = solution.status === 'risky';
         return <article key={mount.mountId} className="border-t border-border pt-2.5 space-y-1.5 text-xs">
@@ -95,6 +105,11 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
             </span>
             ) · 预计 TOF {solution.estimatedTofSec ?? 0}s
           </div>
+          {autoDogleg && (
+            <div className="text-[10px] text-cyan-300 font-mono">
+              已规划山脊绕障转折点 ({autoDogleg.length} 点) 规避地形触山
+            </div>
+          )}
           <div className="text-[11px] text-muted-foreground">
             中继 / 火控：{solution.supportSourceIds.map((id) => units[id]?.callsign).join('、') || '无有效支援'}
           </div>
@@ -104,9 +119,9 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
             size="sm"
             variant={risky ? 'warning' : 'default'}
             disabled={blocked}
-            onClick={() => execute(attacker.id, contact.id, weapon.id, attacker.doctrine.salvoSize)}
+            onClick={() => execute(attacker.id, contact.id, weapon.id, attacker.doctrine.salvoSize, false, autoDogleg)}
           >
-            {blocked ? '条件不满足' : risky ? '查看风险并授权' : `齐射 ${Math.min(attacker.doctrine.salvoSize, mount.currentAmmo)} 枚`}
+            {blocked ? '条件不满足' : risky ? '查看风险并授权' : `齐射 ${Math.min(attacker.doctrine.salvoSize, mount.currentAmmo)} 枚${autoDogleg ? ' (自动绕障)' : ''}`}
           </Button>
         </article>;
       })}

@@ -4,7 +4,10 @@ import type {
   Domain,
   EquipmentCatalog,
   PlatformSpec,
+  PropulsionSpeedPoint,
   RcsAspectProfile,
+  ThrottleSetting,
+  UnitDoctrine,
   WeaponSpec,
 } from '../types/wargame';
 
@@ -146,4 +149,116 @@ export function resolveWeaponPkForDomain(weapon: WeaponSpec, domain?: Domain): n
     return weapon.domainPk[domain]!;
   }
   return weapon.basePk;
+}
+
+/**
+ * Enforce OODA reaction delays automatically for imported CMO platforms (`dbid !== undefined`)
+ * or when `doctrine.enforceOoda` is explicitly enabled, keeping built-in smoke baselines exact.
+ */
+export function shouldEnforceOoda(
+  platform: PlatformSpec | undefined,
+  doctrine?: Partial<UnitDoctrine>
+): boolean {
+  return Boolean(
+    platform?.ooda && (platform.dbid !== undefined || doctrine?.enforceOoda === true)
+  );
+}
+
+export interface ResolvedPropulsionAtAltitude {
+  altitudeBand: number;
+  targetSpeedKts: number;
+  bandMaxSpeedKts: number;
+  bandCruiseSpeedKts: number;
+  fuelBurnMultiplier: number;
+}
+
+export function resolvePropulsionAtAltitude(
+  platform: PlatformSpec,
+  catalog: EquipmentCatalog,
+  altitudeM: number,
+  throttle: ThrottleSetting,
+  fallbackMaxSpeedKts: number,
+  fallbackCruiseSpeedKts: number,
+  loadoutSpeedPenaltyKts = 0
+): ResolvedPropulsionAtAltitude {
+  const allPoints: PropulsionSpeedPoint[] = [];
+  for (const propId of platform.propulsionIds ?? []) {
+    const spec = catalog.propulsions?.[propId];
+    if (spec?.speedProfile?.length) {
+      allPoints.push(...spec.speedProfile);
+    }
+  }
+
+  let bandPoints: PropulsionSpeedPoint[] = [];
+  let chosenBand = 1;
+  if (allPoints.length > 0) {
+    const inRange = allPoints.filter(
+      (pt) => altitudeM >= pt.altitudeMinM - 1e-6 && altitudeM <= pt.altitudeMaxM + 1e-6
+    );
+    if (inRange.length > 0) {
+      chosenBand = inRange[0].altitudeBand;
+      bandPoints = inRange.filter((pt) => pt.altitudeBand === chosenBand);
+    } else {
+      let bestDist = Infinity;
+      for (const pt of allPoints) {
+        const clamped = Math.max(pt.altitudeMinM, Math.min(pt.altitudeMaxM, altitudeM));
+        const dist = Math.abs(altitudeM - clamped);
+        if (dist < bestDist) {
+          bestDist = dist;
+          chosenBand = pt.altitudeBand;
+        }
+      }
+      bandPoints = allPoints.filter((pt) => pt.altitudeBand === chosenBand);
+    }
+  }
+
+  const byThrottle = (t: ThrottleSetting) => bandPoints.find((pt) => pt.throttle === t);
+  const pt1 = byThrottle(1);
+  const pt2 = byThrottle(2);
+  const pt3 = byThrottle(3);
+  const pt4 = byThrottle(4);
+
+  const rawMax = pt4?.speedKts ?? pt3?.speedKts ?? pt2?.speedKts ?? 0;
+  const bandMaxSpeedKts =
+    rawMax > 0 ? Math.max(0, rawMax - loadoutSpeedPenaltyKts) : fallbackMaxSpeedKts;
+  const bandCruiseSpeedKts = pt2
+    ? Math.max(0, Math.min(bandMaxSpeedKts, pt2.speedKts - loadoutSpeedPenaltyKts * 0.5))
+    : Math.min(bandMaxSpeedKts, fallbackCruiseSpeedKts);
+  const bandLoiterSpeedKts = pt1
+    ? Math.max(0, Math.min(bandMaxSpeedKts, pt1.speedKts - loadoutSpeedPenaltyKts * 0.25))
+    : Math.round(bandCruiseSpeedKts * 0.72);
+  const bandFullSpeedKts = pt3
+    ? Math.max(0, Math.min(bandMaxSpeedKts, pt3.speedKts - loadoutSpeedPenaltyKts * 0.75))
+    : Math.round((bandCruiseSpeedKts + bandMaxSpeedKts) * 0.5);
+
+  const targetSpeedKts =
+    throttle === 1
+      ? bandLoiterSpeedKts
+      : throttle === 2
+        ? bandCruiseSpeedKts
+        : throttle === 3
+          ? bandFullSpeedKts
+          : bandMaxSpeedKts;
+
+  const baseCruiseConsumption =
+    pt2 && pt2.consumptionPerHour > 0
+      ? pt2.consumptionPerHour
+      : platform.maxFuelSec > 0
+        ? 3600 / platform.maxFuelSec
+        : 0;
+  const selectedPt = throttle === 1 ? pt1 : throttle === 2 ? pt2 : throttle === 3 ? pt3 : pt4;
+  const defaultThrottleMult =
+    throttle === 1 ? 0.65 : throttle === 2 ? 1.0 : throttle === 3 ? 1.45 : 2.2;
+  const fuelBurnMultiplier =
+    selectedPt && selectedPt.consumptionPerHour > 0 && baseCruiseConsumption > 0
+      ? Math.max(0.35, Number((selectedPt.consumptionPerHour / baseCruiseConsumption).toFixed(4)))
+      : defaultThrottleMult;
+
+  return {
+    altitudeBand: chosenBand,
+    targetSpeedKts,
+    bandMaxSpeedKts,
+    bandCruiseSpeedKts,
+    fuelBurnMultiplier,
+  };
 }

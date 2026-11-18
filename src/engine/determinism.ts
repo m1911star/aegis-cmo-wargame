@@ -5,10 +5,11 @@ export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypo
   'updateUnitWaypoint', 'removeUnitWaypoint', 'clearUnitWaypoints', 'batchClearUnitWaypoints',
   'setGroupFormation', 'requestAirRefuel', 'deployCarriedPlatform',
   'deployCountermeasure', 'cancelUnitReturn',
-  'updateUnitDoctrine', 'batchUpdateUnitDoctrine', 'updateUnitKinematics', 'switchUnitLoadout', 'launchCarrierAircraft',
+  'updateUnitDoctrine', 'batchUpdateUnitDoctrine', 'updateUnitKinematics', 'setUnitThrottle', 'switchUnitLoadout', 'launchCarrierAircraft',
   'assignUnitMission', 'createMissionFromReferencePoints', 'updateMissionFromReferencePoints',
   'updateMissionDoctrine', 'deleteMission', 'toggleMissionActive', 'moveUnitInSandbox', 'updateScenarioGroup',
-  'assignUnitGroup', 'upsertObjective', 'deleteObjective', 'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
+  'assignUnitGroup', 'upsertObjective', 'deleteObjective', 'upsertEnvironmentPolygon', 'deleteEnvironmentPolygon',
+  'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
   'executeManualEngage', 'scheduleTotStrike', 'addReferencePoint',
   'removeReferencePoint', 'startSpawnUnitOnMap', 'startForcePackageSpawnOnMap', 'spawnUnitAtCoordinate'] as const;
 

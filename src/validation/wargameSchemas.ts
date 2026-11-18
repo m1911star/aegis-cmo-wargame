@@ -42,7 +42,10 @@ const waypoint: Check = (value, path) => {
 };
 const doctrine = object({
   roe: optional(oneOf(['free', 'tight', 'hold'])),
-  emconRadar: optional(boolean), emconSonar: optional(boolean), emconJamming: optional(boolean),
+  emconRadar: optional(boolean),
+  emconRadarIntermittent: optional(boolean),
+  emconSonar: optional(boolean),
+  emconJamming: optional(boolean),
   autoEvade: optional(boolean), engageOpportunityTargets: optional(boolean),
   salvoSize: optional(number(1, Number.MAX_SAFE_INTEGER, true)),
   automaticFireRangeFraction: optional(number(0.05, 1)),
@@ -52,6 +55,10 @@ const doctrine = object({
   shootAndScoot: optional(boolean),
   bvrTactics: optional(oneOf(['standard', 'crank_pump'])),
   baffleClearPeriodic: optional(boolean),
+  enforceOoda: optional(boolean),
+  autoDeploySonobuoys: optional(boolean),
+  autoAirRefuel: optional(boolean),
+  autoTerrainDogleg: optional(boolean),
 });
 const cmoArcMask = object({
   SB: optional(boolean), SMF: optional(boolean), SMA: optional(boolean), SS: optional(boolean),
@@ -83,7 +90,10 @@ const mountSpec = object({
 const magazineSpec = object({
   id, dbid: optional(number(0, Number.MAX_SAFE_INTEGER, true)), name: text,
   rofPerMin: number(0), capacity: count, armorGeneral: optional(number(0)),
-  aviationMagazine: optional(boolean), weaponIds: identifiers, description: optional(text),
+  aviationMagazine: optional(boolean),
+  isMirrorOnly: optional(boolean),
+  weaponCounts: optional(record(count)),
+  weaponIds: identifiers, description: optional(text),
 });
 const propulsionSpeedPoint = object({
   altitudeBand: number(1, 10, true), throttle: number(1, 4, true),
@@ -208,8 +218,8 @@ const placement = object({
   id, name: text, callsign: text, side, platformId: id, loadoutId: optional(id),
   parentGroupId: id, position: coordinate, spawnJitterKm: optional(number(0, 100)),
   appearProbability: optional(number(0, 1)), altitudeM: optional(number()), heading: number(),
-  speedKts: optional(number(0)), waypoints: optional(array(waypoint)),
-  doctrine: optional(doctrine), assignedMissionId: optional(id),
+  speedKts: optional(number(0)), throttleSetting: optional(number(1, 4, true)), waypoints: optional(array(waypoint)),
+  doctrine: optional(doctrine), magazineStores: optional(record(count)), assignedMissionId: optional(id),
   recoveryPosition: optional(coordinate),
 });
 const trigger = taggedUnion({
@@ -252,10 +262,11 @@ const scenario = object({
   groups: array(object({ ...metadata, side, commandTitle: text })),
   units: array(placement),
   missions: array(object({
-    ...metadata, side, type: oneOf(['aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'aew_support', 'escort', 'sead', 'tanker_support']),
+    ...metadata, side, type: oneOf(['aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'maritime_strike', 'aew_support', 'escort', 'sead', 'tanker_support']),
     isActive: boolean, areaPolygon: array(coordinate, 3), assignedUnitIds: optional(identifiers),
     prosecuteOutsideAreaKm: number(0), escortUnitId: optional(id), stationRadiusKm: optional(number(0)),
     packageTotSec: optional(number(0)), coordinatedPackageId: optional(text),
+    standoffStrike: optional(boolean),
     doctrineOverride: optional(doctrine),
   })),
   referencePoints: array(object({ id, name: text, side, position: coordinate, locked: boolean })),
@@ -304,6 +315,10 @@ const scenario = object({
 
 export function assertCatalogShape(value: unknown): asserts value is EquipmentCatalog {
   catalog(value, 'catalog');
+}
+
+export function assertCatalogOverlayShape(value: unknown): asserts value is Partial<EquipmentCatalog> {
+  overlay(value, 'catalogOverlay');
 }
 
 export function assertScenarioShape(value: unknown): asserts value is ScenarioDefinition {

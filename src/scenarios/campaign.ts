@@ -708,3 +708,65 @@ export function applyCampaignResupplyChoice(
   next.stageModifiers = deriveCampaignStageModifiers(next);
   return next;
 }
+
+export interface CampaignMetricDelta {
+  before: number;
+  after: number;
+  delta: number;
+}
+
+export interface CampaignResupplyDiffPreview {
+  choice: CampaignResupplyChoice;
+  afterCarryover: CampaignCarryover;
+  supplyPoints: CampaignMetricDelta;
+  readinessPct: CampaignMetricDelta;
+  airbaseIntegrityPct: CampaignMetricDelta;
+  airframeDebt: CampaignMetricDelta;
+  avgHullDamagePct: CampaignMetricDelta & { count: number };
+  totalScarceAmmoDebt: CampaignMetricDelta;
+}
+
+export function computeCampaignResupplyDiff(
+  before: CampaignCarryover,
+  choice: CampaignResupplyChoice
+): CampaignResupplyDiffPreview {
+  const after = applyCampaignResupplyChoice(before, choice);
+
+  const sumAmmo = (debt: Record<string, number>) =>
+    Object.values(debt ?? {}).reduce((sum, v) => sum + v, 0);
+  const hullStats = (debt: Record<string, number>) => {
+    const vals = Object.values(debt ?? {}).filter((v) => v > 0);
+    if (vals.length === 0) return { avgPct: 0, count: 0 };
+    const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
+    return { avgPct: Math.round(avg * 100), count: vals.length };
+  };
+
+  const beforeSupply = before.supplyPoints ?? INITIAL_CAMPAIGN_SUPPLY_POINTS;
+  const afterSupply = after.supplyPoints ?? INITIAL_CAMPAIGN_SUPPLY_POINTS;
+  const beforeReadiness = Math.round(before.readinessMultiplier * 100);
+  const afterReadiness = Math.round(after.readinessMultiplier * 100);
+  const beforeAirbase = before.airbaseIntegrityPct ?? 100;
+  const afterAirbase = after.airbaseIntegrityPct ?? 100;
+  const beforeAirframe = before.airframeAttritionDebt ?? 0;
+  const afterAirframe = after.airframeAttritionDebt ?? 0;
+  const beforeHull = hullStats(before.platformDamageDebt);
+  const afterHull = hullStats(after.platformDamageDebt);
+  const beforeAmmo = sumAmmo(before.scarceAmmoDebt);
+  const afterAmmo = sumAmmo(after.scarceAmmoDebt);
+
+  return {
+    choice,
+    afterCarryover: after,
+    supplyPoints: { before: beforeSupply, after: afterSupply, delta: afterSupply - beforeSupply },
+    readinessPct: { before: beforeReadiness, after: afterReadiness, delta: afterReadiness - beforeReadiness },
+    airbaseIntegrityPct: { before: beforeAirbase, after: afterAirbase, delta: afterAirbase - beforeAirbase },
+    airframeDebt: { before: beforeAirframe, after: afterAirframe, delta: afterAirframe - beforeAirframe },
+    avgHullDamagePct: {
+      before: beforeHull.avgPct,
+      after: afterHull.avgPct,
+      delta: afterHull.avgPct - beforeHull.avgPct,
+      count: Math.max(beforeHull.count, afterHull.count),
+    },
+    totalScarceAmmoDebt: { before: beforeAmmo, after: afterAmmo, delta: afterAmmo - beforeAmmo },
+  };
+}

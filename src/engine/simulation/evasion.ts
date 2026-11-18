@@ -1,5 +1,6 @@
 import * as turf from '../turfGeo';
 import type { CombatLogEntry, EquipmentCatalog, RuntimeUnit, SideId, TacticalContact, WeaponInFlight } from '../../types/wargame';
+import { shouldEnforceOoda } from '../cmoUnits';
 import { resolveUnitConfiguration } from '../unitConfiguration';
 import { getBearingDeg, getDistanceKm } from '../geometry';
 import { observeMissile } from '../sensors';
@@ -132,11 +133,23 @@ export function runEvasionAndSoftKill({
     const threat = observedThreats[0];
 
     if (!threat) {
+      unit.oodaEvasionPending = undefined;
       if (unit.evasionState && nextSimTime >= unit.evasionState.untilSimTime) restoreEvasion(unit);
       continue;
     }
 
     if (!unit.evasionState) {
+      const unitSpec = catalog.platforms[unit.platformId];
+      if (shouldEnforceOoda(unitSpec, unit.doctrine) && (unitSpec?.ooda?.evasionSec ?? 0) > 0) {
+        unit.oodaEvasionPending ??= {
+          threatId: threat.observed.id,
+          detectedAtSimTime: nextSimTime,
+        };
+        if ((nextSimTime - unit.oodaEvasionPending.detectedAtSimTime) / 1000 + 1e-6 < unitSpec!.ooda!.evasionSec) {
+          continue;
+        }
+      }
+      unit.oodaEvasionPending = undefined;
       unit.evasionState = {
         threatContactId: threat.observed.id,
         untilSimTime: nextSimTime + EVASION_MEMORY_MS,

@@ -42,6 +42,10 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   const selectedCount = useWargameStore((s) => s.selectedUnitIds.length);
   const doglegCount = useWargameStore((s) => s.pendingStrikeWaypoints.length);
   const clearPendingStrikeWaypoints = useWargameStore((s) => s.clearPendingStrikeWaypoints);
+  const pendingPolygonDraft = useWargameStore((s) => s.pendingPolygonDraft);
+  const commitPolygonDraw = useWargameStore((s) => s.commitPolygonDraw);
+  const undoPolygonDrawVertex = useWargameStore((s) => s.undoPolygonDrawVertex);
+  const cancelPolygonDraw = useWargameStore((s) => s.cancelPolygonDraw);
   // The map layers subscribe imperatively; React only needs the stable banner label.
   const selectedUnitCallsign = useWargameStore((s) =>
     s.selectedUnitIds.length > 1
@@ -286,6 +290,12 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       (map.getSource('terrain-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.terrainRidges,
       });
+      (map.getSource('land-zones-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection', features: projection.landZones,
+      });
+      (map.getSource('acoustic-zones-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection', features: projection.acousticZones,
+      });
       if (map.getLayer('terrain-extrusion-layer')) {
         map.setLayoutProperty(
           'terrain-extrusion-layer',
@@ -334,6 +344,29 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       });
       (map.getSource('fire-control-source') as maplibregl.GeoJSONSource)?.setData({
         type: 'FeatureCollection', features: projection.fireControlLinks,
+      });
+      const polyVerts = state.pendingPolygonDraft?.vertices ?? [];
+      const drawFeatures: GeoJSON.Feature[] = polyVerts.map((pt, idx) => ({
+        type: 'Feature',
+        properties: { index: idx },
+        geometry: { type: 'Point', coordinates: pt },
+      }));
+      if (polyVerts.length === 2) {
+        drawFeatures.push({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: polyVerts },
+        });
+      } else if (polyVerts.length >= 3) {
+        drawFeatures.push({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Polygon', coordinates: [[...polyVerts, polyVerts[0]]] },
+        });
+      }
+      (map.getSource('draw-polygon-source') as maplibregl.GeoJSONSource)?.setData({
+        type: 'FeatureCollection',
+        features: drawFeatures,
       });
       syncRulerLayer();
     };
@@ -413,6 +446,11 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         Number(e.lngLat.lng.toFixed(4)),
         Number(e.lngLat.lat.toFixed(4)),
       ];
+
+      if (state.interactionMode === 'draw_polygon') {
+        state.appendPolygonDrawVertex(clickedCoord);
+        return;
+      }
 
       if (state.interactionMode === 'measure') {
         const current = rulerRef.current;
@@ -591,6 +629,14 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       e.preventDefault();
       cancelBoxSelect();
       const state = useWargameStore.getState();
+      if (state.interactionMode === 'draw_polygon') {
+        if ((state.pendingPolygonDraft?.vertices.length ?? 0) >= 3) {
+          state.commitPolygonDraw();
+        } else {
+          state.cancelPolygonDraw();
+        }
+        return;
+      }
       if (state.interactionMode !== 'select') {
         state.setInteractionMode('select');
       }
@@ -612,6 +658,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         selectedContactId: s.selectedContactId,
         pendingWeaponIdForEngage: s.pendingWeaponIdForEngage,
         pendingStrikeWaypoints: s.pendingStrikeWaypoints,
+        pendingPolygonDraft: s.pendingPolygonDraft,
         interactionMode: s.interactionMode,
         mapLayers: s.mapLayers,
         environment: s.environment,
@@ -813,8 +860,35 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
               [实时兵力投放模式] 点击海图目标海域/空域立即部署新增作战算子 · 右键取消
             </span>
           )}
+          {interactionMode === 'draw_polygon' && (
+            <>
+              <span className="text-emerald-200 truncate">
+                [多边形标绘 · {pendingPolygonDraft?.name || '新建区域'}] 点击海图添加顶点（已标绘{' '}
+                {pendingPolygonDraft?.vertices.length ?? 0}/3+ 点）· 右键快速闭合
+              </span>
+              <button
+                type="button"
+                disabled={(pendingPolygonDraft?.vertices.length ?? 0) === 0}
+                onClick={() => undoPolygonDrawVertex()}
+                className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 disabled:opacity-35 cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                撤销顶点
+              </button>
+              <button
+                type="button"
+                disabled={(pendingPolygonDraft?.vertices.length ?? 0) < 3}
+                onClick={() => commitPolygonDraw()}
+                className="px-2.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-semibold disabled:opacity-35 cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                闭合保存 ({pendingPolygonDraft?.vertices.length ?? 0})
+              </button>
+            </>
+          )}
           <button
-            onClick={() => setInteractionMode('select')}
+            onClick={() => {
+              if (interactionMode === 'draw_polygon') cancelPolygonDraw();
+              else setInteractionMode('select');
+            }}
             className="ml-auto px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-zinc-100 cursor-pointer shrink-0 whitespace-nowrap transition-colors"
           >
             退出 [ESC]

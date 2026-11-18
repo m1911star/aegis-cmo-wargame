@@ -1,10 +1,18 @@
 import React from 'react';
 import { Gauge, Trash2 } from 'lucide-react';
+import { resolvePropulsionAtAltitude } from '../../engine/cmoUnits';
 import { useWargameStore } from '../../store/useWargameStore';
-import type { PlatformSpec, RuntimeUnit } from '../../types/wargame';
+import type { PlatformSpec, RuntimeUnit, ThrottleSetting } from '../../types/wargame';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Slider } from '../ui/slider';
+
+const THROTTLE_OPTIONS: Array<{ value: ThrottleSetting; label: string; short: string }> = [
+  { value: 1, label: '巡弋节油', short: 'LOITER' },
+  { value: 2, label: '经济巡航', short: 'CRUISE' },
+  { value: 3, label: '军用全速', short: 'FULL' },
+  { value: 4, label: '加力极速', short: 'FLANK' },
+];
 
 interface Props {
   unit: RuntimeUnit;
@@ -23,6 +31,7 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
   radarHorizons,
   groupUnitCount,
 }) => {
+  const catalog = useWargameStore((s) => s.catalog);
   const leaderCallsign = useWargameStore((s) =>
     unit.formationLeaderId ? s.units[unit.formationLeaderId]?.callsign : undefined
   );
@@ -31,6 +40,22 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
   const removeUnitWaypoint = useWargameStore((s) => s.removeUnitWaypoint);
   const setGroupFormation = useWargameStore((s) => s.setGroupFormation);
   const updateUnitKinematics = useWargameStore((s) => s.updateUnitKinematics);
+  const setUnitThrottle = useWargameStore((s) => s.setUnitThrottle);
+  const loadoutSpeedPenalty = unit.activeLoadoutId
+    ? catalog.loadouts[unit.activeLoadoutId]?.speedPenaltyKts ?? 0
+    : 0;
+  const activePropPerf =
+    maxSpeedKts > 0
+      ? resolvePropulsionAtAltitude(
+          platformSpec,
+          catalog,
+          unit.targetAltitudeM,
+          unit.throttleSetting ?? 2,
+          maxSpeedKts,
+          Math.max(0, platformSpec.cruiseSpeedKts - loadoutSpeedPenalty * 0.5),
+          loadoutSpeedPenalty
+        )
+      : undefined;
 
   return (
     <div className="space-y-3">
@@ -74,17 +99,45 @@ export const UnitKinematicsPanel: React.FC<Props> = ({
       </div>
 
       {maxSpeedKts > 0 && (
-        <div className="space-y-1 pt-1">
+        <div className="space-y-1.5 pt-1">
           <div className="stat-line flex justify-between text-[11px]">
-            <span className="text-muted-foreground">航速</span>
+            <span className="text-muted-foreground">推进油门与航速</span>
             <span className="text-foreground font-semibold font-mono tabular-nums">
-              {Math.round(unit.targetSpeedKts)} kts (最大 {maxSpeedKts} kts)
+              {Math.round(unit.targetSpeedKts)} kts (最大 {activePropPerf ? activePropPerf.bandMaxSpeedKts : maxSpeedKts} kts)
             </span>
           </div>
+          <div className="grid grid-cols-4 gap-1 text-[10px]" role="group" aria-label="油门档位">
+            {THROTTLE_OPTIONS.map((opt) => {
+              const isSelected = unit.throttleSetting === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() =>
+                    setUnitThrottle(unit.id, isSelected ? null : opt.value)
+                  }
+                  className={`py-1 px-1 rounded border text-center cursor-pointer transition-colors ${
+                    isSelected
+                      ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200 font-semibold'
+                      : 'bg-secondary/50 border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                  title={`${opt.label} (${opt.short})`}
+                >
+                  <div>{opt.label}</div>
+                </button>
+              );
+            })}
+          </div>
+          {unit.throttleSetting !== undefined && activePropPerf && (
+            <div className="flex items-center justify-between text-[10px] text-cyan-300/90 font-mono">
+              <span>高度层 Band {activePropPerf.altitudeBand}</span>
+              <span>油耗倍率 ×{activePropPerf.fuelBurnMultiplier.toFixed(2)}</span>
+            </div>
+          )}
           <Slider
             aria-label="设定航速"
             min={0}
-            max={maxSpeedKts}
+            max={activePropPerf ? activePropPerf.bandMaxSpeedKts : maxSpeedKts}
             step={5}
             value={unit.targetSpeedKts}
             onChange={(e) => updateUnitKinematics(unit.id, Number(e.target.value), undefined)}

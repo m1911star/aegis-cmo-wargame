@@ -27,10 +27,12 @@ import type {
   ScenarioEnvironment,
   ScenarioObjective,
   ScoreLedger,
+  SeaStateLevel,
   SideId,
   TacticalContact,
   TacticalExplosionEffect,
   TacticalMission,
+  ThrottleSetting,
   TimeScale,
   UnitCategory,
   UnitDoctrine,
@@ -46,7 +48,52 @@ export type MapInteractionMode =
   | 'place_ref_point'
   | 'measure'
   | 'move_unit'
-  | 'spawn_unit';
+  | 'spawn_unit'
+  | 'draw_polygon';
+
+export type PolygonDrawTargetKind =
+  | 'land'
+  | 'acoustic_shallow'
+  | 'acoustic_deep'
+  | 'weather_rain'
+  | 'weather_fog'
+  | 'control_area';
+
+export interface PendingPolygonDraft {
+  targetKind: PolygonDrawTargetKind;
+  name: string;
+  elevationM?: number;
+  seaStateOverride?: SeaStateLevel;
+  side?: 'RED' | 'BLUE';
+  pointsScore?: number;
+  holdDurationSec?: number;
+  vertices: [number, number][];
+}
+
+export type EnvironmentPolygonUpsertPayload =
+  | {
+      kind: 'land';
+      id?: string;
+      name: string;
+      areaPolygon: [number, number][];
+      elevationM?: number;
+    }
+  | {
+      kind: 'acoustic';
+      id?: string;
+      name: string;
+      areaPolygon: [number, number][];
+      acousticKind: 'shallow' | 'deep';
+      sonarRangeFactor?: number;
+    }
+  | {
+      kind: 'weather';
+      id?: string;
+      name: string;
+      areaPolygon: [number, number][];
+      condition: 'rain_storm' | 'heavy_fog';
+      seaStateOverride?: SeaStateLevel;
+    };
 
 export interface MissionReferencePointDraft {
   name: string;
@@ -57,6 +104,7 @@ export interface MissionReferencePointDraft {
   stationRadiusKm?: number;
   packageTotSec?: number;
   coordinatedPackageId?: string;
+  standoffStrike?: boolean;
 }
 
 export interface ObjectiveDraft {
@@ -185,6 +233,12 @@ export interface WargameStoreState {
     side: SideId;
     parentGroupId: string;
   } | null;
+  pendingPolygonDraft: PendingPolygonDraft | null;
+  startPolygonDraw: (config: Omit<PendingPolygonDraft, 'vertices'>) => void;
+  appendPolygonDrawVertex: (coord: [number, number]) => void;
+  undoPolygonDrawVertex: () => void;
+  cancelPolygonDraw: () => void;
+  commitPolygonDraw: () => boolean;
   mapLayers: MapLayerVisibility;
   tacview3dOpen: boolean;
   cameraFlyToRequest: {
@@ -202,9 +256,15 @@ export interface WargameStoreState {
     | 'builder'
     | 'catalog_viewer'
     | 'unit_spawner'
-    | 'skirmish';
+    | 'skirmish'
+    | 'campaign';
 
   // --- Actions ---
+  importCatalogJson: (
+    rawInput: unknown,
+    mode?: 'merge' | 'replace'
+  ) => { ok: boolean; error?: string; importedSummary?: string };
+  resetCatalogToDefault: () => { ok: boolean; error?: string };
   loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number) => void;
   resetScenario: (randomizeSpawns?: boolean) => void;
   startCampaign: (side?: 'RED' | 'BLUE') => void;
@@ -268,8 +328,10 @@ export interface WargameStoreState {
   updateUnitKinematics: (
     unitId: string,
     speedKts?: number,
-    altitudeM?: number
+    altitudeM?: number,
+    throttleSetting?: ThrottleSetting | null
   ) => void;
+  setUnitThrottle: (unitId: string, throttle: ThrottleSetting | null) => void;
   switchUnitLoadout: (unitId: string, loadoutId: string) => void;
   launchCarrierAircraft: (
     carrierUnitId: string,
@@ -287,6 +349,8 @@ export interface WargameStoreState {
   assignUnitGroup: (unitId: string, groupId: string) => void;
   upsertObjective: (draft: ObjectiveDraft) => void;
   deleteObjective: (objectiveId: string) => void;
+  upsertEnvironmentPolygon: (payload: EnvironmentPolygonUpsertPayload) => void;
+  deleteEnvironmentPolygon: (kind: 'land' | 'acoustic' | 'weather', polygonId: string) => void;
   createAreaEventFromReferencePoints: (draft: AreaEventDraft) => void;
   deleteScenarioEvent: (eventId: string) => void;
   executeManualEngage: (

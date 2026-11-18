@@ -16,6 +16,8 @@ export function installTacticalLayers(map: TacticalLayerHost) {
     features: [],
   };
   addSource('terrain-source', { type: 'geojson', data: emptyFC });
+  addSource('land-zones-source', { type: 'geojson', data: emptyFC });
+  addSource('acoustic-zones-source', { type: 'geojson', data: emptyFC });
   addSource('weather-zones-source', { type: 'geojson', data: emptyFC });
   addSource('control-zones-source', { type: 'geojson', data: emptyFC });
   addSource('missions-source', { type: 'geojson', data: emptyFC });
@@ -30,6 +32,87 @@ export function installTacticalLayers(map: TacticalLayerHost) {
   addSource('fire-control-source', { type: 'geojson', data: emptyFC });
   addSource('units-source', { type: 'geojson', data: emptyFC });
   addSource('ruler-source', { type: 'geojson', data: emptyFC });
+  addSource('draw-polygon-source', { type: 'geojson', data: emptyFC });
+
+  addLayer({
+    id: 'land-zones-fill-layer',
+    type: 'fill',
+    source: 'land-zones-source',
+    paint: {
+      'fill-color': 'rgba(120, 113, 108, 0.16)',
+    },
+  });
+  addLayer({
+    id: 'land-zones-line-layer',
+    type: 'line',
+    source: 'land-zones-source',
+    paint: {
+      'line-color': 'rgba(168, 162, 158, 0.55)',
+      'line-width': 1.2,
+    },
+  });
+  addLayer({
+    id: 'acoustic-zones-fill-layer',
+    type: 'fill',
+    source: 'acoustic-zones-source',
+    paint: {
+      'fill-color': [
+        'match',
+        ['get', 'kind'],
+        'shallow',
+        'rgba(20, 184, 166, 0.09)',
+        'rgba(99, 102, 241, 0.10)',
+      ],
+    },
+  });
+  addLayer({
+    id: 'acoustic-zones-line-layer',
+    type: 'line',
+    source: 'acoustic-zones-source',
+    paint: {
+      'line-color': [
+        'match',
+        ['get', 'kind'],
+        'shallow',
+        'rgba(45, 212, 191, 0.55)',
+        'rgba(129, 140, 248, 0.6)',
+      ],
+      'line-width': 1.2,
+      'line-dasharray': [3, 3],
+    },
+  });
+  addLayer({
+    id: 'draw-polygon-fill-layer',
+    type: 'fill',
+    source: 'draw-polygon-source',
+    filter: ['==', '$type', 'Polygon'],
+    paint: {
+      'fill-color': 'rgba(52, 211, 153, 0.18)',
+    },
+  });
+  addLayer({
+    id: 'draw-polygon-line-layer',
+    type: 'line',
+    source: 'draw-polygon-source',
+    filter: ['in', '$type', 'LineString', 'Polygon'],
+    paint: {
+      'line-color': '#34d399',
+      'line-width': 2.2,
+      'line-dasharray': [3, 2],
+    },
+  });
+  addLayer({
+    id: 'draw-polygon-vertex-layer',
+    type: 'circle',
+    source: 'draw-polygon-source',
+    filter: ['==', '$type', 'Point'],
+    paint: {
+      'circle-radius': 4.5,
+      'circle-color': '#34d399',
+      'circle-stroke-color': '#020617',
+      'circle-stroke-width': 1.5,
+    },
+  });
 
   // 0. 地形高程遮蔽区与区域夺控区图层
   addLayer({

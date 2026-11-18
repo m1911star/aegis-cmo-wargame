@@ -1,5 +1,44 @@
-import type { EquipmentCatalog, RuntimeUnit } from '../types/wargame';
+import type { EquipmentCatalog, RuntimeUnit, UnitDoctrine, WeaponInFlight } from '../types/wargame';
 import { resolveUnitConfiguration } from './unitConfiguration';
+
+export const EMCON_BLINK_PERIOD_MS = 60_000;
+export const EMCON_BLINK_ON_MS = 15_000;
+
+export function computeUnitRadarBlinkOffsetMs(unitId: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < unitId.length; i++) {
+    hash ^= unitId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % EMCON_BLINK_PERIOD_MS;
+}
+
+export function isUnitRadarEmittingAtTime(
+  unit: RuntimeUnit,
+  simTime = 0,
+  weaponsInFlight?: Record<string, WeaponInFlight>,
+  catalog?: EquipmentCatalog,
+  doctrineOverride?: Partial<UnitDoctrine>
+): boolean {
+  const emconRadar = doctrineOverride?.emconRadar ?? unit.doctrine.emconRadar;
+  const intermittent =
+    doctrineOverride?.emconRadarIntermittent ?? unit.doctrine.emconRadarIntermittent;
+  if (!intermittent) return Boolean(emconRadar);
+
+  if (weaponsInFlight && catalog) {
+    for (const missile of Object.values(weaponsInFlight)) {
+      if (missile.shooterId !== unit.id || missile.isIntercepted) continue;
+      if (catalog.weapons[missile.weaponId]?.guidance === 'semi_active_radar') {
+        return true;
+      }
+    }
+  }
+  const offset = computeUnitRadarBlinkOffsetMs(unit.id);
+  const phase =
+    (((simTime + offset) % EMCON_BLINK_PERIOD_MS) + EMCON_BLINK_PERIOD_MS) %
+    EMCON_BLINK_PERIOD_MS;
+  return phase < EMCON_BLINK_ON_MS;
+}
 
 export function isActiveUnit(unit: RuntimeUnit): boolean {
   return unit.hp > 0 && unit.status !== 'destroyed' && unit.status !== 'recovered';
@@ -66,12 +105,18 @@ export function getUnitCapabilities(unit: RuntimeUnit) {
   };
 }
 
-export function isRadioEmitting(unit: RuntimeUnit, catalog: EquipmentCatalog): boolean {
+export function isRadioEmitting(
+  unit: RuntimeUnit,
+  catalog: EquipmentCatalog,
+  simTime = 0,
+  weaponsInFlight?: Record<string, WeaponInFlight>
+): boolean {
   if (!isActiveUnit(unit) || !getUnitCapabilities(unit).radarFactor) return false;
+  const radarOn = isUnitRadarEmittingAtTime(unit, simTime, weaponsInFlight, catalog);
   const config = resolveUnitConfiguration(catalog, unit.platformId, unit.activeLoadoutId);
   return (unit.doctrine.emconJamming && (config.platform.ecmStrength ?? 0) > 0) || config.sensorIds.some((id) => {
     const type = catalog.sensors[id]?.type;
-    return (unit.doctrine.emconRadar && (type === 'radar_air_surface' || type === 'radar_oth')) ||
+    return (radarOn && (type === 'radar_air_surface' || type === 'radar_oth')) ||
       (unit.doctrine.emconJamming && type === 'ecm_jammer');
   });
 }

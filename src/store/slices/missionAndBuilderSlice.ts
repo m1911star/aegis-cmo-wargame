@@ -19,6 +19,7 @@ import type {
 } from '../../types/wargame';
 import type {
   AreaEventDraft,
+  EnvironmentPolygonUpsertPayload,
   MissionReferencePointDraft,
   ObjectiveDraft,
   StoreSet,
@@ -26,14 +27,14 @@ import type {
 } from '../types';
 
 const MISSION_TYPES: readonly MissionType[] = [
-  'aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'aew_support', 'escort', 'sead', 'tanker_support',
+  'aaw_patrol', 'asuw_patrol', 'asw_patrol', 'land_strike', 'maritime_strike', 'aew_support', 'escort', 'sead', 'tanker_support',
 ];
 
 function resolveMissionDraft(
   state: Pick<WargameStoreState, 'referencePoints' | 'units' | 'playerSide' | 'playMode' | 'battleResult'>,
   draft: MissionReferencePointDraft,
   requiredSide?: SideId
-): { name: string; type: MissionType; side: SideId; areaPolygon: [number, number][]; prosecuteOutsideAreaKm: number; escortUnitId?: string; stationRadiusKm: number; packageTotSec?: number; coordinatedPackageId?: string } | undefined {
+): { name: string; type: MissionType; side: SideId; areaPolygon: [number, number][]; prosecuteOutsideAreaKm: number; escortUnitId?: string; stationRadiusKm: number; packageTotSec?: number; coordinatedPackageId?: string; standoffStrike?: boolean } | undefined {
   const name = typeof draft.name === 'string' ? draft.name.trim() : '';
   if (state.battleResult || !name || name.length > 80 || !MISSION_TYPES.includes(draft.type) ||
       !Number.isFinite(draft.prosecuteOutsideAreaKm) || draft.prosecuteOutsideAreaKm < 0 ||
@@ -67,6 +68,7 @@ function resolveMissionDraft(
     stationRadiusKm,
     packageTotSec,
     coordinatedPackageId,
+    standoffStrike: draft.standoffStrike,
   };
 }
 
@@ -254,6 +256,114 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
       if (s.playMode !== 'sandbox' || !s.objectives.some((objective) => objective.id === objectiveId)) return s;
       const objectiveProgress = { ...s.objectiveProgress }; delete objectiveProgress[objectiveId];
       return { objectives: s.objectives.filter((objective) => objective.id !== objectiveId), objectiveProgress };
+    }),
+
+    upsertEnvironmentPolygon: (payload: EnvironmentPolygonUpsertPayload) => set((s) => {
+      const name = payload?.name?.trim();
+      if (s.playMode !== 'sandbox' || !name || name.length > 100 || !Array.isArray(payload.areaPolygon) || payload.areaPolygon.length < 3) {
+        return s;
+      }
+      const cleanedRing = payload.areaPolygon
+        .filter((pt) => Array.isArray(pt) && pt.length === 2 && Number.isFinite(pt[0]) && Math.abs(pt[0]) <= 180 && Number.isFinite(pt[1]) && Math.abs(pt[1]) <= 90)
+        .map((pt) => [Number(pt[0].toFixed(4)), Number(pt[1].toFixed(4))] as [number, number]);
+      if (cleanedRing.length < 3) return s;
+      const polyFeature = turf.polygon([[...cleanedRing, cleanedRing[0]]]);
+      if (turf.area(polyFeature) <= 1 || turf.kinks(polyFeature).features.length > 0) {
+        emitActionFeedback('warning', '多边形自交或面积过小，无法保存环境区域');
+        return s;
+      }
+      const id = payload.id ?? `env_${payload.kind}_${s.tick}_${s.commandSequence}`;
+      let nextEnv = { ...s.environment };
+      if (payload.kind === 'land') {
+        const elevationM = payload.elevationM !== undefined && Number.isFinite(payload.elevationM)
+          ? Math.max(0, Math.min(9000, Math.round(payload.elevationM)))
+          : 0;
+        const item = { id, name, areaPolygon: cleanedRing, elevationM };
+        const exists = nextEnv.landPolygons.some((p) => p.id === id);
+        nextEnv = {
+          ...nextEnv,
+          landPolygons: exists
+            ? nextEnv.landPolygons.map((p) => (p.id === id ? item : p))
+            : [...nextEnv.landPolygons, item],
+        };
+      } else if (payload.kind === 'acoustic') {
+        if (!['shallow', 'deep'].includes(payload.acousticKind)) return s;
+        const sonarRangeFactor = payload.sonarRangeFactor !== undefined && Number.isFinite(payload.sonarRangeFactor)
+          ? Math.max(0.1, Math.min(2, Number(payload.sonarRangeFactor.toFixed(2))))
+          : payload.acousticKind === 'shallow'
+            ? 0.65
+            : 1.35;
+        const item = { id, name, areaPolygon: cleanedRing, kind: payload.acousticKind, sonarRangeFactor };
+        const exists = nextEnv.acousticZones.some((z) => z.id === id);
+        nextEnv = {
+          ...nextEnv,
+          acousticZones: exists
+            ? nextEnv.acousticZones.map((z) => (z.id === id ? item : z))
+            : [...nextEnv.acousticZones, item],
+        };
+      } else if (payload.kind === 'weather') {
+        if (!['rain_storm', 'heavy_fog'].includes(payload.condition)) return s;
+        const existingZones = nextEnv.weatherZones ?? [];
+        const seaStateOverride = payload.seaStateOverride !== undefined && Number.isSafeInteger(payload.seaStateOverride) &&
+          payload.seaStateOverride >= 0 && payload.seaStateOverride <= 6
+          ? payload.seaStateOverride
+          : undefined;
+        const item = { id, name, areaPolygon: cleanedRing, condition: payload.condition, seaStateOverride };
+        const exists = existingZones.some((z) => z.id === id);
+        nextEnv = {
+          ...nextEnv,
+          weatherZones: exists
+            ? existingZones.map((z) => (z.id === id ? item : z))
+            : [...existingZones, item],
+        };
+      } else {
+        return s;
+      }
+      const log: CombatLogEntry = {
+        id: `env_poly_${id}_${s.tick}_${s.commandSequence}`,
+        simTime: s.simTime,
+        side: 'SYSTEM',
+        category: 'SYSTEM',
+        severity: 'info',
+        title: `战场环境区域已标绘：${name}`,
+        message: `类型 ${payload.kind} · 顶点 ${cleanedRing.length} 个。`,
+        position: cleanedRing[0],
+      };
+      return {
+        environment: nextEnv,
+        currentScenario: { ...s.currentScenario, environment: nextEnv },
+        logs: [log, ...s.logs].slice(0, 250),
+      };
+    }),
+
+    deleteEnvironmentPolygon: (kind: 'land' | 'acoustic' | 'weather', polygonId: string) => set((s) => {
+      if (s.playMode !== 'sandbox') return s;
+      if (kind === 'land') {
+        if (!s.environment.landPolygons.some((p) => p.id === polygonId)) return s;
+        const nextEnv = {
+          ...s.environment,
+          landPolygons: s.environment.landPolygons.filter((p) => p.id !== polygonId),
+        };
+        return { environment: nextEnv, currentScenario: { ...s.currentScenario, environment: nextEnv } };
+      }
+      if (kind === 'acoustic') {
+        if (!s.environment.acousticZones.some((z) => z.id === polygonId)) return s;
+        const nextEnv = {
+          ...s.environment,
+          acousticZones: s.environment.acousticZones.filter((z) => z.id !== polygonId),
+        };
+        return { environment: nextEnv, currentScenario: { ...s.currentScenario, environment: nextEnv } };
+      }
+      if (kind === 'weather') {
+        const zones = s.environment.weatherZones ?? [];
+        if (!zones.some((z) => z.id === polygonId)) return s;
+        const nextEnv = {
+          ...s.environment,
+          weatherZones: zones.filter((z) => z.id !== polygonId),
+        };
+        return { environment: nextEnv, currentScenario: { ...s.currentScenario, environment: nextEnv } };
+      }
+      return s;
     }),
 
     createAreaEventFromReferencePoints: (draft: AreaEventDraft) => set((s) => {
