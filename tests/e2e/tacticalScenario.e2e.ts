@@ -142,6 +142,50 @@ test('toggles both command sidebars without remounting the workspace', async ({ 
   await expect(orderPanel).toBeVisible();
   await page.getByRole('button', { name: '详情', exact: true }).click();
   await expect(inspectorPanel).toBeHidden();
+  await page.keyboard.press('Alt+m');
+  await expect(orderPanel).toBeHidden();
+  await page.keyboard.press('Alt+m');
+  await expect(orderPanel).toBeVisible();
+  await expect(inspectorPanel).toBeVisible();
+});
+
+test('keeps the map open on a narrow screen and puts tools in a dismissible menu', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  const header = page.locator('.command-header');
+  expect((await header.boundingBox())!.height).toBeLessThan(160);
+  expect((await page.locator('.workspace').boundingBox())!.height).toBeGreaterThan(600);
+  await expect(page.locator('#order-panel')).toBeHidden();
+  await expect(page.locator('#inspector-panel')).toBeHidden();
+  await expect(page.getByRole('button', { name: '开始推演' })).toBeInViewport();
+
+  await page.keyboard.press('Tab');
+  await expect(header.getByRole('button', { name: /有限信息演练/ })).toBeFocused();
+  await page.keyboard.press('Tab');
+  const more = page.getByText('更多工具', { exact: true });
+  await expect(page.locator('summary').filter({ has: more })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const manage = page.getByRole('button', { name: '想定管理' });
+  await expect(manage).toBeVisible();
+  await manage.click();
+  const dialog = page.getByRole('dialog', { name: '想定管理' });
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: '想定与回放 I/O' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: '校验并热加载此想定' })).toBeFocused();
+  await dialog.getByLabel('想定或重放 JSON').focus();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('summary').filter({ has: more })).toBeFocused();
+
+  await page.getByRole('button', { name: '编制', exact: true }).click();
+  await expect(page.locator('#order-panel')).toBeVisible();
+  await page.getByRole('button', { name: '详情', exact: true }).click();
+  await expect(page.locator('#order-panel')).toBeHidden();
+  await expect(page.locator('#inspector-panel')).toBeVisible();
+  await page.getByRole('button', { name: '纯地图' }).click();
+  await expect(page.locator('#inspector-panel')).toBeHidden();
 });
 
 test('starts, advances and pauses the simulation from the command header', async ({ page }) => {
@@ -222,14 +266,21 @@ test('requires confirmation before mid-battle reset and launches live map replay
   const player = page.getByLabel('地图航迹回放播放器');
   await expect(player).toContainText('Tick 0/20');
   await page.clock.install();
-  await player.getByRole('button', { name: '1×', exact: true }).click();
-  await player.getByRole('button', { name: '播放回放' }).click();
+  await page.clock.pauseAt(new Date(Date.now() + 2000));
+  await player.getByRole('button', { name: '1×', exact: true }).press('Enter');
+  await player.getByRole('button', { name: '播放回放' }).press('Enter');
   await page.clock.runFor(1000);
   await expect(player).toContainText('Tick 4/20');
-  await player.getByRole('button', { name: '暂停回放' }).click();
+  await player.getByRole('button', { name: '暂停回放' }).press('Enter');
   await page.clock.runFor(1000);
   await expect(player).toContainText('Tick 4/20');
-  await player.getByRole('button', { name: '退出回放' }).click();
+  await expect(player.getByText('已暂停')).toBeVisible();
+  await expect(page.getByRole('button', { name: '开始推演' })).toHaveCount(0);
+  await player.getByRole('button', { name: '+5s' }).press('Enter');
+  await expect(player.getByText('已到末尾')).toBeVisible();
+  await player.getByRole('button', { name: '重新播放' }).press('Enter');
+  await expect(player).toContainText('Tick 0/20');
+  await player.getByRole('button', { name: '退出回放' }).press('Enter');
   await expect(page.getByText(/^种子 \d+ · Tick 20$/)).toBeAttached();
   expect(await page.evaluate(() => localStorage.getItem('aegis_cmo_autosave_v1'))).toBe(autosaveBefore);
 });

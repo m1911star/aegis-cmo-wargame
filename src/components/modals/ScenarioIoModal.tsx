@@ -139,7 +139,8 @@ export const ScenarioIoModal: React.FC = () => {
     <ModalShell className="max-w-3xl max-h-[90dvh] flex flex-col">
       <ModalHeader
         icon={<FileJson className="w-4 h-4" />}
-        title="SCENARIO SCHEMA SERIALIZER // 想定 JSON 导出、编辑与热加载"
+        title="想定管理"
+        subtitle="保存进度、载入想定或播放录像"
         onClose={() => setActiveModal('none')}
       />
 
@@ -148,9 +149,9 @@ export const ScenarioIoModal: React.FC = () => {
           <div className="flex items-center justify-between gap-2">
             <span className="font-semibold text-primary flex items-center gap-1.5">
               <HardDrive className="w-3.5 h-3.5" />
-              <span>本地多槽位断点存档库 ({saveSlots.length}/{MAX_BATTLE_SAVE_SLOTS})</span>
+              <span>本地存档</span>
             </span>
-            <span className="text-[11px] text-muted-foreground">摘要防篡改校验 · 精确恢复实时交战状态</span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">{saveSlots.length} / {MAX_BATTLE_SAVE_SLOTS}</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -251,12 +252,13 @@ export const ScenarioIoModal: React.FC = () => {
           )}
         </div>
 
-        <p className="text-muted-foreground">
-          当前战场实时态势已序列化为标准 <code>ScenarioDefinition</code> JSON。你可以直接修改算子坐标、添加自定义{' '}
-          <code>customCatalogOverlay</code> 武器参数，或保存为外部剧本文件。
-        </p>
+        <div className="flex flex-wrap items-baseline justify-between gap-1 border-t border-border pt-3">
+          <label htmlFor="scenario-json" className="font-semibold text-foreground">想定、存档与录像 JSON</label>
+          <span className="text-[11px] text-muted-foreground">可直接编辑，也可从文件导入</span>
+        </div>
 
         <Textarea
+          id="scenario-json"
           aria-label="想定或重放 JSON"
           value={displayedJson}
           onChange={(e) => {
@@ -266,8 +268,8 @@ export const ScenarioIoModal: React.FC = () => {
             if (untilTick !== undefined) setReplayTick(untilTick);
             setJsonError(null);
           }}
-          rows={15}
-          className="font-mono text-[11px] text-cyan-200"
+          rows={9}
+          className="min-h-28 resize-y font-mono text-[11px] text-cyan-100"
         />
 
         <div className="flex flex-wrap gap-2 items-center">

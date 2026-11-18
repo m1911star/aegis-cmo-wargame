@@ -42,23 +42,29 @@ export const ReplayPlayerBar: React.FC = () => {
   if (!replayPlayer) return null;
 
   const { recording: currentRecording, currentTick, isPlaying, speed } = replayPlayer;
+  const atEnd = currentTick >= currentRecording.untilTick;
   const utc = new Date(simTime).toISOString().slice(11, 19);
+  const restart = () => {
+    budgetMs.current = 0;
+    seekReplayPlayer(0);
+    if (useWargameStore.getState().replayPlayer?.currentTick === 0) setReplayPlayerPlaying(true);
+  };
 
   return (
     <section
       aria-label="地图航迹回放播放器"
-      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 w-[min(92%,560px)] rounded-xl border border-amber-500/40 bg-card/95 backdrop-blur-xl px-3.5 py-2.5 text-xs shadow-2xl space-y-2"
+      className="replay-strip"
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-amber-300 font-semibold">
-          <span>REPLAY // 地图航迹回放</span>
-          <span className="text-muted-foreground font-mono font-normal">
-            Tick {currentTick}/{currentRecording.untilTick} · {utc}
-          </span>
+      <div className="replay-heading">
+        <div className="min-w-0">
+          <p className="replay-title">航迹回放 <span className="replay-state">{isPlaying ? '播放中' : atEnd ? '已到末尾' : '已暂停'}</span></p>
+          <p className="replay-time">{utc} UTC <span>·</span> Tick {currentTick}/{currentRecording.untilTick}</p>
         </div>
         <button
+          type="button"
           onClick={exitReplayPlayer}
-          className="px-2 py-1 rounded-md bg-secondary hover:bg-accent text-foreground border border-border flex items-center gap-1 cursor-pointer transition-colors"
+          title="退出回放，返回暂停的原局"
+          className="toolbar-button replay-exit"
         >
           <X className="w-3 h-3" />
           <span>退出回放</span>
@@ -67,6 +73,7 @@ export const ReplayPlayerBar: React.FC = () => {
 
       <Slider
         aria-label="回放播放器时间轴"
+        aria-valuetext={`第 ${currentTick} 步，共 ${currentRecording.untilTick} 步`}
         min={0}
         max={currentRecording.untilTick}
         value={currentTick}
@@ -83,19 +90,23 @@ export const ReplayPlayerBar: React.FC = () => {
         rangeClassName="bg-amber-400"
       />
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="replay-transport">
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setReplayPlayerPlaying(!isPlaying)}
-            className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1 cursor-pointer"
+            type="button"
+            disabled={currentRecording.untilTick === 0}
+            onClick={atEnd ? restart : () => setReplayPlayerPlaying(!isPlaying)}
+            className="toolbar-button replay-action"
           >
-            {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            <span>{isPlaying ? '暂停回放' : '播放回放'}</span>
+            {isPlaying ? <Pause /> : <Play />}
+            <span>{isPlaying ? '暂停回放' : atEnd ? '重新播放' : '播放回放'}</span>
           </button>
           <button
+            type="button"
             onClick={() => seekReplayPlayer(Math.min(currentRecording.untilTick, currentTick + 20))}
-            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1 cursor-pointer"
-            title="步进 +20 Tick (5秒)"
+            disabled={atEnd}
+            className="toolbar-button"
+            title="向前跳过 5 秒"
           >
             <StepForward className="w-3.5 h-3.5" />
             <span>+5s</span>
@@ -107,6 +118,7 @@ export const ReplayPlayerBar: React.FC = () => {
           {([1, 5, 15] as const).map((s) => (
             <button
               key={s}
+              type="button"
               onClick={() => setReplayPlayerSpeed(s)}
               aria-pressed={speed === s}
               className={`px-2 py-0.5 rounded cursor-pointer ${

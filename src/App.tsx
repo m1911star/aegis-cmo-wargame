@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { extractSimulationWorldState, useWargameStore } from './store/useWargameStore';
 import { simulationWorkerClient } from './engine/workerClient';
 import { TopCommandHeader } from './components/TopCommandHeader';
@@ -14,13 +14,18 @@ import { ReplayPlayerBar } from './components/ReplayPlayerBar';
 import { BattleResultOverlay } from './components/modals/BattleResultOverlay';
 import { DraggableTacviewViewport } from './components/tacview/DraggableTacviewViewport';
 
+const NARROW_WORKSPACE = '(max-width: 900px)';
+const isNarrowWorkspace = () => window.matchMedia(NARROW_WORKSPACE).matches;
+
+type WorkspacePanels = { order: boolean; inspector: boolean };
+const initialPanels = (): WorkspacePanels => {
+  const wide = !isNarrowWorkspace();
+  return { order: wide, inspector: wide };
+};
+
 export default function App() {
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
-  const leftOpenRef = useRef(leftOpen);
-  const rightOpenRef = useRef(rightOpen);
-  leftOpenRef.current = leftOpen;
-  rightOpenRef.current = rightOpen;
+  const [panels, setPanels] = useState(initialPanels);
+  const [compact, setCompact] = useState(isNarrowWorkspace);
   const [debriefDismissed, setDebriefDismissed] = useState(false);
 
   const battleResult = useWargameStore((s) => s.battleResult);
@@ -33,28 +38,27 @@ export default function App() {
   }, [battleResult]);
 
   useEffect(() => {
-    const narrow = window.matchMedia('(max-width: 900px)');
-    const collapse = () => { if (narrow.matches) setRightOpen(false); };
-    narrow.addEventListener('change', collapse);
-    return () => narrow.removeEventListener('change', collapse);
+    const narrow = window.matchMedia(NARROW_WORKSPACE);
+    const onResize = () => {
+      setCompact(narrow.matches);
+      if (narrow.matches) setPanels((current) => current.inspector ? { order: false, inspector: true } : current);
+    };
+    narrow.addEventListener('change', onResize);
+    return () => narrow.removeEventListener('change', onResize);
   }, []);
 
   useEffect(() => useWargameStore.subscribe(
     (s) => s.selectedContactId ?? s.selectedUnitId,
     (selection) => {
       if (selection) {
-        setRightOpen(true);
-        if (window.matchMedia('(max-width: 900px)').matches) setLeftOpen(false);
+        setPanels((current) => ({ order: !isNarrowWorkspace() && current.order, inspector: true }));
       }
     }
   ), []);
 
   useEffect(() => useWargameStore.subscribe(
     (s) => s.currentScenario,
-    () => {
-      setLeftOpen(true);
-      setRightOpen(!window.matchMedia('(max-width: 900px)').matches);
-    }
+    () => setPanels(initialPanels())
   ), []);
 
   const timeScale = useWargameStore((s) => s.timeScale);
@@ -127,22 +131,25 @@ export default function App() {
     };
   }, [timeScale, stepSingleTick]);
 
-  // --------------------------------------------------------------------------
-  // 2. CMO 风格全局战术快捷键监听 (Space / F1 / F3 / F9 / Escape)
-  // --------------------------------------------------------------------------
+  const toggleMapOnly = useCallback(() => {
+    setPanels((current) => {
+      const show = !current.order && !current.inspector;
+      return { order: show, inspector: show && !isNarrowWorkspace() };
+    });
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT')
-      ) {
+      if (e.defaultPrevented) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const state = useWargameStore.getState();
+      if (state.activeModal !== 'none' || target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyM') {
+        e.preventDefault();
+        if (!e.repeat) toggleMapOnly();
         return;
       }
-
-      const state = useWargameStore.getState();
+      if (e.altKey || e.ctrlKey || e.metaKey || e.key === 'Tab') return;
 
       if (e.code === 'Space') {
         // Let focused UI controls keep their native keyboard activation.
@@ -183,15 +190,8 @@ export default function App() {
       } else if (e.key === 'F4') {
         e.preventDefault();
         state.toggleTacview3d();
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        const next = !(leftOpenRef.current || rightOpenRef.current);
-        setLeftOpen(next);
-        setRightOpen(next);
       } else if (e.key === 'Escape') {
-        if (state.activeModal !== 'none') {
-          state.setActiveModal('none');
-        } else if (state.interactionMode === 'draw_polygon') {
+        if (state.interactionMode === 'draw_polygon') {
           state.cancelPolygonDraw();
         } else if (state.interactionMode !== 'select') {
           state.setInteractionMode('select');
@@ -201,45 +201,39 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [toggleMapOnly]);
 
   const toggleLeft = useCallback(() => {
-    const next = !leftOpen;
-    setLeftOpen(next);
-    if (next && window.matchMedia('(max-width: 900px)').matches) {
-      setRightOpen(false);
-    }
-  }, [leftOpen]);
+    setPanels(({ order, inspector }) => ({ order: !order, inspector: (order || !isNarrowWorkspace()) && inspector }));
+  }, []);
 
   const toggleRight = useCallback(() => {
-    const next = !rightOpen;
-    setRightOpen(next);
-    if (next && window.matchMedia('(max-width: 900px)').matches) {
-      setLeftOpen(false);
-    }
-  }, [rightOpen]);
+    setPanels(({ order, inspector }) => ({ order: (inspector || !isNarrowWorkspace()) && order, inspector: !inspector }));
+  }, []);
 
   return (
     <div className="app-shell bg-[#050811] text-slate-100 select-none">
       {/* 顶栏：半实时推演时钟、想定切换、视角迷雾与工具入口 */}
       <TopCommandHeader
-        leftOpen={leftOpen}
-        rightOpen={rightOpen}
+        leftOpen={panels.order}
+        rightOpen={panels.inspector}
+        compact={compact}
         onToggleLeft={toggleLeft}
         onToggleRight={toggleRight}
+        onToggleMapOnly={toggleMapOnly}
       />
+      <ReplayPlayerBar />
 
       {/* 中间主体区：100%全屏 WebGL 态势地图为底，左右侧栏以半透明悬浮抽屉展开 */}
       <div className="workspace">
-        <div id="order-panel" className="workspace-pane order-pane" hidden={!leftOpen}>
+        <div id="order-panel" className="workspace-pane order-pane" hidden={!panels.order}>
           <LeftOrbatMissionSidebar />
         </div>
-        <main className="workspace-map-stage" data-left-open={leftOpen} data-right-open={rightOpen}>
-          <TacticalMapCanvas leftOpen={leftOpen} rightOpen={rightOpen} />
-          <ReplayPlayerBar />
-          <TutorialChecklistOverlay leftOpen={leftOpen} />
+        <main className="workspace-map-stage" data-left-open={panels.order} data-right-open={panels.inspector}>
+          <TacticalMapCanvas leftOpen={panels.order} rightOpen={panels.inspector} />
+          <TutorialChecklistOverlay leftOpen={panels.order} />
         </main>
-        <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!rightOpen}>
+        <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!panels.inspector}>
           <RightUnitTelemetryInspector />
         </div>
       </div>
