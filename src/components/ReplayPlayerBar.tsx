@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { FIXED_DT_SEC } from '../engine/determinism';
 import { FastForward, Pause, Play, StepForward, X } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import { Slider } from './ui/slider';
@@ -10,22 +11,37 @@ export const ReplayPlayerBar: React.FC = () => {
   const setReplayPlayerSpeed = useWargameStore((s) => s.setReplayPlayerSpeed);
   const seekReplayPlayer = useWargameStore((s) => s.seekReplayPlayer);
   const exitReplayPlayer = useWargameStore((s) => s.exitReplayPlayer);
+  const recording = replayPlayer?.recording;
+  const budgetMs = useRef(0);
+  const seekFrame = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!replayPlayer?.isPlaying) return;
+    budgetMs.current = 0;
+    return () => { if (seekFrame.current !== null) cancelAnimationFrame(seekFrame.current); };
+  }, [recording]);
+
+  useEffect(() => {
+    if (!recording || !replayPlayer?.isPlaying) return;
+    let last = performance.now();
     const timer = window.setInterval(() => {
-      const current = useWargameStore.getState().replayPlayer;
-      if (!current || !current.isPlaying) return;
-      const stepTicks = current.speed * 4;
-      const nextTick = Math.min(current.recording.untilTick, current.currentTick + stepTicks);
-      useWargameStore.getState().seekReplayPlayer(nextTick);
+      const store = useWargameStore.getState();
+      const current = store.replayPlayer;
+      if (!current?.isPlaying || current.recording !== recording) return;
+      const now = performance.now();
+      budgetMs.current += (now - last) * current.speed;
+      last = now;
+      const tickMs = FIXED_DT_SEC * 1000;
+      const stepTicks = Math.min(60, Math.floor(budgetMs.current / tickMs));
+      if (stepTicks === 0) return;
+      budgetMs.current -= stepTicks * tickMs;
+      store.seekReplayPlayer(Math.min(recording.untilTick, current.currentTick + stepTicks));
     }, 250);
     return () => window.clearInterval(timer);
-  }, [replayPlayer?.isPlaying, replayPlayer?.speed]);
+  }, [recording, replayPlayer?.isPlaying, replayPlayer?.speed]);
 
   if (!replayPlayer) return null;
 
-  const { recording, currentTick, isPlaying, speed } = replayPlayer;
+  const { recording: currentRecording, currentTick, isPlaying, speed } = replayPlayer;
   const utc = new Date(simTime).toISOString().slice(11, 19);
 
   return (
@@ -37,7 +53,7 @@ export const ReplayPlayerBar: React.FC = () => {
         <div className="flex items-center gap-2 text-amber-300 font-semibold">
           <span>REPLAY // 地图航迹回放</span>
           <span className="text-muted-foreground font-mono font-normal">
-            Tick {currentTick}/{recording.untilTick} · {utc}
+            Tick {currentTick}/{currentRecording.untilTick} · {utc}
           </span>
         </div>
         <button
@@ -52,9 +68,18 @@ export const ReplayPlayerBar: React.FC = () => {
       <Slider
         aria-label="回放播放器时间轴"
         min={0}
-        max={recording.untilTick}
+        max={currentRecording.untilTick}
         value={currentTick}
-        onChange={(e) => seekReplayPlayer(Number(e.target.value))}
+        onChange={(e) => {
+          const target = Number(e.target.value);
+          budgetMs.current = 0;
+          setReplayPlayerPlaying(false);
+          if (seekFrame.current !== null) cancelAnimationFrame(seekFrame.current);
+          seekFrame.current = requestAnimationFrame(() => {
+            seekFrame.current = null;
+            seekReplayPlayer(target);
+          });
+        }}
         rangeClassName="bg-amber-400"
       />
 
@@ -68,7 +93,7 @@ export const ReplayPlayerBar: React.FC = () => {
             <span>{isPlaying ? '暂停回放' : '播放回放'}</span>
           </button>
           <button
-            onClick={() => seekReplayPlayer(Math.min(recording.untilTick, currentTick + 20))}
+            onClick={() => seekReplayPlayer(Math.min(currentRecording.untilTick, currentTick + 20))}
             className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1 cursor-pointer"
             title="步进 +20 Tick (5秒)"
           >

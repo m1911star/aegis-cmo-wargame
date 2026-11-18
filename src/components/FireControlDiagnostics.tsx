@@ -113,8 +113,15 @@ export function FireControlDiagnostics({ contact }: { contact: TacticalContact }
           <div className="text-[11px] text-muted-foreground">
             中继 / 火控：{solution.supportSourceIds.map((id) => units[id]?.callsign).join('、') || '无有效支援'}
           </div>
-          {solution.hardBlockReasons.map((reason) => <p key={reason} className="text-[11px] text-rose-300">不可执行：{reason}</p>)}
-          {solution.riskWarnings.map((reason) => <p key={reason} className="text-[11px] text-amber-300">风险：{reason}</p>)}
+          {solution.hardBlockReasons[0] && <p className="text-[11px] text-rose-300">当前无法执行：{solution.hardBlockReasons[0]}</p>}
+          {solution.riskWarnings[0] && <p className="text-[11px] text-amber-300">需确认：{solution.riskWarnings[0]}</p>}
+          {(solution.hardBlockReasons.length > 1 || solution.riskWarnings.length > 1) && (
+            <details className="text-[11px] text-muted-foreground">
+              <summary>查看其余条件与风险</summary>
+              {solution.hardBlockReasons.slice(1).map((reason) => <p key={reason}>{reason}</p>)}
+              {solution.riskWarnings.slice(1).map((reason) => <p key={reason}>{reason}</p>)}
+            </details>
+          )}
           <Button
             size="sm"
             variant={risky ? 'warning' : 'default'}

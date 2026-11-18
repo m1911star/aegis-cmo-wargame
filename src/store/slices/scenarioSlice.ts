@@ -23,6 +23,7 @@ import {
   computeNextCampaignCarryover,
   createInitialCampaignState,
   type CampaignResupplyChoice,
+  type CampaignStageStart,
   type CampaignState,
 } from '../../scenarios/campaign';
 import { FORCE_PACKAGES, resolveEquipmentCatalog, validateCatalogIntegrity } from '../../db';
@@ -33,28 +34,32 @@ import { emitActionFeedback } from '../actionFeedbackBus';
 import {
   AUTOSAVE_STORAGE_KEY,
   advanceReplayRecordingIncremental,
-  captureBattleSave,
+  prepareBattleSave,
+  isApplyingBattleRecording,
   replayBattleRecording,
   restoreBattleSave,
   type BattleRecording,
   type BattleSnapshot,
 } from '../battleRecording';
+import { appendReplayKeyframe, compactReplayKeyframes } from '../replayKeyframes';
+import { readAutosave, writeAutosave } from '../autosaveStorage';
 import type { StoreGet, StoreSet, WargameStoreState } from '../types';
 
 export function createInitialStateFromScenario(
   definition: ScenarioDefinition,
   randomizeSpawns = false,
-  requestedSeed?: number
+  requestedSeed?: number,
+  campaignStart?: CampaignStageStart
 ) {
   const { scenario, catalog } = compileScenario(definition);
   const seed = requestedSeed ?? (randomizeSpawns ? crypto.getRandomValues(new Uint32Array(1))[0] : DEFAULT_SEED);
   if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new Error('Seed must be an unsigned 32-bit integer');
   const random = createRandomStream(seed);
-  const initialUnits = instantiateScenarioUnits(
-    scenario,
-    catalog,
-    random.next
-  );
+  const spawned = instantiateScenarioUnits(scenario, catalog, random.next);
+  const playerSide = campaignStart?.playerSide ?? 'RED';
+  const initialUnits = campaignStart
+    ? applyCampaignRuntimeCarryover(spawned, campaignStart.carryover, playerSide, catalog)
+    : spawned;
   const startTime = Date.parse(scenario.startTimeIso);
 
   const initialWorld = {
@@ -96,9 +101,7 @@ export function createInitialStateFromScenario(
 
   const warmup = initializeWorldContacts(initialWorld, catalog);
 
-  const firstRedUnitId =
-    Object.values(warmup.nextState.units).find((u) => u.side === 'RED')?.id ||
-    null;
+  const selectedUnitId = Object.values(warmup.nextState.units).find((u) => u.side === playerSide)?.id ?? null;
 
   return {
     scenario,
@@ -123,7 +126,7 @@ export function createInitialStateFromScenario(
       position: [...rp.position] as [number, number],
     })),
     score: warmup.nextState.score,
-    selectedUnitId: firstRedUnitId,
+    selectedUnitId,
     logs: [
       {
         id: `log_init_${startTime}`,
@@ -175,6 +178,18 @@ export function extractSimulationWorldState(s: WargameStoreState): SimulationWor
 
 export function createScenarioSlice(set: StoreSet, get: StoreGet) {
   const initialBoot = createInitialStateFromScenario(INFORMATION_EXERCISE);
+  let liveBattleBeforeReplay: WargameStoreState | undefined;
+  let autosaveGeneration = 0;
+  let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let latestAutosave = 0;
+  let autosaveAt = -Infinity;
+  let autosaveQueue = Promise.resolve();
+  const cancelQueuedAutosave = () => {
+    autosaveGeneration++;
+    if (autosaveTimer !== undefined) clearTimeout(autosaveTimer);
+    autosaveTimer = undefined;
+    autosaveAt = -Infinity;
+  };
 
   return {
     basemapMode: DEFAULT_BASEMAP,
@@ -184,7 +199,12 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     playerSide: 'RED' as const,
     playMode: 'command' as const,
     campaignState: null,
+    campaignStageStart: undefined,
     hasAutosave: readHasAutosave(),
+    refreshAutosaveAvailability: async () => {
+      if (typeof indexedDB === 'undefined') return;
+      try { if (await readAutosave()) set({ hasAutosave: true }); } catch { /* A manual export is still available. */ }
+    },
     replayPlayer: null,
     seed: initialBoot.seed,
     rngState: initialBoot.rngState,
@@ -202,7 +222,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     pendingRiskEngagement: null,
     setPlayerSide: (side: 'RED' | 'BLUE') => {
       const s = get();
-      if (s.tick !== 0 || s.timeScale !== 0 || s.playerSide === side) return;
+      if (s.campaignState || s.tick !== 0 || s.timeScale !== 0 || s.playerSide === side) return;
       const firstUnitId = Object.values(s.units).find((u) => u.side === side)?.id ?? null;
       set({
         playerSide: side,
@@ -476,15 +496,22 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       return { ok: true };
     },
 
-    loadScenario: (scenario: ScenarioDefinition, randomizeSpawns = false, seed?: number) => {
-      const boot = createInitialStateFromScenario(scenario, randomizeSpawns, seed);
+    loadScenario: (scenario: ScenarioDefinition, randomizeSpawns = false, seed?: number, campaignStart?: CampaignStageStart) => {
+      const boot = createInitialStateFromScenario(scenario, randomizeSpawns, seed, campaignStart);
+      const playerSide = campaignStart?.playerSide ?? 'RED';
+      const applyingRecording = isApplyingBattleRecording();
+      if (!applyingRecording) {
+        liveBattleBeforeReplay = undefined;
+        cancelQueuedAutosave();
+      }
       set((state) => {
         const exists = state.availableScenarios.some(
           (s) => s.id === scenario.id
         );
         return {
-          playerSide: 'RED', playMode: 'command', activePerspective: 'RED',
-          campaignState: null,
+          playerSide, playMode: 'command', activePerspective: playerSide,
+          campaignState: null, campaignStageStart: campaignStart,
+          replayPlayer: applyingRecording ? state.replayPlayer : null,
           seed: boot.seed, rngState: boot.rngState, tick: 0, pendingSimSeconds: 0,
           commandSequence: 0, commandHistory: [], replaySnapshots: [], objectiveProgress: {}, objectiveHoldProgress: {}, battleResult: undefined,
           creditedDamage: {}, detectedMissileIds: [], aar: boot.aar, pendingRiskEngagement: null,
@@ -529,21 +556,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     resetScenario: (randomizeSpawns = false) => {
       const current = get().currentScenario;
       const prevCampaign = get().campaignState;
-      get().loadScenario(current, randomizeSpawns, randomizeSpawns ? undefined : get().seed);
-      if (prevCampaign) {
-        const carriedUnits = applyCampaignRuntimeCarryover(
-          get().units,
-          prevCampaign.carryover,
-          prevCampaign.playerSide,
-          get().catalog
-        );
-        set({
-          campaignState: prevCampaign,
-          playerSide: prevCampaign.playerSide,
-          activePerspective: prevCampaign.playerSide,
-          units: carriedUnits,
-        });
-      }
+      get().loadScenario(current, randomizeSpawns, randomizeSpawns ? undefined : get().seed, get().campaignStageStart);
+      if (prevCampaign) set({ campaignState: prevCampaign });
     },
 
     startCampaign: (side?: 'RED' | 'BLUE') => {
@@ -552,13 +566,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       const firstStage = BUILTIN_CAMPAIGN_WESTPAC.stages[0];
       const base = BUILTIN_SCENARIOS.find((candidate) => candidate.id === firstStage.scenarioId) ?? BUILTIN_SCENARIOS[0];
       const stageScenario = buildCampaignStageScenario(base, campaignState.carryover, chosenSide, 0);
-      get().loadScenario(stageScenario, false, DEFAULT_SEED);
-      set({
-        campaignState,
-        playerSide: chosenSide,
-        activePerspective: chosenSide,
-        selectedUnitId: Object.values(get().units).find((u) => u.side === chosenSide)?.id ?? null,
-      });
+      get().loadScenario(stageScenario, false, DEFAULT_SEED, { playerSide: chosenSide, carryover: campaignState.carryover });
+      set({ campaignState });
     },
 
     advanceCampaignStage: (resupplyChoice: CampaignResupplyChoice = 'balanced') => {
@@ -601,51 +610,55 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         stageModifiers: [...nextCarryover.stageModifiers],
         carryover: nextCarryover,
       };
-      get().loadScenario(stageScenario, false, DEFAULT_SEED + nextIndex);
-      const carriedUnits = applyCampaignRuntimeCarryover(
-        get().units,
-        nextCarryover,
-        campaign.playerSide,
-        get().catalog
-      );
-      set({
-        campaignState: nextCampaignState,
-        playerSide: campaign.playerSide,
-        activePerspective: campaign.playerSide,
-        units: carriedUnits,
-        selectedUnitId: Object.values(carriedUnits).find((u) => u.side === campaign.playerSide)?.id ?? null,
-      });
+      get().loadScenario(stageScenario, false, DEFAULT_SEED + nextIndex, { playerSide: campaign.playerSide, carryover: nextCarryover });
+      set({ campaignState: nextCampaignState });
     },
 
     exitCampaign: () => set({ campaignState: null }),
 
     saveAutosaveCheckpoint: () => {
-      try {
-        if (typeof window === 'undefined' || !window.localStorage) return;
-        const save = captureBattleSave();
-        window.localStorage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify(save));
-        set({ hasAutosave: true });
-      } catch {
-        // Ignore storage quota or private mode failures.
-      }
+      if (typeof window === 'undefined' || get().replayPlayer || isApplyingBattleRecording()) return;
+      const state = get();
+      const generation = autosaveGeneration;
+      const sequence = ++latestAutosave;
+      if (autosaveTimer !== undefined) clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => {
+        autosaveTimer = undefined;
+        autosaveQueue = autosaveQueue.then(async () => {
+          if (generation !== autosaveGeneration || sequence !== latestAutosave) return;
+          try {
+            await writeAutosave(prepareBattleSave(state));
+            if (generation === autosaveGeneration && sequence === latestAutosave) set({ hasAutosave: true });
+          } catch (error) {
+            if (generation === autosaveGeneration && sequence === latestAutosave) {
+              emitActionFeedback('warning', `自动存档写入失败，旧档未更改：${error instanceof Error ? error.message : '未知错误'}`);
+            }
+          }
+        });
+      }, 0);
     },
 
-    restoreAutosaveCheckpoint: () => {
+    restoreAutosaveCheckpoint: async () => {
+      if (typeof window === 'undefined') return false;
+      const before = get();
       try {
-        if (typeof window === 'undefined' || !window.localStorage) return false;
-        const raw = window.localStorage.getItem(AUTOSAVE_STORAGE_KEY);
-        if (!raw) {
+        await autosaveQueue;
+        const current = await readAutosave().catch(() => undefined);
+        const legacy = current === undefined ? window.localStorage.getItem(AUTOSAVE_STORAGE_KEY) : null;
+        if (current === undefined && !legacy) {
           emitActionFeedback('warning', '未找到本地自动断点存档');
           return false;
         }
-        restoreBattleSave(JSON.parse(raw));
+        const after = get();
+        if (after.currentScenario !== before.currentScenario || after.tick !== before.tick || after.commandSequence !== before.commandSequence || after.replayPlayer) {
+          emitActionFeedback('warning', '当前局面已经变化，未恢复旧的断点');
+          return false;
+        }
+        restoreBattleSave(current ?? JSON.parse(legacy!));
         emitActionFeedback('info', '已恢复上局断点存档');
         return true;
       } catch (error) {
-        emitActionFeedback(
-          'error',
-          `断点存档恢复失败（版本或校验不匹配）：${error instanceof Error ? error.message : '未知错误'}`
-        );
+        emitActionFeedback('error', `断点存档恢复失败：${error instanceof Error ? error.message : '未知错误'}`);
         return false;
       }
     },
@@ -653,11 +666,14 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     startReplayPlayer: (recording: BattleRecording, startTick = 0) => {
       try {
         const clamped = Math.max(0, Math.min(startTick, recording.untilTick));
+        const original = liveBattleBeforeReplay ?? get();
         replayBattleRecording(recording, 60, clamped);
+        cancelQueuedAutosave();
         const enrichedRecording: BattleRecording =
           recording.snapshots && recording.snapshots.length > 0
             ? recording
-            : { ...recording, snapshots: structuredClone(get().replaySnapshots) };
+            : { ...recording, ...compactReplayKeyframes(get().replaySnapshots) };
+        liveBattleBeforeReplay = original;
         set({
           replayPlayer: { recording: enrichedRecording, currentTick: clamped, isPlaying: false, speed: 5 },
           activeModal: 'none',
@@ -701,9 +717,12 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
 
     exitReplayPlayer: () => {
       const player = get().replayPlayer;
-      set({ replayPlayer: null });
+      const original = liveBattleBeforeReplay;
+      liveBattleBeforeReplay = undefined;
+      if (original) set({ ...original, timeScale: 0, pendingSimSeconds: 0, activeModal: 'none' }, true);
+      else set({ replayPlayer: null });
       if (player) {
-        emitActionFeedback('info', '已退出地图回放模式');
+        emitActionFeedback('info', '已退出地图回放');
       }
     },
 
@@ -724,7 +743,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
 
     stepSingleTick: (dtSec = 2) => {
       const s = get();
-      if (s.battleResult) return;
+      if (s.battleResult || (s.replayPlayer && !isApplyingBattleRecording())) return;
       const world = extractSimulationWorldState(s);
       const result = advanceSimulation(
         world,
@@ -745,7 +764,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       let applied = false;
       const prevTick = get().tick;
       set((prev) => {
-        if (prev.battleResult) return prev;
+        if (prev.battleResult || (prev.replayPlayer && !isApplyingBattleRecording())) return prev;
         if (expectedTick !== undefined && prev.tick !== expectedTick) return prev;
         if (expectedCommandSequence !== undefined && prev.commandSequence !== expectedCommandSequence) return prev;
         if (expectedScenarioId !== undefined && prev.currentScenario.id !== expectedScenarioId) return prev;
@@ -755,8 +774,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         const crossedSnapshotBoundary =
           nextTick > prev.tick &&
           Math.floor(nextTick / SNAPSHOT_INTERVAL_TICKS) > Math.floor(prev.tick / SNAPSHOT_INTERVAL_TICKS);
-        if (crossedSnapshotBoundary && prev.replaySnapshots.length < 50) {
-          const snap: BattleSnapshot = structuredClone({
+        if (crossedSnapshotBoundary) {
+          const snap: BattleSnapshot = {
             tick: nextTick,
             startTime: result.nextState.startTime ?? prev.startTime,
             simTime: result.nextState.simTime,
@@ -783,8 +802,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
             playMode: prev.playMode,
             referencePoints: prev.referencePoints,
             commandSequence: prev.commandSequence,
-          });
-          replaySnapshots = [...prev.replaySnapshots, snap];
+          };
+          replaySnapshots = appendReplayKeyframe(prev.replaySnapshots, snap);
         }
         return {
           simTime: result.nextState.simTime,
@@ -821,7 +840,8 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       });
       if (applied && typeof window !== 'undefined' && !get().replayPlayer) {
         const after = get();
-        if (after.battleResult || Math.floor(after.tick / 120) > Math.floor(prevTick / 120)) {
+        if (after.battleResult || (after.tick > prevTick && performance.now() - autosaveAt >= 5000)) {
+          autosaveAt = performance.now();
           get().saveAutosaveCheckpoint();
         }
       }

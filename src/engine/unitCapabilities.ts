@@ -61,7 +61,8 @@ export function getUnitCapabilities(unit: RuntimeUnit) {
   const fireSev = sub?.fire ?? 0;
   const floodSev = sub?.flooding ?? 0;
 
-  const hpDisabled = !isActiveUnit(unit) || fraction <= disabledAt;
+  const active = isActiveUnit(unit);
+  const hpDisabled = !active || fraction <= disabledAt;
   const radarSiteBlinded = unit.category === 'radar_site' && sensorsInt <= 0.2;
   const airbaseRunwayCratered = unit.category === 'airbase' && weapInt <= 0.22;
   const disabled = hpDisabled || radarSiteBlinded || airbaseRunwayCratered;
@@ -74,18 +75,18 @@ export function getUnitCapabilities(unit: RuntimeUnit) {
 
   const baseRadar = disabled || sensorsInt <= 0.2 ? 0 : fraction <= 0.6 ? 0.75 : 1;
   const sensorMod = sensorsInt <= 0.2 ? 0 : sensorsInt < 0.65 ? sensorsInt / 0.65 : 1;
-  const radarFactor = Number((baseRadar * sensorMod).toFixed(3));
-  const sonarFactor = disabled || sensorsInt <= 0.2 ? 0 : Number(sensorMod.toFixed(3));
+  const radarFactor = baseRadar === 0 || sensorMod === 1 ? baseRadar : Number((baseRadar * sensorMod).toFixed(3));
+  const sonarFactor = disabled || sensorsInt <= 0.2 ? 0 : sensorMod === 1 ? 1 : Number(sensorMod.toFixed(3));
 
-  const baseSpeed = !isActiveUnit(unit) ? 0 : disabled ? 0.4 : fraction <= 0.6 ? 0.75 : 1;
+  const baseSpeed = !active ? 0 : disabled ? 0.4 : fraction <= 0.6 ? 0.75 : 1;
   const propMod =
     (propInt < 0.65 ? Math.max(0.2, propInt / 0.65) : 1) *
     (floodSev > 0.15 ? Math.max(0.25, 1 - floodSev * 0.65) : 1);
-  const speedFactor =
-    !isActiveUnit(unit) || baseSpeed === 0 ? 0 : Number((baseSpeed * propMod).toFixed(3));
+  const speedFactor = baseSpeed === 0 || propMod === 1 ? baseSpeed : Number((baseSpeed * propMod).toFixed(3));
 
   const weapReloadMod = weapInt < 0.65 ? 1 + (0.65 - weapInt) * 1.2 : 1;
-  const reloadFactor = Number(((fraction <= 0.6 ? 1.5 : 1) * weapReloadMod).toFixed(2));
+  const baseReload = fraction <= 0.6 ? 1.5 : 1;
+  const reloadFactor = weapReloadMod === 1 ? baseReload : Number((baseReload * weapReloadMod).toFixed(2));
 
   return {
     state:

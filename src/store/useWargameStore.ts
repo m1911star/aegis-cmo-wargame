@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { recordAarTick } from '../engine/aar';
 import { COMMAND_ACTIONS } from '../engine/determinism';
+import { isApplyingBattleRecording } from './battleRecording';
 import { createCommandSlice } from './slices/commandSlice';
 import { createMissionAndBuilderSlice } from './slices/missionAndBuilderSlice';
 import { createScenarioSlice, extractSimulationWorldState } from './slices/scenarioSlice';
@@ -29,6 +30,7 @@ export const useWargameStore = create<WargameStoreState>()(
       const action = state[name] as (...args: unknown[]) => void;
       Object.assign(state, { [name]: (...args: unknown[]) => {
         const before = get();
+        if (before.replayPlayer && !isApplyingBattleRecording()) return;
         action(...args);
         if (get() !== before) {
           const after = get();

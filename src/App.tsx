@@ -26,6 +26,8 @@ export default function App() {
   const battleResult = useWargameStore((s) => s.battleResult);
   const replayPlayer = useWargameStore((s) => s.replayPlayer);
 
+  useEffect(() => { void useWargameStore.getState().refreshAutosaveAvailability(); }, []);
+
   useEffect(() => {
     if (!battleResult) setDebriefDismissed(false);
   }, [battleResult]);

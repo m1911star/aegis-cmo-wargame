@@ -55,6 +55,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const hasAutosave = useWargameStore((s) => s.hasAutosave);
   const restoreAutosaveCheckpoint = useWargameStore((s) => s.restoreAutosaveCheckpoint);
   const exitReplayPlayer = useWargameStore((s) => s.exitReplayPlayer);
+  const replayOpen = useWargameStore((s) => s.replayPlayer !== null);
   const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
   const setPlayMode = useWargameStore((s) => s.setPlayMode);
@@ -117,8 +118,8 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           </button>
           <Select
             aria-label="控制席位"
-            title="开局选择控制席位；观察视角不会改变控制权"
-            disabled={hasStarted || timeScale !== 0}
+            title={campaignState ? '控制席位由战役开局选择固定' : '开局选择控制席位；观察视角不会改变控制权'}
+            disabled={replayOpen || Boolean(campaignState) || hasStarted || timeScale !== 0}
             value={playerSide}
             onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')}
             className="w-auto min-w-[90px] h-7 text-[11px]"
@@ -184,7 +185,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           {hasAutosave && !hasStarted && (
             <button
               type="button"
-              onClick={() => restoreAutosaveCheckpoint()}
+              onClick={() => { void restoreAutosaveCheckpoint(); }}
               className="toolbar-button toolbar-button-subtle text-emerald-300 border-emerald-500/30 hover:border-emerald-400/50 hover:bg-emerald-500/10"
               title="恢复浏览器本地自动保存的上一局断点"
             >
@@ -347,6 +348,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             <button
               type="button"
               onClick={() => stepSingleTick(5)}
+              disabled={replayOpen}
               title="单步推进 5 秒"
               className="toolbar-button toolbar-button-subtle"
             >
@@ -355,6 +357,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
             <button
               type="button"
               onClick={() => setTimeScale(timeScale === 0 ? 5 : 0)}
+              disabled={replayOpen}
               title="空格键：暂停或继续推演"
               className={`toolbar-button playback-toggle ${timeScale === 0 ? 'is-paused' : 'is-running'}`}
             >

@@ -15,7 +15,9 @@
     "test:e2e": "playwright test",
     "validate:db": "bun run scripts/validateDb.ts",
     "smoke:scenarios": "bun run scripts/smokeScenarios.ts",
-    "smoke:scenarios:check": "bun run scripts/smokeScenarios.ts --check"
+    "smoke:scenarios:check": "bun run scripts/smokeScenarios.ts --check",
+    "bench:engine": "bun run scripts/benchmarkEngine.ts",
+    "bench:browser": "bun run scripts/benchmarkBrowser.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",

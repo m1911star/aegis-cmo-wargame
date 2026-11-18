@@ -908,6 +908,35 @@ export function computeContactsOnly(
   return { contacts: nextContacts, logs: newLogs };
 }
 
+export function createMissileObservationCache(
+  units: Record<string, RuntimeUnit>, catalog: EquipmentCatalog, simTime: number,
+  activeUnits: readonly RuntimeUnit[], environment?: ScenarioEnvironment
+) {
+  const observers = new Map<SideId, RuntimeUnit[]>();
+  const byMissile = new Map<WeaponInFlight, Map<SideId, TacticalContact | undefined>>();
+  return (side: SideId, missile: WeaponInFlight, receiver?: RuntimeUnit): TacticalContact | undefined => {
+    let bySide = byMissile.get(missile);
+    if (!bySide) byMissile.set(missile, bySide = new Map());
+    if (!bySide.has(side)) {
+      let sideObservers = observers.get(side);
+      if (!sideObservers) observers.set(side, sideObservers = activeUnits.filter((unit) => unit.side === side));
+      bySide.set(side, observeMissile(side, missile, units, catalog, simTime, undefined, environment, false, sideObservers));
+    }
+    const contact = bySide.get(side);
+    if (!receiver || !contact) return contact;
+    const receiverHasDatalink = !!catalog.platforms[receiver.platformId]?.hasDatalink;
+    const sources = contact.sourceUnitIds?.filter((id) => id === receiver.id ||
+      (receiverHasDatalink && catalog.platforms[units[id].platformId]?.hasDatalink));
+    if (!sources?.length) return undefined;
+    return sources.length === contact.sourceUnitIds?.length ? contact : {
+      ...contact,
+      sourceUnitIds: sources,
+      fireControlSourceIds: sources,
+      detectedBySources: sources.map((id) => units[id].callsign),
+    };
+  };
+}
+
 export function observeMissile(
   side: SideId, missile: WeaponInFlight, units: Record<string, RuntimeUnit>,
   catalog: EquipmentCatalog, simTime: number, receiver?: RuntimeUnit, environment?: ScenarioEnvironment,

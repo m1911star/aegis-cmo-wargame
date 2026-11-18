@@ -225,8 +225,14 @@ describe('Snapshot-accelerated replay and resumable full-state save', () => {
     const withSnapshots = JSON.parse(JSON.stringify(captureBattleRecording()));
     const withoutSnapshots = { ...withSnapshots, snapshots: undefined };
     expect(withSnapshots.snapshots?.length).toBeGreaterThanOrEqual(1);
+    expect(withSnapshots.history.tracks.length).toBeGreaterThan(0);
+    expect(withSnapshots.snapshots.every((frame: Record<string, unknown>) => !('aar' in frame))).toBe(true);
     expect(replayBattleRecording(withSnapshots, 60)).toEqual(expected);
     expect(replayBattleRecording(withoutSnapshots, 60)).toEqual(expected);
+    const invalid = structuredClone(withSnapshots);
+    invalid.snapshots[0].history.tracks.count = invalid.history.tracks.length + 1;
+    expect(() => replayBattleRecording(invalid, 60)).toThrow('history range');
+    expect(canonicalBattleState()).toEqual(expected);
   });
 
   test('captures and restores resumable battle save and rejects tampered digests atomically', () => {

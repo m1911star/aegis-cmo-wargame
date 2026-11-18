@@ -59,12 +59,8 @@ export const CampaignTheaterModal: React.FC = () => {
     return computeCampaignResupplyDiff(baseCarryoverForPreview, selectedChoice);
   }, [baseCarryoverForPreview, selectedChoice]);
 
-  const canAdvanceNow = Boolean(
-    campaignState &&
-      battleResult &&
-      !campaignState.finished &&
-      campaignState.currentStageIndex + 1 < campaignState.totalStages
-  );
+  const canAdvanceNow = Boolean(campaignState && battleResult && !campaignState.finished);
+  const finalStage = !!campaignState && campaignState.currentStageIndex + 1 === campaignState.totalStages;
 
   return (
     <ModalShell className="max-w-4xl max-h-[90dvh] flex flex-col">
@@ -227,7 +223,7 @@ export const CampaignTheaterModal: React.FC = () => {
                   <Wrench className="w-3.5 h-3.5 text-cyan-300" />
                   <span>
                     战间后勤整备方案模拟与前后差值预览
-                    {battleResult ? '（本战已结算，可立即执行推进）' : '（基于当前战区账本推演预览）'}
+                    {canAdvanceNow ? '（确认后生效）' : '（账本预览）'}
                   </span>
                 </h4>
                 <span className="font-mono text-[11px] text-amber-300">
@@ -237,12 +233,14 @@ export const CampaignTheaterModal: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-1.5">
                 {CAMPAIGN_RESUPPLY_OPTIONS.map((opt) => {
-                  const affordable = baseCarryoverForPreview.supplyPoints >= opt.cost;
+                  const spent = Math.min(baseCarryoverForPreview.supplyPoints, opt.cost);
+                  const affordable = spent === opt.cost;
                   return (
                     <button
                       key={opt.id}
                       type="button"
                       onClick={() => setSelectedChoice(opt.id)}
+                      aria-pressed={selectedChoice === opt.id}
                       className={`text-left p-2 rounded border text-[10px] cursor-pointer transition-colors ${
                         selectedChoice === opt.id
                           ? 'border-cyan-400 bg-cyan-500/20 text-cyan-100'
@@ -252,7 +250,7 @@ export const CampaignTheaterModal: React.FC = () => {
                       <div className="flex items-center justify-between font-semibold">
                         <span>{opt.title}</span>
                         <span className={affordable ? 'font-mono text-amber-300' : 'font-mono text-rose-300'}>
-                          -{opt.cost}SP
+                          {spent} SP{affordable ? '' : '（折算）'}
                         </span>
                       </div>
                       <div className="mt-0.5 leading-snug opacity-85">{opt.summary}</div>
@@ -261,6 +259,9 @@ export const CampaignTheaterModal: React.FC = () => {
                 })}
               </div>
 
+              {selectedChoice === 'balanced' && baseCarryoverForPreview.supplyPoints === 0 && (
+                <p className="text-[11px] text-muted-foreground">无补给点时，均衡方案仍提供少量应急整备，不扣补给。</p>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono text-[11px]">
                 {[
                   {
@@ -345,7 +346,7 @@ export const CampaignTheaterModal: React.FC = () => {
             }}
           >
             <Play className="w-3.5 h-3.5" />
-            <span>执行整备并进入第 {(campaignState?.currentStageIndex ?? 0) + 2} 阶段</span>
+            <span>{finalStage ? '确认最终战役结算' : `执行整备并进入第 ${(campaignState?.currentStageIndex ?? 0) + 2} 阶段`}</span>
           </Button>
         )}
         <Button variant="secondary" onClick={() => setActiveModal('none')}>

@@ -3,7 +3,7 @@ import type { RecordedCommand } from '../engine/determinism';
 import type { FireControlSolution } from '../engine/fireControl';
 import type { SimulationStepResult } from '../engine/simulationEngine';
 import type { BasemapMode } from '../map/basemaps';
-import type { CampaignResupplyChoice, CampaignState } from '../scenarios/campaign';
+import type { CampaignResupplyChoice, CampaignStageStart, CampaignState } from '../scenarios/campaign';
 import type {
   ActivePerspective,
   AutoPauseSettings,
@@ -147,6 +147,7 @@ export interface WargameStoreState {
   playerSide: SideId;
   playMode: PlayMode;
   campaignState: CampaignState | null;
+  campaignStageStart: CampaignStageStart | undefined;
   seed: number;
   rngState: number;
   tick: number;
@@ -173,8 +174,9 @@ export interface WargameStoreState {
   dismissRiskEngagement: () => void;
   selectLogEntry: (logId: string) => void;
   hasAutosave: boolean;
+  refreshAutosaveAvailability: () => Promise<void>;
   saveAutosaveCheckpoint: () => void;
-  restoreAutosaveCheckpoint: () => boolean;
+  restoreAutosaveCheckpoint: () => Promise<boolean>;
   replayPlayer: { recording: BattleRecording; currentTick: number; isPlaying: boolean; speed: 1 | 5 | 15 } | null;
   startReplayPlayer: (recording: BattleRecording, startTick?: number) => void;
   setReplayPlayerPlaying: (playing: boolean) => void;
@@ -265,7 +267,7 @@ export interface WargameStoreState {
     mode?: 'merge' | 'replace'
   ) => { ok: boolean; error?: string; importedSummary?: string };
   resetCatalogToDefault: () => { ok: boolean; error?: string };
-  loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number) => void;
+  loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number, campaignStart?: CampaignStageStart) => void;
   resetScenario: (randomizeSpawns?: boolean) => void;
   startCampaign: (side?: 'RED' | 'BLUE') => void;
   advanceCampaignStage: (resupplyChoice?: CampaignResupplyChoice) => void;

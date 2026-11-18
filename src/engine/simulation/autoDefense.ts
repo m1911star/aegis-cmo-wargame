@@ -23,7 +23,7 @@ import { computeMissileTerrainDogleg, findShootAndScootDestination } from '../en
 import { getBearingDeg, calculateRadarHorizonKm } from '../geometry';
 import { launchGuidance } from '../guidance';
 import { effectiveDoctrine } from '../operations';
-import { observeMissile } from '../sensors';
+import { createMissileObservationCache } from '../sensors';
 import { compareRuntimeUnits, getUnitCapabilities, isActiveUnit } from '../unitCapabilities';
 import { recordWeaponLaunch } from '../unitConfiguration';
 import type { PauseTrigger } from './types';
@@ -64,6 +64,7 @@ export function runAutoDefense({
     .filter(isActiveUnit)
     .sort(compareRuntimeUnits);
 
+  const observeIncoming = createMissileObservationCache(units, catalog, nextSimTime, aliveUnits, environment);
   for (const shooter of aliveUnits) {
     const doctrine = effectiveDoctrine(shooter, missions);
     const shooterSpec = catalog.platforms[shooter.platformId];
@@ -99,15 +100,7 @@ export function runAutoDefense({
       );
 
       for (const incoming of incomingEnemyMissiles.sort((a, b) => a.id.localeCompare(b.id))) {
-        const missileContact = observeMissile(
-          shooter.side,
-          incoming,
-          units,
-          catalog,
-          nextSimTime,
-          shooter,
-          environment
-        );
+        const missileContact = observeIncoming(shooter.side, incoming, shooter);
         if (!missileContact) continue;
 
         if (!doctrine.automaticTargetDomains.includes(missileContact.domain) ||
@@ -438,21 +431,19 @@ export function runAutoDefense({
   }
 
   const detectedMissileIds: string[] = [];
+  const observeWarning = environment
+    ? createMissileObservationCache(units, catalog, nextSimTime, aliveUnits)
+    : observeIncoming;
+  const previousDetections = new Set(previousDetectedMissileIds);
   const sortedInFlight = Object.values(weaponsInFlight).sort((a, b) => a.id.localeCompare(b.id));
   for (const missile of sortedInFlight) {
     for (const side of ['RED', 'BLUE'] as const) {
       if (missile.side === side) continue;
-      const observed = observeMissile(
-        side,
-        missile,
-        units,
-        catalog,
-        nextSimTime
-      );
+      const observed = observeWarning(side, missile);
       if (!observed) continue;
       const key = `${side}:${missile.id}`;
       detectedMissileIds.push(key);
-      if (!previousDetectedMissileIds?.includes(key)) {
+      if (!previousDetections.has(key)) {
         logs.push({
           id: `missile_contact_${nextSimTime}_${key}`,
           simTime: nextSimTime,

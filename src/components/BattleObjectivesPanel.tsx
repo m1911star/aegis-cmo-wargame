@@ -22,7 +22,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const holdProgress = useShallow ? useWargameStore(useShallow((state) => state.objectiveHoldProgress)) : {};
   const result = useWargameStore((state) => state.battleResult);
   const campaignState = useWargameStore((state) => state.campaignState);
-  const advanceCampaignStage = useWargameStore((state) => state.advanceCampaignStage);
+  const setActiveModal = useWargameStore((state) => state.setActiveModal);
   // The display only changes once per whole visible second, not every physics tick.
   const elapsedDisplaySec = useWargameStore((state) =>
     Math.ceil((state.simTime - state.startTime) / 1000)
@@ -38,6 +38,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
     (scenario.victoryConditions?.durationSec ?? 0) - elapsedDisplaySec
   );
   const showDetails = expanded || !!result;
+  const nextRequired = !result && objectives.find((objective) => objective.required && progress[objective.id] !== 'achieved' && progress[objective.id] !== 'failed');
 
   return (
     <section className="p-2.5 rounded-lg border border-border bg-card/90 text-xs space-y-2 shadow-xs" aria-label="任务目标">
@@ -57,6 +58,7 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
           </span>
         )}
       </button>
+      {!showDetails && nextRequired && <p className="text-[11px] text-muted-foreground">待完成主要目标 · {nextRequired.title}</p>}
       {showDetails && (
         <div className="space-y-2 pt-1">
           {!objectives.length && (
@@ -138,12 +140,10 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
               </p>
               {campaignState && !campaignState.finished && (
                 <button
-                  onClick={() => advanceCampaignStage('balanced')}
+                  onClick={() => setActiveModal('campaign')}
                   className="toolbar-button text-cyan-300"
                 >
-                  {campaignState.currentStageIndex + 1 < campaignState.totalStages
-                    ? `推进至第 ${campaignState.currentStageIndex + 2} 阶段战役`
-                    : '结算全部战役战果'}
+                  打开战间整备
                 </button>
               )}
               {campaignState?.finished && (

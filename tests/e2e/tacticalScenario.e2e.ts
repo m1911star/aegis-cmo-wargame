@@ -176,6 +176,38 @@ test('captures and restores a resumable battle save and named save slot in Scena
   await expect(page.getByRole('button', { name: '开始推演' })).toBeVisible();
 });
 
+test('resumes a blue-side campaign checkpoint after reloading the browser', async ({ page }) => {
+  await page.getByRole('button', { name: '战区态势' }).click();
+  await page.getByRole('button', { name: '以蓝方开启战役' }).click();
+  await expect(page.getByRole('button', { name: '战役 1/5' })).toBeVisible();
+  await expect(page.getByLabel('控制席位')).toHaveValue('BLUE');
+  await expect(page.getByLabel('控制席位')).toBeDisabled();
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await page.getByRole('button', { name: '想定管理' }).click();
+  await page.getByLabel('存档槽备注名称').fill('战役 E2E');
+  await page.getByRole('button', { name: '新建断点存档槽' }).click();
+  await expect(page.getByText('战役 E2E')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: '战役模式' })).toBeVisible();
+  await page.getByRole('button', { name: '想定管理' }).click();
+  await page.getByRole('button', { name: '读档' }).click();
+  await expect(page.getByRole('button', { name: '战役 1/5' })).toBeVisible();
+  await expect(page.getByLabel('控制席位')).toHaveValue('BLUE');
+});
+
+test('restores the latest automatic checkpoint across a reload', async ({ page }) => {
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await page.getByLabel('重置当前想定').click();
+  await page.getByRole('button', { name: '取消' }).click();
+  await page.getByLabel('选择战役想定').selectOption('interactive_command_tutorial');
+  await page.getByRole('button', { name: '确认执行' }).click();
+  await expect(page.getByRole('button', { name: '恢复自动存档' })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: '恢复自动存档' }).click();
+  await expect(page.getByText(/^种子 \d+ · Tick 20$/)).toBeAttached();
+});
+
 test('requires confirmation before mid-battle reset and launches live map replay player', async ({ page }) => {
   await page.getByRole('button', { name: '+5秒' }).click();
   await page.getByLabel('重置当前想定').click();
@@ -184,9 +216,22 @@ test('requires confirmation before mid-battle reset and launches live map replay
 
   await page.getByRole('button', { name: '想定管理' }).click();
   await page.getByRole('button', { name: '生成指令重放 JSON' }).click();
+  const autosaveBefore = await page.evaluate(() => localStorage.getItem('aegis_cmo_autosave_v1'));
+  await page.getByLabel('回放时间轴').fill('0');
   await page.getByRole('button', { name: '启动地图航迹回放播放器' }).click();
-  await expect(page.getByLabel('地图航迹回放播放器')).toBeVisible();
-  await page.getByRole('button', { name: '退出回放' }).click();
+  const player = page.getByLabel('地图航迹回放播放器');
+  await expect(player).toContainText('Tick 0/20');
+  await page.clock.install();
+  await player.getByRole('button', { name: '1×', exact: true }).click();
+  await player.getByRole('button', { name: '播放回放' }).click();
+  await page.clock.runFor(1000);
+  await expect(player).toContainText('Tick 4/20');
+  await player.getByRole('button', { name: '暂停回放' }).click();
+  await page.clock.runFor(1000);
+  await expect(player).toContainText('Tick 4/20');
+  await player.getByRole('button', { name: '退出回放' }).click();
+  await expect(page.getByText(/^种子 \d+ · Tick 20$/)).toBeAttached();
+  expect(await page.evaluate(() => localStorage.getItem('aegis_cmo_autosave_v1'))).toBe(autosaveBefore);
 });
 
 test('filters equipment catalog and triggers manual countermeasure from inspector', async ({ page }) => {

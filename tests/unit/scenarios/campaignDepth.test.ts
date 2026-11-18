@@ -13,7 +13,7 @@ import {
 import { INFORMATION_EXERCISE } from '../../../src/scenarios/informationExercise';
 import { SCENARIO_EAST_SEA_THUNDER } from '../../../src/scenarios/builtinScenarios';
 import { SCENARIO_JOINT_AMPHIBIOUS_ASSAULT } from '../../../src/scenarios/jointAmphibiousScenario';
-import { captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../../src/store/battleRecording';
+import { captureBattleRecording, canonicalBattleState, captureBattleSave, computeCanonicalDigest, replayBattleRecording, restoreBattleSave } from '../../../src/store/battleRecording';
 import { useWargameStore as store } from '../../../src/store/useWargameStore';
 
 describe('Campaign strategic depth: supplyPoints, airbaseIntegrityPct, modifiers & resupply tradeoffs', () => {
@@ -202,6 +202,74 @@ describe('Campaign strategic depth: supplyPoints, airbaseIntegrityPct, modifiers
     expect(s2?.airbaseIntegrityPct).toBe(s2?.carryover.airbaseIntegrityPct);
     expect(s2?.stageModifiers).toEqual(s2?.carryover.stageModifiers);
     expect(SCENARIO_JOINT_AMPHIBIOUS_ASSAULT.id).toBeTruthy();
+  });
+
+  test('resumes an unsettled campaign checkpoint and applies the same resupply only once', () => {
+    store.getState().startCampaign('BLUE');
+    store.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
+    store.getState().stepSingleTick(905);
+    expect(store.getState().battleResult).toBeDefined();
+    const save = JSON.parse(JSON.stringify(captureBattleSave()));
+    store.getState().advanceCampaignStage('airframes');
+    const expectedCampaign = store.getState().campaignState;
+    const expectedWorld = canonicalBattleState();
+    expect(expectedCampaign?.currentStageIndex).toBe(1);
+    expect(expectedCampaign?.carryover.lastResupplyChoice).toBe('airframes');
+    expect(expectedWorld.playerSide).toBe('BLUE');
+
+    restoreBattleSave(save);
+    expect(store.getState().campaignState?.currentStageIndex).toBe(0);
+    store.getState().advanceCampaignStage('airframes');
+    expect(store.getState().campaignState).toEqual(expectedCampaign);
+    expect(canonicalBattleState()).toEqual(expectedWorld);
+    store.getState().advanceCampaignStage('airframes');
+    expect(store.getState().campaignState).toEqual(expectedCampaign);
+
+    store.getState().stepSingleTick(5);
+    const midStageWorld = canonicalBattleState();
+    const midStage = JSON.parse(JSON.stringify(captureBattleSave()));
+    store.getState().loadScenario(INFORMATION_EXERCISE, false, 777);
+    expect(restoreBattleSave(midStage)).toEqual(midStageWorld);
+    expect(store.getState().campaignState).toEqual(expectedCampaign);
+    const invalid = { ...midStage, campaign: { ...midStage.campaign, currentStageIndex: 2 } };
+    expect(() => restoreBattleSave(invalid)).toThrow('digest');
+    expect(canonicalBattleState()).toEqual(midStageWorld);
+    expect(store.getState().campaignState).toEqual(expectedCampaign);
+  });
+
+  test('reconstructs the start and early commands of a campaign recording without keyframes', () => {
+    for (const seat of ['BLUE', 'RED'] as const) {
+      store.getState().startCampaign(seat);
+      store.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
+      for (const stage of [0, 1]) {
+        expect(store.getState().campaignState?.currentStageIndex).toBe(stage);
+        if (stage === 1) store.getState().resetScenario();
+        const initial = canonicalBattleState();
+        store.getState().stepSingleTick(5);
+        const moved = canonicalBattleState();
+        if (stage === 1) restoreBattleSave(JSON.parse(JSON.stringify(captureBattleSave())));
+        if (stage === 0) store.getState().exitCampaign();
+        const { snapshots: _snapshots, ...recording } = captureBattleRecording();
+        const json = JSON.parse(JSON.stringify(recording));
+        expect(replayBattleRecording(json, 60, 0)).toEqual(initial);
+        expect(replayBattleRecording(json, 60)).toEqual(moved);
+        if (stage === 0) {
+          store.getState().startCampaign(seat);
+          store.getState().stepSingleTick(905);
+          store.getState().advanceCampaignStage('munitions');
+        }
+      }
+    }
+  });
+
+  test('restores a legacy ordinary battle without inventing campaign progress', () => {
+    store.getState().loadScenario(INFORMATION_EXERCISE, false, 777);
+    store.getState().stepSingleTick(5);
+    const current = captureBattleSave();
+    const legacy = { ...current, version: 1, digest: computeCanonicalDigest(current.snapshot) };
+    store.getState().startCampaign('RED');
+    expect(restoreBattleSave(JSON.parse(JSON.stringify(legacy)))).toEqual(current.snapshot);
+    expect(store.getState().campaignState).toBeNull();
   });
 
   test('computes resupply before/after diffs, hot-reloads CMO JSON catalog overlays, and replays draw_polygon commands deterministically', () => {

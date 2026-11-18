@@ -18,6 +18,7 @@ import {
   saveBattleToSlot,
   type SavedBattleSlot,
 } from '../../store/battleRecording';
+import { MAX_RECORDING_BYTES } from '../../store/replayKeyframes';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Button } from '../ui/button';
 import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
@@ -54,6 +55,7 @@ export const ScenarioIoModal: React.FC = () => {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [replayTick, setReplayTick] = useState(0);
+  const [fileRecording, setFileRecording] = useState<{ value: import('../../store/battleRecording').BattleRecording; label: string } | null>(null);
   const [customSeedInput, setCustomSeedInput] = useState(String(seed));
   const [randomizeSpawns, setRandomizeSpawns] = useState(false);
   const [saveSlots, setSaveSlots] = useState<SavedBattleSlot[]>(() => listBattleSaveSlots());
@@ -62,7 +64,8 @@ export const ScenarioIoModal: React.FC = () => {
   const displayedJson = jsonText || exportCurrentStateAsScenarioJson(currentScenario, units, {
     groups, missions, events, objectives, referencePoints, environment,
   });
-  const replayUntilTick = recordingUntilTick(displayedJson);
+  const replayUntilTick = fileRecording?.value.untilTick ?? recordingUntilTick(displayedJson);
+  const readRecording = () => fileRecording?.value ?? JSON.parse(displayedJson);
   const selectedReplayTick = replayUntilTick === undefined ? 0 : Math.min(replayTick, replayUntilTick);
 
   const downloadJsonFile = () => {
@@ -88,14 +91,34 @@ export const ScenarioIoModal: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const downloadRecording = async () => {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    const recording = captureBattleRecording();
+    const url = URL.createObjectURL(new Blob([JSON.stringify(recording)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${recording.scenario.id}.recording.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
+      if (file.size > MAX_RECORDING_BYTES) {
+        setJsonError('文件超过 32 MiB；请使用当前版本重新导出紧凑录像。');
+        return;
+      }
       const content = await file.text();
-      setJsonText(content);
-      const untilTick = recordingUntilTick(content);
-      if (untilTick !== undefined) setReplayTick(untilTick);
+      const parsed = JSON.parse(content);
+      if (parsed?.version === BATTLE_RECORDING_VERSION && Number.isSafeInteger(parsed.untilTick) && Array.isArray(parsed.commands)) {
+        setFileRecording({ value: parsed, label: file.name });
+        setReplayTick(parsed.untilTick);
+      } else {
+        setFileRecording(null);
+        setJsonText(content);
+      }
       setJsonError(null);
     } catch {
       setJsonError('读取本地 JSON 文件失败');
@@ -237,6 +260,7 @@ export const ScenarioIoModal: React.FC = () => {
           aria-label="想定或重放 JSON"
           value={displayedJson}
           onChange={(e) => {
+            setFileRecording(null);
             setJsonText(e.target.value);
             const untilTick = recordingUntilTick(e.target.value);
             if (untilTick !== undefined) setReplayTick(untilTick);
@@ -249,16 +273,20 @@ export const ScenarioIoModal: React.FC = () => {
         <div className="flex flex-wrap gap-2 items-center">
           <Button size="sm" variant="outline" onClick={() => {
             const recording = captureBattleRecording();
-            setJsonText(JSON.stringify(recording, null, 2));
+            const json = JSON.stringify(recording);
+            if (json.length > 256_000) setFileRecording({ value: recording, label: '当前战局的指令录像' });
+            else { setFileRecording(null); setJsonText(json); }
             setReplayTick(recording.untilTick);
             setJsonError(null);
           }}>生成指令重放 JSON</Button>
+          <Button size="sm" variant="outline" onClick={() => { void downloadRecording(); }}>下载指令录像</Button>
           <Button size="sm" variant="outline" onClick={() => {
-            try { replayBattleRecording(JSON.parse(displayedJson), 60); setActiveModal('none'); }
+            try { replayBattleRecording(readRecording(), 60); setActiveModal('none'); }
             catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
           }}>加载重放到记录末尾</Button>
           <Button size="sm" variant="outline" onClick={() => {
             const save = captureBattleSave();
+            setFileRecording(null);
             setJsonText(JSON.stringify(save, null, 2));
             setJsonError(null);
           }}>生成断点存档 JSON</Button>
@@ -275,6 +303,7 @@ export const ScenarioIoModal: React.FC = () => {
               <span>REPLAY TIMELINE</span>
               <span className="font-mono">Tick {selectedReplayTick} / {replayUntilTick}</span>
             </div>
+            {fileRecording && <p className="text-[11px] text-muted-foreground">{fileRecording.label} 已加载，可回放或跳转，不在编辑框展开。</p>}
             <Slider
               aria-label="回放时间轴"
               min={0}
@@ -284,7 +313,7 @@ export const ScenarioIoModal: React.FC = () => {
             />
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => {
-                try { replayBattleRecording(JSON.parse(displayedJson), 60, selectedReplayTick); setActiveModal('none'); }
+                try { replayBattleRecording(readRecording(), 60, selectedReplayTick); setActiveModal('none'); }
                 catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
               }}>
                 跳转至 Tick {selectedReplayTick}
@@ -294,8 +323,7 @@ export const ScenarioIoModal: React.FC = () => {
                 variant="warning"
                 onClick={() => {
                   try {
-                    const parsed = JSON.parse(displayedJson);
-                    startReplayPlayer(parsed, selectedReplayTick);
+                    startReplayPlayer(readRecording(), selectedReplayTick);
                   } catch (error) {
                     setJsonError(error instanceof Error ? error.message : '启动地图回放失败');
                   }

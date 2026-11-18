@@ -118,6 +118,11 @@ export interface CampaignCarryover {
   notes: string[];
 }
 
+export interface CampaignStageStart {
+  playerSide: 'RED' | 'BLUE';
+  carryover: CampaignCarryover;
+}
+
 export interface CampaignState {
   campaignId: string;
   title: string;
