@@ -6,6 +6,7 @@
 |---|---|---|
 | [`../README.md`](../README.md) | 项目概览、运行方式、架构、内置想定与质量命令 | 随当前主分支更新 |
 | [`../GAMEPLAY.md`](../GAMEPLAY.md) | 权限、有限信息、火控、资源、任务、重放等玩法契约 | 规则变化时同步更新 |
+| [游戏方向与试玩门槛](superpowers/plans/game-direction.md) | 默认短局已交付的体验，以及何时投入下一阶段 | 真人试玩后更新 |
 | [`SCENARIO_SMOKE_RESULTS.json`](SCENARIO_SMOKE_RESULTS.json) | 全部内置想定的固定种子无命令终局摘要 | 由 `bun run smoke:scenarios` 生成 |
 
 装备与想定数量以 `bun run validate:db` 输出为准。测试通过数、覆盖率和烟测结果不在多个 Markdown 文件中重复维护，避免阶段性数字被误认为当前状态。
