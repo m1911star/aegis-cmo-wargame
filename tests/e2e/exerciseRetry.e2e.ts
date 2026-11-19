@@ -29,6 +29,20 @@ test('restarts the same blue exercise from its result, without replacing the ran
   await expect(result.getByRole('button', { name: '同条件再试' })).toBeVisible();
 });
 
+test('shows the blue opening instead of the inspector after a narrow-screen retry', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByText('更多工具', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await page.getByRole('dialog', { name: '战后结算与评估' }).getByRole('button', { name: '同条件再试' }).click();
+  const card = page.getByRole('region', { name: '演练开局' });
+  await expect(card.getByText('蓝方主要目标', { exact: true })).toBeInViewport();
+  await expect(page.locator('#inspector-panel')).toBeHidden();
+  await expect(page.locator('#order-panel')).toBeHidden();
+  await expect(page.getByRole('button', { name: '开始推演', exact: true })).toBeEnabled();
+  await card.getByRole('button', { name: /查看接触/ }).click();
+  await expect(page.getByRole('region', { name: '详情' })).toBeFocused();
+});
+
 test('returns from full review to the result that opened it, not to an already dismissed result', async ({ page }) => {
   await page.getByRole('button', { name: '+5秒' }).click();
   const result = page.getByRole('dialog', { name: '战后结算与评估' });

@@ -69,14 +69,17 @@ export default function App() {
   useEffect(() => useWargameStore.subscribe(
     (s) => [s.selectedContactId ?? s.selectedUnitId, s.playerSide] as const,
     ([selection, side], [, previousSide]) => {
-      if (showOpening && side !== previousSide && isNarrowWorkspace()) {
-        setPanels(initialPanels());
-      } else if (selection) {
-        openInspector();
+      if (side !== previousSide && isNarrowWorkspace()) {
+        const opening = selectOpeningScenario(useWargameStore.getState());
+        if (opening && opening !== dismissedOpening) {
+          setPanels(initialPanels());
+          return;
+        }
       }
+      if (selection) openInspector();
     },
     { equalityFn: shallow },
-  ), [openInspector, showOpening]);
+  ), [openInspector, dismissedOpening]);
 
   useEffect(() => {
     if (panels.inspector && focusInspector.current) {
