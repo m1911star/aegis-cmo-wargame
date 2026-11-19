@@ -198,9 +198,9 @@ button svg, summary svg { flex-shrink: 0; }
   z-index: 16;
   left: 12px;
   right: 12px;
-  bottom: 60px;
+  bottom: 76px;
   max-width: 20rem;
-  max-height: calc(100% - 172px);
+  max-height: calc(100% - 188px);
   overflow: auto;
   display: grid;
   gap: 8px;
