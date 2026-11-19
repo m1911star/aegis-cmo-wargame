@@ -39,14 +39,14 @@ describe('first exercise card projection', () => {
   test('shows the primary goal and only the observing seat’s report', () => {
     const contacts = { [blueContact.id]: blueContact, [redContact.id]: redContact };
     expect(projectFirstExerciseCard('RED', objectives, contacts)).toEqual({
-      primaryGoal: '使演练目标失能或被摧毁',
+      primaryGoal: '取得演习标志船的接触',
       contact: {
         id: 'red-track', displayName: '观测接触 A', classification: 'classified',
         estimatedPosition: [125, 25], uncertaintyRadiusKm: 20,
       },
     });
     expect(projectFirstExerciseCard('BLUE', objectives, contacts)).toEqual({
-      primaryGoal: '保护演练目标能力至结束',
+      primaryGoal: '让标志船抵达交接点',
       contact: {
         id: 'blue-track', displayName: '观测接触 B', classification: 'unknown',
         estimatedPosition: [125, 25], uncertaintyRadiusKm: 20,
@@ -55,7 +55,7 @@ describe('first exercise card projection', () => {
   });
 
   test('shows the goal without intel when the seat has no contact', () => {
-    const goalOnly = { primaryGoal: '使演练目标失能或被摧毁' };
+    const goalOnly = { primaryGoal: '取得演习标志船的接触' };
     expect(projectFirstExerciseCard('RED', objectives, {})).toEqual(goalOnly);
     expect(projectFirstExerciseCard('RED', objectives, { [blueContact.id]: blueContact })).toEqual(goalOnly);
   });

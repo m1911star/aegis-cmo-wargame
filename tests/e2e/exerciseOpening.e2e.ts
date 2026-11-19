@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-const redGoal = '使演练目标失能或被摧毁';
-const blueGoal = '保护演练目标能力至结束';
+const redGoal = '取得演习标志船的接触';
+const blueGoal = '让标志船抵达交接点';
 const redContact = 'SKUNK-303 [疑似大型水面舰]';
 const blueContact = 'RED-ONE · Type 052DL Luyang III';
 const openingName = '演练开局';

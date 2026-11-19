@@ -1649,8 +1649,7 @@ describe('Deterministic replay and scenario contracts', () => {
     store.getState().loadScenario(INFORMATION_EXERCISE, false, 7); store.setState({ autoPause: pausesOff });
     store.getState().stepSingleTick(1000);
     expect(store.getState().simTime - store.getState().startTime).toBe(900000);
-    expect(store.getState().battleResult?.outcomes.RED).toBe('defeat');
-    expect(store.getState().battleResult?.outcomes.BLUE).toBe('victory');
+    expect(store.getState().battleResult?.outcomes).toEqual({ RED: 'defeat', BLUE: 'defeat' });
   });
 
   test('an incompatible replay rolls back the entire current battle', () => {

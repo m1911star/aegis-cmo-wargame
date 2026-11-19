@@ -403,7 +403,7 @@
       "terminalReason": "time_limit",
       "outcomes": {
         "RED": "defeat",
-        "BLUE": "victory"
+        "BLUE": "defeat"
       },
       "losses": {
         "red": 0,
@@ -418,20 +418,26 @@
         "blue": 0
       },
       "score": {
-        "red": 40,
-        "blue": 120
+        "red": 0,
+        "blue": 40
       },
       "sortiesLaunched": 0,
-      "events": [],
+      "events": [
+        {
+          "id": "exercise_midpoint",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        }
+      ],
       "sortieOrders": {
         "pending": 0,
         "failed": []
       },
       "objectives": {
         "red_primary": "failed",
-        "red_preserve": "achieved",
-        "blue_primary": "achieved",
-        "blue_observe": "achieved"
+        "red_return": "failed",
+        "blue_primary": "failed",
+        "blue_preserve": "achieved"
       },
       "aarEvents": 0,
       "finiteState": true
