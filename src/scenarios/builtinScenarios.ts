@@ -19,6 +19,7 @@ export { SCENARIO_BASHI_CHANNEL_BLOCKADE } from './bashiChannelBlockade';
 import { SCENARIO_INTERACTIVE_TUTORIAL } from './tutorialScenario';
 import { SCENARIO_JOINT_AMPHIBIOUS_ASSAULT } from './jointAmphibiousScenario';
 import { SCENARIO_INLAND_AIR_LAND } from './inlandAirLandScenario';
+import { SCENARIO_FOG_BAY_RELAY } from './fogBayRelayScenario';
 
 // ============================================================================
 // AEGIS-CMO // 内置战役想定剧本库 v2.0
@@ -1364,6 +1365,7 @@ export const BUILTIN_SCENARIOS: ScenarioDefinition[] = [
   SCENARIO_BASHI_CHANNEL_BLOCKADE,
   SCENARIO_JOINT_AMPHIBIOUS_ASSAULT,
   SCENARIO_INLAND_AIR_LAND,
+  SCENARIO_FOG_BAY_RELAY,
   INFORMATION_EXERCISE,
   SCENARIO_INTERACTIVE_TUTORIAL,
 ];

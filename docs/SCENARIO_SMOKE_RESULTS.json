@@ -3,7 +3,7 @@
     "fixedStepSec": 0.25,
     "commandMode": "no-command",
     "recordingVersion": 2,
-    "scenarios": 7
+    "scenarios": 8
   },
   "summaries": [
     {
@@ -391,6 +391,55 @@
         "inland_blue_preserve_airbase": "achieved"
       },
       "aarEvents": 67,
+      "finiteState": true
+    },
+    {
+      "scenarioId": "op_fog_bay_relay",
+      "title": "《雾湾接力》 · 海陆空联合短局",
+      "seed": 8642,
+      "tick": 8400,
+      "elapsedSec": 2100,
+      "configuredDurationSec": 2100,
+      "terminalReason": "time_limit",
+      "outcomes": {
+        "RED": "costly_victory",
+        "BLUE": "defeat"
+      },
+      "losses": {
+        "red": 1,
+        "blue": 1
+      },
+      "missilesFired": {
+        "red": 68,
+        "blue": 74
+      },
+      "interceptions": {
+        "red": 18,
+        "blue": 16
+      },
+      "score": {
+        "red": 350,
+        "blue": 280
+      },
+      "sortiesLaunched": 2,
+      "events": [
+        {
+          "id": "fog_red_landing",
+          "fireCount": 1,
+          "lastFiredElapsedSec": null
+        }
+      ],
+      "sortieOrders": {
+        "pending": 0,
+        "failed": []
+      },
+      "objectives": {
+        "fog_red_handoff": "achieved",
+        "fog_blue_handoff": "failed",
+        "fog_red_airfield_offline": "failed",
+        "fog_blue_airfield_online": "achieved"
+      },
+      "aarEvents": 114,
       "finiteState": true
     },
     {

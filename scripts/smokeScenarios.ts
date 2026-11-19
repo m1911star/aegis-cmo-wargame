@@ -7,6 +7,7 @@ const SEEDS: Record<string, number> = {
   op_bashi_channel_blockade_2029: 7373,
   op_joint_amphibious_assault_2027: 8484,
   op_inland_mountain_strike_2027: 9595,
+  op_fog_bay_relay: 8642,
   limited_information_exercise: 6262,
   interactive_command_tutorial: 1010,
 };
