@@ -1,15 +1,18 @@
 import { expect, test } from '@playwright/test';
 import { INFORMATION_EXERCISE } from '../../src/scenarios/informationExercise';
 
-test('restarts the same blue exercise from its result, without replacing the random restart', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
   await page.route('https://tiles.openfreemap.org/**', (route) => route.abort());
   await page.goto('/');
   await page.getByRole('button', { name: '想定管理' }).click();
   const exercise = { ...INFORMATION_EXERCISE, victoryConditions: { ...INFORMATION_EXERCISE.victoryConditions!, durationSec: 5 } };
   await page.getByLabel('想定或重放 JSON').fill(JSON.stringify(exercise));
   await page.getByRole('button', { name: '校验并热加载此想定' }).click();
+  await page.getByLabel('控制席位').selectOption('BLUE');
+});
+
+test('restarts the same blue exercise from its result, without replacing the random restart', async ({ page }) => {
   const seat = page.getByLabel('控制席位');
-  await seat.selectOption('BLUE');
   const step = page.getByRole('button', { name: '+5秒' });
   const opening = await page.getByText(/^种子 \d+ · Tick 0$/).textContent();
   expect(opening).toBeTruthy();
@@ -24,4 +27,28 @@ test('restarts the same blue exercise from its result, without replacing the ran
   await expect(page.getByRole('button', { name: '开始推演', exact: true })).toBeEnabled();
   await step.click();
   await expect(result.getByRole('button', { name: '同条件再试' })).toBeVisible();
+});
+
+test('returns from full review to the result that opened it, not to an already dismissed result', async ({ page }) => {
+  await page.getByRole('button', { name: '+5秒' }).click();
+  const result = page.getByRole('dialog', { name: '战后结算与评估' });
+  const review = page.getByRole('dialog', { name: '战后复盘' });
+  await result.getByRole('button', { name: /查看完整复盘/ }).click();
+  await expect(review).toBeVisible();
+  await expect(result).toBeHidden();
+  await review.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(result.getByRole('button', { name: '同条件再试' })).toBeVisible();
+  await result.getByRole('button', { name: /查看完整复盘/ }).click();
+  await expect(review).toBeFocused();
+  await page.keyboard.press('Escape');
+  await result.getByRole('button', { name: '同条件再试' }).click();
+  await expect(page.getByLabel('控制席位')).toHaveValue('BLUE');
+  await expect(page.getByRole('region', { name: '演练开局' })).toBeVisible();
+
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await result.getByRole('button', { name: '关闭终局结算' }).click();
+  await page.getByRole('button', { name: '战后复盘', exact: true }).click();
+  await review.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(review).toBeHidden();
+  await expect(result).toBeHidden();
 });

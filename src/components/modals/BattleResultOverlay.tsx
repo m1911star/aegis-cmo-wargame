@@ -119,10 +119,7 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
         <ModalFooter>
           <Button
             variant="outline"
-            onClick={() => {
-              onDismiss();
-              setActiveModal('aar');
-            }}
+            onClick={() => setActiveModal('aar')}
             className="text-amber-300"
           >
             <ChartColumn className="w-3.5 h-3.5" /><span>查看完整复盘 (AAR)</span>

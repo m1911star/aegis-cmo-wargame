@@ -41,6 +41,7 @@ export default function App() {
   const focusInspector = useRef(false);
 
   const battleResult = useWargameStore((s) => s.battleResult);
+  const modalOpen = useWargameStore((s) => s.activeModal !== 'none');
   const replayPlayer = useWargameStore((s) => s.replayPlayer);
   const openingScenario = useWargameStore(selectOpeningScenario);
   const showOpening = openingScenario !== null && openingScenario !== dismissedOpening;
@@ -289,7 +290,7 @@ export default function App() {
 
       {/* 模态框：战役简报、装备数据库、实时兵力投放、想定 JSON 序列化 */}
       <TacticalModals />
-      {battleResult && !replayPlayer && !debriefDismissed && (
+      {battleResult && !replayPlayer && !modalOpen && !debriefDismissed && (
         <BattleResultOverlay onDismiss={() => setDebriefDismissed(true)} />
       )}
       <ActionFeedbackToast />
