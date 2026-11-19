@@ -1,6 +1,8 @@
 import React from 'react';
 import { Award, ChartColumn, Compass, RotateCcw } from 'lucide-react';
 import { evaluateBattleAssessment } from '../../engine/simulation/battleAssessment';
+import { INFORMATION_EXERCISE } from '../../scenarios/informationExercise';
+import { exerciseClock, projectExerciseDebrief } from '../../ui/exerciseDebrief';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Button } from '../ui/button';
 import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
@@ -24,11 +26,17 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const objectives = useWargameStore((s) => s.objectives);
   const objectiveProgress = useWargameStore((s) => s.objectiveProgress);
   const campaignState = useWargameStore((s) => s.campaignState);
+  const playMode = useWargameStore((s) => s.playMode);
+  const logs = useWargameStore((s) => s.logs);
+  const events = useWargameStore((s) => s.aar.events);
+  const startTime = useWargameStore((s) => s.startTime);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const resetScenario = useWargameStore((s) => s.resetScenario);
   if (!battleResult) return null;
 
   const side = playerSide === 'BLUE' ? 'BLUE' : 'RED';
+  const shortExercise = currentScenario.id === INFORMATION_EXERCISE.id && playMode === 'command' && !campaignState;
+  const debrief = shortExercise ? projectExerciseDebrief(side, objectives, objectiveProgress, logs, events) : [];
   const outcome = battleResult.outcomes[side];
   const assessment = evaluateBattleAssessment(score, currentScenario.victoryConditions);
   const sideObjectives = objectives.filter((obj) => obj.side === side);
@@ -52,11 +60,23 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
         <div className="p-5 space-y-4 text-xs max-h-[78dvh] overflow-y-auto">
           <div className="p-3.5 rounded-lg bg-amber-500/8 border border-amber-500/25 space-y-1">
             <div className="text-base font-semibold text-amber-300">{OUTCOME_LABELS[outcome]}</div>
+            {shortExercise ? (
+              <section aria-label="本局结算依据" className="space-y-1.5">
+                <p>{exerciseClock(battleResult.endedAt, startTime)} · {battleResult.reason === 'time_limit' ? '演练时限结束' : '关键目标决定终局'}</p>
+                {debrief.map(({ id, title, status, moment }) => (
+                  <div key={id}>
+                    <p className="font-medium">主要目标{status === 'achieved' ? '已达成' : status === 'failed' ? '未达成' : '未结算'} · {title}</p>
+                    {moment && <p className="text-muted-foreground">{exerciseClock(moment.simTime, startTime)} · {moment.label}</p>}
+                  </div>
+                ))}
+              </section>
+            ) : (
+              <div className="text-muted-foreground">
+                终止原因：{battleResult.reason === 'critical_objective' ? '关键目标决定终局' : '到达想定预设时间上限'}
+                {failedRequired.length > 0 && ` · 未达成主要目标：${failedRequired.map((o) => o.title).join('；')}`}
+              </div>
+            )}
             <div className="text-cyan-300">积分评级：{assessment.summary}（红 {score.redScore} : 蓝 {score.blueScore}）</div>
-            <div className="text-muted-foreground">
-              终止原因：{battleResult.reason === 'critical_objective' ? '关键目标决定终局' : '到达想定预设时间上限'}
-              {failedRequired.length > 0 && ` · 未达成主要目标：${failedRequired.map((o) => o.title).join('；')}`}
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
