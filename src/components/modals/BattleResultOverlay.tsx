@@ -39,7 +39,9 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const shortExercise = currentScenario.id === INFORMATION_EXERCISE.id && playMode === 'command' && !campaignState;
   const debrief = shortExercise ? projectExerciseDebrief(side, objectives, objectiveProgress, logs, events) : [];
   const outcome = battleResult.outcomes[side];
-  const assessment = evaluateBattleAssessment(score, currentScenario.victoryConditions);
+  const scoreSummary = shortExercise
+    ? `积分：红方 ${score.redScore} · 蓝方 ${score.blueScore}`
+    : `积分评级：${evaluateBattleAssessment(score, currentScenario.victoryConditions).summary}（红 ${score.redScore} : 蓝 ${score.blueScore}）`;
   const sideObjectives = objectives.filter((obj) => obj.side === side);
   const failedRequired = sideObjectives.filter((obj) => obj.required && objectiveProgress[obj.id] !== 'achieved');
 
@@ -77,7 +79,7 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
                 {failedRequired.length > 0 && ` · 未达成主要目标：${failedRequired.map((o) => o.title).join('；')}`}
               </div>
             )}
-            <div className="text-cyan-300">积分评级：{assessment.summary}（红 {score.redScore} : 蓝 {score.blueScore}）</div>
+            <div className="text-cyan-300">{scoreSummary}</div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

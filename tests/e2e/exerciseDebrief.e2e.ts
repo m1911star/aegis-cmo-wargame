@@ -15,6 +15,10 @@ test('explains a no-command exercise at its deadline and opens the full debrief 
   await expect(evidence).toContainText('15:00 · 演练时限结束', { timeout: 55_000 });
   await expect(evidence).toContainText('主要目标未达成');
   await expect(evidence).not.toContainText('目标达成记录');
+  const result = page.getByRole('dialog', { name: '战后结算与评估' });
+  await expect(result).toContainText('任务失利');
+  await expect(result).not.toContainText('STRATEGIC DRAW');
+  await expect(result).toContainText('积分：红方 0 · 蓝方 40');
   await page.getByRole('button', { name: '查看完整复盘 (AAR)' }).click();
   await expect(page.getByRole('dialog', { name: '战后复盘' })).toBeVisible();
 });
