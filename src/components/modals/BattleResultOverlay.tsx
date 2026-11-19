@@ -32,6 +32,7 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const startTime = useWargameStore((s) => s.startTime);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const resetScenario = useWargameStore((s) => s.resetScenario);
+  const retryExercise = useWargameStore((s) => s.retryExercise);
   if (!battleResult) return null;
 
   const side = playerSide === 'BLUE' ? 'BLUE' : 'RED';
@@ -126,6 +127,11 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
           >
             <ChartColumn className="w-3.5 h-3.5" /><span>查看完整复盘 (AAR)</span>
           </Button>
+          {shortExercise && (
+            <Button onClick={() => { if (retryExercise()) onDismiss(); }}>
+              <RotateCcw className="w-3.5 h-3.5" /><span>同条件再试</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => {

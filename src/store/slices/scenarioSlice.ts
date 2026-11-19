@@ -560,6 +560,14 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       if (prevCampaign) set({ campaignState: prevCampaign });
     },
 
+    retryExercise: () => {
+      const s = get();
+      if (!s.battleResult || s.currentScenario.id !== INFORMATION_EXERCISE.id || s.playMode !== 'command' || s.campaignState || s.replayPlayer) return false;
+      s.resetScenario();
+      if (s.playerSide === 'BLUE') get().setPlayerSide('BLUE');
+      return true;
+    },
+
     startCampaign: (side?: 'RED' | 'BLUE') => {
       const chosenSide: 'RED' | 'BLUE' = side ?? (get().playerSide === 'BLUE' ? 'BLUE' : 'RED');
       const campaignState = createInitialCampaignState(BUILTIN_CAMPAIGN_WESTPAC, chosenSide);

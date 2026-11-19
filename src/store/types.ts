@@ -269,6 +269,7 @@ export interface WargameStoreState {
   resetCatalogToDefault: () => { ok: boolean; error?: string };
   loadScenario: (scenario: ScenarioDefinition, randomizeSpawns?: boolean, seed?: number, campaignStart?: CampaignStageStart) => void;
   resetScenario: (randomizeSpawns?: boolean) => void;
+  retryExercise: () => boolean;
   startCampaign: (side?: 'RED' | 'BLUE') => void;
   advanceCampaignStage: (resupplyChoice?: CampaignResupplyChoice) => void;
   exitCampaign: () => void;
