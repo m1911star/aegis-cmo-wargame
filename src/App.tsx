@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import { extractSimulationWorldState, useWargameStore } from './store/useWargameStore';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { shallow } from 'zustand/shallow';
+import { extractSimulationWorldState, useWargameStore, type WargameStoreState } from './store/useWargameStore';
+import { INFORMATION_EXERCISE } from './scenarios/informationExercise';
+import type { ScenarioDefinition } from './types/wargame';
 import { simulationWorkerClient } from './engine/workerClient';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
@@ -9,6 +12,7 @@ import { TacticalModals } from './components/TacticalModals';
 import { TacticalMapCanvas } from './map/TacticalMapCanvas';
 import { RiskEngagementDialog } from './components/FireControlDiagnostics';
 import { TutorialChecklistOverlay } from './components/TutorialChecklistOverlay';
+import { FirstExerciseCard } from './components/FirstExerciseCard';
 import { ActionFeedbackToast } from './components/ActionFeedbackToast';
 import { ReplayPlayerBar } from './components/ReplayPlayerBar';
 import { BattleResultOverlay } from './components/modals/BattleResultOverlay';
@@ -23,13 +27,23 @@ const initialPanels = (): WorkspacePanels => {
   return { order: wide, inspector: wide };
 };
 
+const selectOpeningScenario = (s: WargameStoreState) => (
+  s.currentScenario.id === INFORMATION_EXERCISE.id && s.playMode === 'command' && !s.campaignState &&
+  s.tick === 0 && s.timeScale === 0 && s.pendingSimSeconds === 0 && !s.replayPlayer && !s.battleResult
+) ? s.currentScenario : null;
+
 export default function App() {
   const [panels, setPanels] = useState(initialPanels);
   const [compact, setCompact] = useState(isNarrowWorkspace);
   const [debriefDismissed, setDebriefDismissed] = useState(false);
+  const [dismissedOpening, setDismissedOpening] = useState<ScenarioDefinition | null>(null);
+  const inspectorRef = useRef<HTMLDivElement>(null);
+  const focusInspector = useRef(false);
 
   const battleResult = useWargameStore((s) => s.battleResult);
   const replayPlayer = useWargameStore((s) => s.replayPlayer);
+  const openingScenario = useWargameStore(selectOpeningScenario);
+  const showOpening = openingScenario !== null && openingScenario !== dismissedOpening;
 
   useEffect(() => { void useWargameStore.getState().refreshAutosaveAvailability(); }, []);
 
@@ -47,14 +61,28 @@ export default function App() {
     return () => narrow.removeEventListener('change', onResize);
   }, []);
 
+  const openInspector = useCallback(() => {
+    setPanels((current) => ({ order: !isNarrowWorkspace() && current.order, inspector: true }));
+  }, []);
+
   useEffect(() => useWargameStore.subscribe(
-    (s) => s.selectedContactId ?? s.selectedUnitId,
-    (selection) => {
-      if (selection) {
-        setPanels((current) => ({ order: !isNarrowWorkspace() && current.order, inspector: true }));
+    (s) => [s.selectedContactId ?? s.selectedUnitId, s.playerSide] as const,
+    ([selection, side], [, previousSide]) => {
+      if (showOpening && side !== previousSide && isNarrowWorkspace()) {
+        setPanels(initialPanels());
+      } else if (selection) {
+        openInspector();
       }
+    },
+    { equalityFn: shallow },
+  ), [openInspector, showOpening]);
+
+  useEffect(() => {
+    if (panels.inspector && focusInspector.current) {
+      focusInspector.current = false;
+      inspectorRef.current?.focus({ preventScroll: true });
     }
-  ), []);
+  }, [panels]);
 
   useEffect(() => useWargameStore.subscribe(
     (s) => s.currentScenario,
@@ -232,8 +260,25 @@ export default function App() {
         <main className="workspace-map-stage" data-left-open={panels.order} data-right-open={panels.inspector}>
           <TacticalMapCanvas leftOpen={panels.order} rightOpen={panels.inspector} />
           <TutorialChecklistOverlay leftOpen={panels.order} />
+          {showOpening && !(compact && (panels.order || panels.inspector)) && (
+            <FirstExerciseCard
+              onDismiss={() => setDismissedOpening(openingScenario)}
+              onContactOpened={() => {
+                focusInspector.current = true;
+                openInspector();
+              }}
+            />
+          )}
         </main>
-        <div id="inspector-panel" className="workspace-pane inspector-pane" hidden={!panels.inspector}>
+        <div
+          ref={inspectorRef}
+          id="inspector-panel"
+          role="region"
+          aria-label="详情"
+          tabIndex={-1}
+          className="workspace-pane inspector-pane"
+          hidden={!panels.inspector}
+        >
           <RightUnitTelemetryInspector />
         </div>
       </div>
