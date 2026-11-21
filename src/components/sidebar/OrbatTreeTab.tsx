@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Anchor, ChevronDown, ChevronRight, Plane, Shield, Ship } from 'lucide-react';
 import { useWargameStore } from '../../store/useWargameStore';
 import type { Domain, RuntimeUnit } from '../../types/wargame';
@@ -17,8 +17,10 @@ function DomainIcon({ domain }: { domain: Domain }) {
   }
 }
 
-export const OrbatTreeTab: React.FC = () => {
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+export const OrbatTreeTab: React.FC<{
+  collapsedGroups: Record<string, boolean>;
+  setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+}> = ({ collapsedGroups, setCollapsedGroups }) => {
   const groups = useWargameStore((s) => s.groups);
   const units = useWargameStore((s) => s.units);
   const activePerspective = useWargameStore((s) => s.activePerspective);
@@ -55,7 +57,8 @@ export const OrbatTreeTab: React.FC = () => {
         return (
           <div key={group.id} className="rounded-lg border border-border bg-card/75 overflow-hidden shadow-xs">
             <button
-              onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group.id]: !isCollapsed }))}
+              aria-expanded={!isCollapsed}
+              onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group.id]: !prev[group.id] }))}
               className={`w-full px-2.5 py-2 flex items-center justify-between text-left cursor-pointer transition-colors ${
                 isRed
                   ? 'bg-rose-500/10 hover:bg-rose-500/15 border-b border-border text-rose-200'

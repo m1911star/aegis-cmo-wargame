@@ -36,7 +36,7 @@ bun run docs:api                                 # ignored output at docs/api/
 ## Simulation invariants
 
 - Engine/simulation code must not use `Math.random()`, `Date.now()`, or `performance.now()`. Use `world.rngState`/`createRandomStream`, deterministic tick/sequence-derived IDs, and `simTime`/`FIXED_DT_SEC`.
-- Every store action that mutates simulation state must be listed in `COMMAND_ACTIONS` in `src/engine/determinism.ts`. The wrapper records replay commands and increments `commandSequence`, which invalidates stale worker batches.
+- Every in-battle command that mutates simulation state must be listed in `COMMAND_ACTIONS` in `src/engine/determinism.ts`. The wrapper records replay commands and increments the battle-local `commandSequence`. Worker request epochs are separate; writeback must also match the original session and batch inputs.
 - Never mutate an `EquipmentCatalog` in place. Unit-resolution caches and worker catalog transfer deduplication are keyed by catalog object identity; construct a new object (or `structuredClone` in tests).
 - Runtime performance, sensors, and mounts require platform + active loadout resolution through `resolveUnitConfiguration(...)`; do not read `PlatformSpec` alone.
 - Enforce command ownership in store actions with `canCommandUnit(...)`, not only in UI controls. `activePerspective` is view-only; sandbox mode is the explicit cross-side authority bypass.
@@ -53,7 +53,7 @@ bun run docs:api                                 # ignored output at docs/api/
 
 ## Persistence and tests
 
-- Do not conflate the three persistence contracts: scenario export is a clean restart (`compileScenario`), battle save is a resumable digest-checked checkpoint, and Recording v2 is command history plus snapshots (`src/store/battleRecording.ts`).
+- Do not conflate the three persistence contracts: scenario export validates a clean restart (`compileScenario`), battle save is a resumable digest-checked checkpoint, and recording is command history plus snapshots (`src/store/battleRecording.ts`). Save and recording share the immutable opening definition, not the live edited terrain.
 - Prefer injected deterministic RNG, `WorkerLike`, or fetch callbacks over global module mocks. Clone `MASTER_EQUIPMENT_CATALOG` before test mutation.
 - `useWargameStore` is a singleton. Headless tests should reload a scenario with an explicit seed and disable all auto-pause triggers before stepping.
 

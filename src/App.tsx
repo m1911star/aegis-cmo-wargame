@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { shallow } from 'zustand/shallow';
-import { extractSimulationWorldState, useWargameStore, type WargameStoreState } from './store/useWargameStore';
+import { useWargameStore, type WargameStoreState } from './store/useWargameStore';
+import { runSimulationBatch, selectSimulationSession } from './store/simulationBatch';
+import { emitActionFeedback } from './store/actionFeedbackBus';
 import { INFORMATION_EXERCISE } from './scenarios/informationExercise';
 import type { ScenarioDefinition } from './types/wargame';
-import { simulationWorkerClient } from './engine/workerClient';
+import { FIXED_DT_SEC } from './engine/determinism';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftOrbatMissionSidebar } from './components/LeftOrbatMissionSidebar';
 import { RightUnitTelemetryInspector } from './components/RightUnitTelemetryInspector';
@@ -22,10 +24,13 @@ const NARROW_WORKSPACE = '(max-width: 900px)';
 const isNarrowWorkspace = () => window.matchMedia(NARROW_WORKSPACE).matches;
 
 type WorkspacePanels = { order: boolean; inspector: boolean };
+const MAP_ONLY_PANELS: WorkspacePanels = { order: false, inspector: false };
 const initialPanels = (): WorkspacePanels => {
   const wide = !isNarrowWorkspace();
   return { order: wide, inspector: wide };
 };
+
+const isCompactRouteEditor = (s: WargameStoreState) => isNarrowWorkspace() && s.interactionMode === 'plot_waypoint';
 
 const selectOpeningScenario = (s: WargameStoreState) => (
   s.currentScenario.id === INFORMATION_EXERCISE.id && s.playMode === 'command' && !s.campaignState &&
@@ -39,10 +44,15 @@ export default function App() {
   const [dismissedOpening, setDismissedOpening] = useState<ScenarioDefinition | null>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
   const focusInspector = useRef(false);
+  const restorePlotFocus = useRef(false);
 
   const battleResult = useWargameStore((s) => s.battleResult);
   const modalOpen = useWargameStore((s) => s.activeModal !== 'none');
   const replayPlayer = useWargameStore((s) => s.replayPlayer);
+  const plottingRoute = useWargameStore((s) => s.interactionMode === 'plot_waypoint');
+  const compactRouteEditor = compact && plottingRoute;
+  // Temporarily reveal the map without changing the user's drawer layout or unit selection.
+  const visiblePanels = compactRouteEditor ? MAP_ONLY_PANELS : panels;
   const openingScenario = useWargameStore(selectOpeningScenario);
   const showOpening = openingScenario !== null && openingScenario !== dismissedOpening;
 
@@ -87,11 +97,16 @@ export default function App() {
   ), [openInspector, dismissedOpening]);
 
   useEffect(() => {
-    if (panels.inspector && focusInspector.current) {
+    if (compactRouteEditor) {
+      restorePlotFocus.current = panels.inspector;
+      return;
+    }
+    if (visiblePanels.inspector && (focusInspector.current || restorePlotFocus.current)) {
       focusInspector.current = false;
       inspectorRef.current?.focus({ preventScroll: true });
     }
-  }, [panels]);
+    restorePlotFocus.current = false;
+  }, [panels, visiblePanels, compactRouteEditor]);
 
   useEffect(() => useWargameStore.subscribe(
     (s) => s.currentScenario,
@@ -111,45 +126,35 @@ export default function App() {
     let backlog = 0;
     let workerBusy = false;
     let cancelled = false;
+    let clockGeneration = 0;
+    // Discard time from a different session or pause, even if React batches a pause/resume.
+    const unsubscribe = useWargameStore.subscribe(
+      (s) => [selectSimulationSession(s), s.timeScale, s.replayPlayer !== null] as const,
+      () => { backlog = 0; last = performance.now(); clockGeneration++; },
+      { equalityFn: shallow },
+    );
     // Speed changes the time budget, never the engine's atomic step. Keep lag rather than skip ticks.
     const timer = window.setInterval(() => {
+      const s = useWargameStore.getState();
+      if (s.timeScale !== timeScale || s.battleResult || s.replayPlayer) return;
       const now = performance.now();
       backlog += (now - last) * timeScale / 1000;
       last = now;
-      const s = useWargameStore.getState();
-      if (s.timeScale !== timeScale || s.battleResult) return;
       if (timeScale >= 15 && typeof Worker !== 'undefined') {
         if (workerBusy) return;
         const budget = Math.min(15, backlog);
-        if (budget + s.pendingSimSeconds + 1e-9 < 0.25) return;
+        if (budget + s.pendingSimSeconds + 1e-9 < FIXED_DT_SEC) return;
         workerBusy = true;
-        const expectedTick = s.tick;
-        const expectedSeq = s.commandSequence;
-        const expectedScenarioId = s.currentScenario.id;
-        void simulationWorkerClient
-          .runBatch(
-            extractSimulationWorldState(s),
-            s.catalog,
-            budget + s.pendingSimSeconds,
-            s.autoPause,
-            s.playerSide,
-            expectedSeq
-          )
-          .then((result) => {
-            if (cancelled) return;
-            const applied = useWargameStore
-              .getState()
-              .applySimulationResult(result, expectedTick, expectedSeq, expectedScenarioId);
-            if (applied) {
-              backlog = Math.max(0, backlog - budget);
-            } else if (useWargameStore.getState().currentScenario.id !== expectedScenarioId) {
-              backlog = 0;
-            }
+        const generation = clockGeneration;
+        const isLoopActive = () => !cancelled && clockGeneration === generation;
+        void runSimulationBatch(s, budget, isLoopActive)
+          .then((applied) => {
+            if (applied && isLoopActive()) backlog = Math.max(0, backlog - budget);
           })
-          .catch(() => {
-            if (!cancelled) {
-              backlog = Math.max(0, backlog - budget);
-              stepSingleTick(budget);
+          .catch((error: unknown) => {
+            if (isLoopActive()) {
+              useWargameStore.getState().setTimeScale(0);
+              emitActionFeedback('error', `推演已暂停：${error instanceof Error ? error.message : '无法推进当前状态'}`);
             }
           })
           .finally(() => {
@@ -165,10 +170,12 @@ export default function App() {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      unsubscribe();
     };
   }, [timeScale, stepSingleTick]);
 
   const toggleMapOnly = useCallback(() => {
+    if (isCompactRouteEditor(useWargameStore.getState())) return;
     setPanels((current) => {
       const show = !current.order && !current.inspector;
       return { order: show, inspector: show && !isNarrowWorkspace() };
@@ -252,9 +259,10 @@ export default function App() {
     <div className="app-shell bg-[#050811] text-slate-100 select-none">
       {/* 顶栏：半实时推演时钟、想定切换、视角迷雾与工具入口 */}
       <TopCommandHeader
-        leftOpen={panels.order}
-        rightOpen={panels.inspector}
+        leftOpen={visiblePanels.order}
+        rightOpen={visiblePanels.inspector}
         compact={compact}
+        panelsLocked={compactRouteEditor}
         onToggleLeft={toggleLeft}
         onToggleRight={toggleRight}
         onToggleMapOnly={toggleMapOnly}
@@ -263,13 +271,13 @@ export default function App() {
 
       {/* 中间主体区：100%全屏 WebGL 态势地图为底，左右侧栏以半透明悬浮抽屉展开 */}
       <div className="workspace">
-        <div id="order-panel" className="workspace-pane order-pane" hidden={!panels.order}>
-          <LeftOrbatMissionSidebar onUnitDetails={openFocusedInspector} />
+        <div id="order-panel" className="workspace-pane order-pane" hidden={!visiblePanels.order}>
+          <LeftOrbatMissionSidebar open={visiblePanels.order} onUnitDetails={openFocusedInspector} />
         </div>
-        <main className="workspace-map-stage" data-left-open={panels.order} data-right-open={panels.inspector}>
-          <TacticalMapCanvas leftOpen={panels.order} rightOpen={panels.inspector} />
-          <TutorialChecklistOverlay leftOpen={panels.order} />
-          {showOpening && !(compact && (panels.order || panels.inspector)) && (
+        <main className="workspace-map-stage" data-left-open={visiblePanels.order} data-right-open={visiblePanels.inspector}>
+          <TacticalMapCanvas leftOpen={visiblePanels.order} rightOpen={visiblePanels.inspector} compact={compact} />
+          <TutorialChecklistOverlay leftOpen={visiblePanels.order} />
+          {showOpening && !compactRouteEditor && !(compact && (panels.order || panels.inspector)) && (
             <FirstExerciseCard
               onDismiss={() => setDismissedOpening(openingScenario)}
               onContactOpened={openFocusedInspector}
@@ -283,9 +291,9 @@ export default function App() {
           aria-label="详情"
           tabIndex={-1}
           className="workspace-pane inspector-pane"
-          hidden={!panels.inspector}
+          hidden={!visiblePanels.inspector}
         >
-          <RightUnitTelemetryInspector />
+          <RightUnitTelemetryInspector open={visiblePanels.inspector} />
         </div>
       </div>
       <DraggableTacviewViewport />

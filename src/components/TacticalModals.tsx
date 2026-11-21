@@ -45,7 +45,8 @@ export const TacticalModals: React.FC = () => {
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.defaultPrevented) return;
-        if (event.key === 'Escape' && !event.currentTarget.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) {
+        // Nested controls (such as Select popups) handle and consume their own Escape first.
+        if (event.key === 'Escape') {
           event.preventDefault();
           setActiveModal('none');
           return;

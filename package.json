@@ -11,7 +11,7 @@
     "test": "bun test",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
-    "test:coverage": "bun test tests/unit tests/integration --coverage --coverage-reporter=text --coverage-reporter=lcov && bun run scripts/checkEngineCoverage.ts",
+    "test:coverage": "rm -f coverage/lcov.info && bun test tests/unit tests/integration --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage && bun run scripts/checkEngineCoverage.ts",
     "test:e2e": "playwright test",
     "validate:db": "bun run scripts/validateDb.ts",
     "smoke:scenarios": "bun run scripts/smokeScenarios.ts",

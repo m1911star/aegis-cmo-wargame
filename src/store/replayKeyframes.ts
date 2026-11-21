@@ -1,4 +1,5 @@
 import type { BattleAarLedger } from '../types/wargame';
+import { invalid, isRecord } from '../validation/schema';
 import type { BattleSnapshot } from './battleRecording';
 
 interface ArchiveWindow { offset: number; count: number }
@@ -61,16 +62,22 @@ export function compactReplayKeyframes(snapshots: readonly BattleSnapshot[]) {
   return { snapshots: frames, history: { events: events.data, tracks: tracks.data } };
 }
 
-export function inflateReplayKeyframe(frame: BattleSnapshot | CompactKeyframe, history?: BattleAarLedger): BattleSnapshot {
-  if ('aar' in frame) return structuredClone(frame);
-  const { history: window, ...state } = frame;
-  if (!history || !Array.isArray(history.events) || !Array.isArray(history.tracks)) throw new Error('Missing recording history');
-  const read = <T>(range: ArchiveWindow, rows: T[]) => {
-    if (!range || !Number.isSafeInteger(range.offset) || !Number.isSafeInteger(range.count) ||
-        range.offset < 0 || range.count < 0 || range.offset + range.count > rows.length) {
-      throw new Error('Invalid recording history range');
+export function checkKeyframeHistory(frame: CompactKeyframe, history: BattleAarLedger | undefined, path: string) {
+  if (!history) invalid(path, 'missing recording history');
+  for (const key of ['events', 'tracks'] as const) {
+    const window: unknown = frame.history[key];
+    if (!isRecord(window) || typeof window.offset !== 'number' || typeof window.count !== 'number' ||
+        !Number.isSafeInteger(window.offset) || !Number.isSafeInteger(window.count) ||
+        window.offset < 0 || window.count < 0 || window.offset + window.count > history[key].length) {
+      invalid(`${path}.${key}`, 'invalid history range');
     }
-    return rows.slice(range.offset, range.offset + range.count);
-  };
-  return structuredClone({ ...state, aar: { events: read(window?.events, history.events), tracks: read(window?.tracks, history.tracks) } });
+  }
+}
+
+export function inflateReplayKeyframe(frame: BattleSnapshot | CompactKeyframe, history?: BattleAarLedger): BattleSnapshot {
+  if ('aar' in frame) return frame;
+  const { history: window, ...state } = frame;
+  checkKeyframeHistory(frame, history, 'recording.snapshot.history');
+  const read = <T>({ offset, count }: ArchiveWindow, rows: T[]) => rows.slice(offset, offset + count);
+  return { ...state, aar: { events: read(window.events, history!.events), tracks: read(window.tracks, history!.tracks) } };
 }

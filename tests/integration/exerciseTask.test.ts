@@ -44,7 +44,7 @@ function commandsOnly() {
   return recording;
 }
 
-test('invalid orders have no history and a real seat switch clears a Tick 0 plan', () => {
+test('invalid orders have no history and an exercise plan locks the seat and mode until restart', () => {
   begin();
   const feedback: string[] = [];
   const unsubscribe = subscribeActionFeedback((next) => { if (next) feedback.push(next.message); });
@@ -75,6 +75,24 @@ test('invalid orders have no history and a real seat switch clears a Tick 0 plan
     expect(state().commandHistory).toBe(planned);
 
     state().setPlayerSide('BLUE');
+    state().setPlayMode('sandbox');
+    state().setPlayMode('command');
+    expect(state()).toMatchObject({ playerSide: 'RED', playMode: 'command' });
+    expect(task()).toBe(redPlan);
+    expect(state().commandHistory).toBe(planned);
+
+    state().stopExerciseTask();
+    const stopped = task();
+    const stoppedHistory = state().commandHistory;
+    state().setPlayMode('sandbox');
+    state().setPlayerSide('BLUE');
+    state().planExerciseTask(redScout, 0, 20);
+    expect(task()).toBe(stopped);
+    expect(stopped?.end).toEqual({ reason: 'cancelled', tick: 0 });
+    expect(state().commandHistory).toBe(stoppedHistory);
+    expect(replayBattleRecording(commandsOnly()).exerciseTask).toEqual(stopped);
+
+    begin('BLUE');
     expect(task()).toBeUndefined();
     state().planExerciseTask(blueGuard, 0, 20);
     expect(task()).toBeUndefined();
@@ -83,8 +101,7 @@ test('invalid orders have no history and a real seat switch clears a Tick 0 plan
     state().reassignExerciseTask(blueGuard);
     expect(task()).toBe(bluePlan);
     expect(replayBattleRecording(commandsOnly()).exerciseTask).toEqual(bluePlan);
-    state().setPlayerSide('RED');
-    expect(task()).toBeUndefined();
+    begin();
     state().setPlayMode('sandbox');
     const sandbox = state().commandHistory;
     state().planExerciseTask(redScout, 0, 20);
@@ -173,7 +190,8 @@ test('a report at the inclusive close counts, including the final tick of an exe
   state().stopExerciseTask();
   state().planExerciseTask(redShip, 4, 5);
   expect(state().commandHistory).toBe(history);
-  expect(replayBattleRecording(commandsOnly()).exerciseTask).toEqual(task());
+  const completed = task();
+  expect(replayBattleRecording(commandsOnly()).exerciseTask).toEqual(completed);
 });
 
 test('a manual stop at a keyframe round-trips through compact replay and saves', () => {
@@ -187,9 +205,11 @@ test('a manual stop at a keyframe round-trips through compact replay and saves',
   const expected = canonicalBattleState();
   const endedSave = jsonRoundTrip(captureBattleSave());
   const recording = jsonRoundTrip(captureBattleRecording());
+  expect(recording.version).toBe(3);
   expect(recording.snapshots?.[0]).toMatchObject({ tick: 240, exerciseTask: scheduled });
   expect(expected.exerciseTask).toMatchObject({ phase: 'stopped', end: { reason: 'cancelled', tick: 240 } });
   expect(replayBattleRecording(recording, 60)).toEqual(expected);
+  expect(replayBattleRecording({ ...recording, version: 2 }, 60)).toEqual(expected);
   const invalidRecording = structuredClone(recording);
   Object.assign(invalidRecording.snapshots![0].exerciseTask!, { assignedUnitId: blueMarker });
   expect(() => replayBattleRecording(invalidRecording, 60)).toThrow('invalid friendly assignment');
@@ -202,6 +222,39 @@ test('a manual stop at a keyframe round-trips through compact replay and saves',
   state().updateUnitDoctrine(redScout, { emconRadar: true });
   step(1);
   expect(task()).toMatchObject({ phase: 'completed', end: { reason: 'marker_report', tick: 242 } });
+});
+
+test('legacy v2 seat and mode resets can still replay and recapture faithfully as v3', () => {
+  begin();
+  const recording = commandsOnly();
+  expect(recording.version).toBe(2);
+  recording.untilTick = 2;
+  recording.commands = [
+    { tick: 0, sequence: 0, action: 'planExerciseTask', args: [redScout, 0, 20] },
+    { tick: 0, sequence: 1, action: 'setPlayerSide', args: ['BLUE'] },
+    { tick: 0, sequence: 2, action: 'planExerciseTask', args: [blueMarker, 0, 20] },
+    { tick: 1, sequence: 3, action: 'setPlayMode', args: ['sandbox'] },
+    { tick: 1, sequence: 4, action: 'setPlayMode', args: ['command'] },
+  ];
+  expect(replayBattleRecording(recording, 60, 0).exerciseTask?.assignedUnitId).toBe(blueMarker);
+  const end = replayBattleRecording(recording, 60);
+  expect(end).toMatchObject({ playerSide: 'BLUE', playMode: 'command', commandSequence: 5 });
+  expect(end.exerciseTask).toBeUndefined();
+  restoreBattleSave(jsonRoundTrip(captureBattleSave()));
+  const restoredHistory = state().commandHistory;
+  state().planExerciseTask(blueMarker, 2, 20);
+  expect(task()).toBeUndefined();
+  expect(state().commandHistory).toBe(restoredHistory);
+  const recaptured = commandsOnly();
+  expect(recaptured).toMatchObject({ version: 3, legacyExerciseResets: true });
+  expect(replayBattleRecording(recaptured, 60)).toEqual(end);
+  expect(() => replayBattleRecording({ ...recaptured, legacyExerciseResets: undefined }, 60)).toThrow('recording.commands');
+
+  state().startReplayPlayer(recaptured, 0);
+  expect(task()?.assignedUnitId).toBe(blueMarker);
+  state().seekReplayPlayer(2);
+  expect(canonicalBattleState()).toEqual(end);
+  state().exitReplayPlayer();
 });
 
 test('Worker batches carry task evidence and a task command rejects an in-flight batch', () => {
@@ -278,18 +331,22 @@ test('Blue cannot claim a receipt before opening, during pause, or after a task 
   expect(task()?.end).toEqual({ reason: 'window_closed', tick: 1 });
 });
 
-test('exercise-free v2 saves and recordings keep the persisted bytes from base 3591e63', () => {
+test('reads the historical ordinary v2 save and still emits the original ordinary v2 recording bytes', () => {
   begin('BLUE');
   state().setPlayMode('sandbox');
   state().setPlayMode('command');
   step(240);
   const save = jsonRoundTrip(captureBattleSave());
   const recording = jsonRoundTrip(captureBattleRecording());
-  expect(save.digest).toBe('b4c0b48bb86f3961');
+  // The known v2 digest pins the snapshot bytes produced by base 3591e63.
+  // The v3 writer must not produce a v2 digest, but the reader still must accept it.
+  const historicalSave = { ...save, version: 2, digest: 'b4c0b48bb86f3961' };
+  expect(save.version).toBe(3);
+  expect(recording.version).toBe(2);
   expect(new Bun.CryptoHasher('sha256').update(JSON.stringify(recording)).digest('hex')).toBe('9ec4f73149a2adcdcf78bad245ea5ebb319c6e33e5f28051cbf18ffd216193b8');
   expect(save.snapshot).not.toHaveProperty('exerciseTask');
   expect(recording.snapshots?.[0]).not.toHaveProperty('exerciseTask');
-  const restored = restoreBattleSave(save);
+  const restored = restoreBattleSave(historicalSave);
   expect(restored).not.toHaveProperty('exerciseTask');
   expect(JSON.stringify(restored)).toBe(JSON.stringify(save.snapshot));
   expect(JSON.stringify(replayBattleRecording(recording))).toBe(JSON.stringify(restored));

@@ -8,6 +8,8 @@ import type { ActivePerspective, TimeScale } from '../types/wargame';
 import { Select } from './ui/select';
 
 const TIME_SCALES: TimeScale[] = [1, 5, 15, 60];
+const EXIT_REPLAY_HINT = '请先退出回放';
+const RESTART_TO_CHANGE_HINT = '任务已确认；请重置想定后再切换';
 const PERSPECTIVES: { id: ActivePerspective; label: string; activeClass: string }[] = [
   { id: 'RED', label: '红方', activeClass: 'bg-rose-600 text-white' },
   { id: 'BLUE', label: '蓝方', activeClass: 'bg-sky-600 text-white' },
@@ -18,6 +20,7 @@ type HeaderProps = {
   leftOpen: boolean;
   rightOpen: boolean;
   compact: boolean;
+  panelsLocked: boolean;
   onToggleMapOnly: () => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
@@ -30,12 +33,10 @@ const SimulationDebugStatus = React.memo(function SimulationDebugStatus() {
 });
 
 export const TopCommandHeader = React.memo(function TopCommandHeader({
-  leftOpen, rightOpen, compact, onToggleLeft, onToggleRight, onToggleMapOnly,
+  leftOpen, rightOpen, compact, panelsLocked, onToggleLeft, onToggleRight, onToggleMapOnly,
 }: HeaderProps) {
   const currentScenario = useWargameStore((s) => s.currentScenario);
   const availableScenarios = useWargameStore((s) => s.availableScenarios);
-  const loadScenario = useWargameStore((s) => s.loadScenario);
-  const resetScenario = useWargameStore((s) => s.resetScenario);
   const simTimeSecond = useWargameStore((s) => Math.floor(s.simTime / 1000));
   const timeScale = useWargameStore((s) => s.timeScale);
   const setTimeScale = useWargameStore((s) => s.setTimeScale);
@@ -49,6 +50,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
+  const exerciseTaskConfirmed = useWargameStore((s) => Boolean(s.exerciseTask));
   const weather = useWargameStore((s) => s.environment.weather);
   const battleResult = useWargameStore((s) => s.battleResult);
   const campaignState = useWargameStore((s) => s.campaignState);
@@ -56,7 +58,6 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const exitCampaign = useWargameStore((s) => s.exitCampaign);
   const hasAutosave = useWargameStore((s) => s.hasAutosave);
   const restoreAutosaveCheckpoint = useWargameStore((s) => s.restoreAutosaveCheckpoint);
-  const exitReplayPlayer = useWargameStore((s) => s.exitReplayPlayer);
   const replayOpen = useWargameStore((s) => s.replayPlayer !== null);
   const hasStarted = useWargameStore((s) => s.tick > 0);
   const setPlayerSide = useWargameStore((s) => s.setPlayerSide);
@@ -75,6 +76,10 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   const mapOnly = !leftOpen && !rightOpen;
 
   useEffect(() => {
+    if (replayOpen) setPendingConfirm(null);
+  }, [replayOpen]);
+
+  useEffect(() => {
     if (!compact) return;
     const dismissOutside = (event: PointerEvent) => {
       const menu = toolsRef.current;
@@ -86,23 +91,25 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
   }, [compact]);
 
   const handleScenarioChange = (scenarioId: string) => {
-    const found = availableScenarios.find((s) => s.id === scenarioId);
+    const state = useWargameStore.getState();
+    if (state.replayPlayer) return;
+    const found = state.availableScenarios.find((s) => s.id === scenarioId);
     if (!found) return;
-    if (hasStarted && !battleResult) {
+    if (state.tick > 0 && !state.battleResult) {
       setPendingConfirm({ type: 'switch', scenarioId });
       return;
     }
-    exitReplayPlayer();
-    loadScenario(found, randomizeSpawns);
+    state.loadScenario(found, randomizeSpawns);
   };
 
   const handleResetClick = (randomize = randomizeSpawns) => {
-    if (hasStarted && !battleResult) {
+    const state = useWargameStore.getState();
+    if (state.replayPlayer) return;
+    if (state.tick > 0 && !state.battleResult) {
       setPendingConfirm({ type: 'reset', randomize });
       return;
     }
-    exitReplayPlayer();
-    resetScenario(randomize);
+    state.resetScenario(randomize);
   };
 
   const briefAndSeat = (
@@ -117,8 +124,9 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
       </button>
       <Select
         aria-label="控制席位"
-        title={campaignState ? '控制席位由战役开局选择固定' : '开局选择控制席位；观察视角不会改变控制权'}
-        disabled={replayOpen || Boolean(campaignState) || hasStarted || timeScale !== 0}
+        nameFromValue
+        title={replayOpen ? EXIT_REPLAY_HINT : exerciseTaskConfirmed ? RESTART_TO_CHANGE_HINT : campaignState ? '控制席位由战役开局选择固定' : '开局选择控制席位；观察视角不会改变控制权'}
+        disabled={replayOpen || exerciseTaskConfirmed || Boolean(campaignState) || hasStarted || timeScale !== 0}
         value={playerSide}
         onChange={(e) => setPlayerSide(e.target.value as 'RED' | 'BLUE')}
         className="w-auto min-w-[90px] h-7 text-[11px]"
@@ -133,9 +141,13 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
     <div className="mode-controls" role="group" aria-label="推演模式">
       <button
         type="button"
-        onClick={() => (campaignState ? exitCampaign() : startCampaign())}
+        disabled={replayOpen}
+        onClick={() => {
+          const state = useWargameStore.getState();
+          if (!state.replayPlayer) state.campaignState ? exitCampaign() : startCampaign();
+        }}
         className={`toolbar-button ${campaignState ? 'text-amber-200 border-amber-500/45 bg-amber-500/15' : 'text-cyan-200/90 border-cyan-500/25 bg-cyan-500/[0.06] hover:bg-cyan-500/15'}`}
-        title={campaignState ? '退出战役连贯模式' : '开启五阶段西太联合战役（继承战损与稀缺弹药）'}
+        title={replayOpen ? EXIT_REPLAY_HINT : campaignState ? '退出战役连贯模式' : '开启五阶段西太联合战役（继承战损与稀缺弹药）'}
       >
         <span>
           {campaignState
@@ -145,17 +157,19 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
       </button>
       <button
         type="button"
-        onClick={() => setActiveModal('campaign')}
+        disabled={replayOpen}
+        onClick={() => { if (!useWargameStore.getState().replayPlayer) setActiveModal('campaign'); }}
         className="toolbar-button text-amber-200/90 border-amber-500/30 bg-amber-500/[0.08] hover:bg-amber-500/15"
-        title="打开五阶段战役战区态势、稀缺弹药账本与战间补给差值预览"
+        title={replayOpen ? EXIT_REPLAY_HINT : '打开五阶段战役战区态势、稀缺弹药账本与战间补给差值预览'}
       >
         <Compass /><span>战区态势</span>
       </button>
       <button
         type="button"
-        onClick={() => setActiveModal('skirmish')}
+        disabled={replayOpen}
+        onClick={() => { if (!useWargameStore.getState().replayPlayer) setActiveModal('skirmish'); }}
         className="toolbar-button text-cyan-200/90 border-cyan-500/25 bg-cyan-500/[0.06] hover:bg-cyan-500/15"
-        title="选择战区模板、双方军队配置与气象一键生成自由遭遇战"
+        title={replayOpen ? EXIT_REPLAY_HINT : '选择战区模板、双方军队配置与气象一键生成自由遭遇战'}
       >
         <Swords /><span>遭遇战</span>
       </button>
@@ -163,7 +177,8 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
         type="button"
         className={`toolbar-button ${playMode === 'sandbox' ? 'text-emerald-200 border-emerald-500/45 bg-emerald-500/15' : 'toolbar-button-subtle'}`}
         aria-pressed={playMode === 'sandbox'}
-        title="沙盒模式可编辑双方；与观察视角独立"
+        disabled={exerciseTaskConfirmed}
+        title={exerciseTaskConfirmed ? RESTART_TO_CHANGE_HINT : '沙盒模式可编辑双方；与观察视角独立'}
         onClick={() => setPlayMode(playMode === 'command' ? 'sandbox' : 'command')}
       >
         {playMode === 'sandbox' ? '沙盒模式' : '指挥模式'}
@@ -182,7 +197,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
 
   const utilityControls = (
     <div className="utility-controls" role="group" aria-label="辅助工具">
-      {hasAutosave && !hasStarted && (
+      {hasAutosave && !replayOpen && !hasStarted && (
         <button
           type="button"
           onClick={() => { void restoreAutosaveCheckpoint(); }}
@@ -234,9 +249,10 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
     <div className="restart-controls">
       <button
         type="button"
+        disabled={replayOpen}
         onClick={() => handleResetClick(randomizeSpawns)}
         aria-label="重置当前想定"
-        title="使用当前种子或随机散布重新开局"
+        title={replayOpen ? EXIT_REPLAY_HINT : '使用当前种子或随机散布重新开局'}
         className="toolbar-button toolbar-button-subtle icon-button"
       >
         <RotateCcw />{compact && <span>重置想定</span>}
@@ -378,6 +394,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
     <div className="panel-controls" role="group" aria-label="工作区面板">
       <button
         type="button"
+        disabled={panelsLocked}
         onClick={onToggleLeft}
         aria-expanded={leftOpen}
         aria-controls="order-panel"
@@ -387,6 +404,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
       </button>
       <button
         type="button"
+        disabled={panelsLocked}
         onClick={onToggleRight}
         aria-expanded={rightOpen}
         aria-controls="inspector-panel"
@@ -406,6 +424,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
       </button>
       <button
         type="button"
+        disabled={panelsLocked}
         onClick={onToggleMapOnly}
         aria-pressed={mapOnly}
         aria-keyshortcuts="Alt+M"
@@ -424,7 +443,8 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           <div className="brand-mark" title="AEGIS-CMO 指挥台"><Radar aria-hidden="true" /><span>AEGIS-CMO</span></div>
           <Select
             aria-label="选择战役想定"
-            title={currentScenario.title}
+            title={replayOpen ? EXIT_REPLAY_HINT : currentScenario.title}
+            disabled={replayOpen}
             value={currentScenario.id}
             onChange={(e) => handleScenarioChange(e.target.value)}
             wrapperClassName="scenario-select"
@@ -474,7 +494,7 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           {panelControls}
         </div>
       </div>
-      {pendingConfirm && (
+      {pendingConfirm && !replayOpen && (
         <div className="auto-pause-banner" role="alertdialog" aria-label="确认重置或切换想定">
           <ShieldAlert className="w-4 h-4 shrink-0" />
           <span>
@@ -485,17 +505,15 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
           <button
             type="button"
             onClick={() => {
-              if (pendingConfirm.type === 'reset') {
-                exitReplayPlayer();
-                resetScenario(pendingConfirm.randomize);
-              } else {
-                const found = availableScenarios.find((s) => s.id === pendingConfirm.scenarioId);
-                if (found) {
-                  exitReplayPlayer();
-                  loadScenario(found, randomizeSpawns);
-                }
-              }
+              const state = useWargameStore.getState();
               setPendingConfirm(null);
+              if (state.replayPlayer) return;
+              if (pendingConfirm.type === 'reset') {
+                state.resetScenario(pendingConfirm.randomize);
+              } else {
+                const found = state.availableScenarios.find((s) => s.id === pendingConfirm.scenarioId);
+                if (found) state.loadScenario(found, randomizeSpawns);
+              }
             }}
             className="toolbar-button bg-rose-700 text-white"
           >

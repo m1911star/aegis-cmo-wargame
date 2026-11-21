@@ -263,6 +263,11 @@ export const CatalogViewerModal: React.FC = () => {
         )}
       </div>
 
+      {hotloadMessage && (
+        <div role="status" className={`px-4 py-2 text-[11px] font-medium ${hotloadMessage.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
+          {hotloadMessage.text}
+        </div>
+      )}
       {showHotloadPanel && (
         <div className="px-4 py-3 bg-emerald-950/20 border-b border-emerald-500/25 space-y-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -310,6 +315,7 @@ export const CatalogViewerModal: React.FC = () => {
               </Button>
             </div>
           </div>
+          <p className="text-[11px] text-muted-foreground">仅可在未推进、未下达指令的暂停开局导入或重置目录；修改后会按同一种子重建开局。</p>
           <Textarea
             aria-label="粘贴 CMO Catalog JSON"
             rows={3}
@@ -318,11 +324,6 @@ export const CatalogViewerModal: React.FC = () => {
             onChange={(e) => setHotloadJsonText(e.target.value)}
             className="font-mono text-[11px]"
           />
-          {hotloadMessage && (
-            <div className={`text-[11px] font-medium ${hotloadMessage.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-              {hotloadMessage.text}
-            </div>
-          )}
         </div>
       )}
 

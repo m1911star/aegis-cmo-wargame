@@ -19,9 +19,11 @@ import { sanitizeSidc } from '../validation/wargameSchemas';
 export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   leftOpen = true,
   rightOpen = true,
+  compact = false,
 }: {
   leftOpen?: boolean;
   rightOpen?: boolean;
+  compact?: boolean;
 }) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -37,8 +39,10 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
   const [hoverEngageSummary, setHoverEngageSummary] = useState<string | null>(null);
   const hoveredContactIdRef = useRef<string | null>(null);
   const suppressNextClickRef = useRef(false);
+  const finishRouteRef = useRef<HTMLButtonElement>(null);
 
   const interactionMode = useWargameStore((s) => s.interactionMode);
+  const compactRouteEditor = compact && interactionMode === 'plot_waypoint';
   const selectedCount = useWargameStore((s) => s.selectedUnitIds.length);
   const doglegCount = useWargameStore((s) => s.pendingStrikeWaypoints.length);
   const clearPendingStrikeWaypoints = useWargameStore((s) => s.clearPendingStrikeWaypoints);
@@ -55,6 +59,10 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
         : undefined
   );
   const setInteractionMode = useWargameStore((s) => s.setInteractionMode);
+
+  useEffect(() => {
+    if (compactRouteEditor) finishRouteRef.current?.focus({ preventScroll: true });
+  }, [compactRouteEditor]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -762,7 +770,7 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
       <div
         className="basemap-controls tactical-panel"
         style={{
-          top: interactionMode === 'select' ? 10 : 56,
+          top: interactionMode === 'select' ? 10 : compactRouteEditor ? 76 : 56,
           right: rightOpen ? 'clamp(278px, calc(20vw + 18px), 310px)' : 12,
         }}
         aria-label="地图工具"
@@ -813,17 +821,23 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
             right: rightOpen ? 'clamp(278px, calc(20vw + 18px), 310px)' : 12,
           }}
         >
-          <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          <span aria-hidden="true" className="inline-block w-2 h-2 shrink-0 rounded-full bg-emerald-400 animate-ping" />
           {interactionMode === 'box_select' && (
             <span className="text-cyan-200">
               [多单元框选模式] 在态势图拖拽矩形框选本方多个作战单元进行批量指控 · 也可随时按住 Shift 拖拽
             </span>
           )}
           {interactionMode === 'plot_waypoint' && (
-            <span>
-              [F3 航路点标绘模式] 点击海图追加机动航路点 ({selectedUnitCallsign}
-              ) · 右键或按 ESC 完成
-            </span>
+            compactRouteEditor ? (
+              <span className="min-w-0">
+                <span className="block truncate">航路点标绘模式 · {selectedUnitCallsign}</span>
+                <span className="text-zinc-300">点按地图添加航点</span>
+              </span>
+            ) : (
+              <span>
+                [F3 航路点标绘模式] 点击海图追加机动航路点 ({selectedUnitCallsign}) · 右键或按 ESC 完成
+              </span>
+            )
           )}
           {interactionMode === 'manual_engage' && (
             <span className="text-rose-200 truncate">
@@ -885,13 +899,19 @@ export const TacticalMapCanvas = React.memo(function TacticalMapCanvas({
             </>
           )}
           <button
+            ref={compactRouteEditor ? finishRouteRef : undefined}
+            type="button"
             onClick={() => {
               if (interactionMode === 'draw_polygon') cancelPolygonDraw();
               else setInteractionMode('select');
             }}
-            className="ml-auto px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-zinc-100 cursor-pointer shrink-0 whitespace-nowrap transition-colors"
+            className={`ml-auto px-2.5 py-1 rounded-md border cursor-pointer shrink-0 whitespace-nowrap transition-colors ${
+              compactRouteEditor
+                ? 'min-h-11 border-cyan-400/50 bg-cyan-400/15 text-cyan-100 hover:bg-cyan-400/25'
+                : 'bg-zinc-800 hover:bg-zinc-700 border-white/10 text-zinc-100'
+            }`}
           >
-            退出 [ESC]
+            {compactRouteEditor ? '完成标绘' : '退出 [ESC]'}
           </button>
         </div>
       )}

@@ -2,13 +2,13 @@ import * as turf from '../../engine/turfGeo';
 import { createAarLedger } from '../../engine/aar';
 import { canCommandUnit, contactForUnit } from '../../engine/commandPolicy';
 import { createRandomStream, DEFAULT_SEED, SNAPSHOT_INTERVAL_TICKS } from '../../engine/determinism';
+import { cloneEnvironment } from '../../engine/environment';
 import { deriveMissionAssignments } from '../../engine/missions';
 import {
   advanceSimulation,
   initializeWorldContacts,
   type SimulationWorldState,
 } from '../../engine/simulationEngine';
-import { resolveUnitConfiguration } from '../../engine/unitConfiguration';
 import { BASEMAP_PRESETS, DEFAULT_BASEMAP } from '../../map/basemaps';
 import {
   BUILTIN_SCENARIOS,
@@ -26,7 +26,7 @@ import {
   type CampaignStageStart,
   type CampaignState,
 } from '../../scenarios/campaign';
-import { FORCE_PACKAGES, resolveEquipmentCatalog, validateCatalogIntegrity } from '../../db';
+import { FORCE_PACKAGES } from '../../db';
 import { compileScenario } from '../../scenarios/compileScenario';
 import type { EquipmentCatalog, ScenarioDefinition } from '../../types/wargame';
 import { assertCatalogOverlayShape } from '../../validation/wargameSchemas';
@@ -36,6 +36,7 @@ import {
   advanceReplayRecordingIncremental,
   prepareBattleSave,
   isApplyingBattleRecording,
+  isReplayingLegacyExerciseHistory,
   replayBattleRecording,
   restoreBattleSave,
   type BattleRecording,
@@ -76,7 +77,8 @@ export function createInitialStateFromScenario(
     weaponsInFlight: {},
     explosions: [],
     missions: deriveMissionAssignments(scenario.missions, initialUnits),
-    environment: scenario.environment,
+    // Opening definitions are for reset and replay; builder edits affect this live copy.
+    environment: cloneEnvironment(scenario.environment),
     pendingSortieOrders: [],
     events: (scenario.events || []).map((ev) => ({
       ...ev,
@@ -150,6 +152,13 @@ function readHasAutosave(): boolean {
   }
 }
 
+const catalogEditBlocked = '仅可在未推进、未下达指令的暂停开局修改装备目录；请退出回放并重新开局后重试。';
+
+function isPristineOpening(s: WargameStoreState): boolean {
+  return s.tick === 0 && s.timeScale === 0 && s.pendingSimSeconds === 0 && s.commandSequence === 0 &&
+    s.commandHistory.length === 0 && s.replaySnapshots.length === 0 && !s.replayPlayer && !s.battleResult;
+}
+
 export function extractSimulationWorldState(s: WargameStoreState): SimulationWorldState {
   return {
     startTime: s.startTime,
@@ -192,6 +201,24 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     autosaveAt = -Infinity;
   };
 
+  function applyOpeningCatalog(s: WargameStoreState, overlay: Partial<EquipmentCatalog> | undefined) {
+    if (!isPristineOpening(s)) throw new Error(catalogEditBlocked);
+    // Compile the whole unchanged opening with the proposed overlay (including
+    // future placements), then rebuild runtime units and initial observations atomically.
+    const { scenario, selectedUnitId: _openingSelection, ...boot } = createInitialStateFromScenario({
+      ...s.currentScenario,
+      customCatalogOverlay: structuredClone(overlay),
+    }, false, s.seed, s.campaignStageStart);
+    cancelQueuedAutosave();
+    set({
+      ...boot,
+      currentScenario: scenario,
+      selectedUnitId: s.selectedUnitId && Object.hasOwn(boot.units, s.selectedUnitId) ? s.selectedUnitId : null,
+      selectedUnitIds: s.selectedUnitIds.filter((unitId) => Object.hasOwn(boot.units, unitId)),
+      selectedContactId: s.selectedContactId && Object.hasOwn(boot.contacts, s.selectedContactId) ? s.selectedContactId : null,
+    });
+  }
+
   return {
     basemapMode: DEFAULT_BASEMAP,
     setBasemapMode: (mode: WargameStoreState['basemapMode']) => {
@@ -223,7 +250,11 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     pendingRiskEngagement: null,
     setPlayerSide: (side: 'RED' | 'BLUE') => {
       const s = get();
-      if (s.campaignState || s.tick !== 0 || s.timeScale !== 0 || s.playerSide === side) return;
+      if ((side !== 'RED' && side !== 'BLUE') || s.campaignState || s.tick !== 0 || s.timeScale !== 0 || s.playerSide === side) return;
+      if (s.exerciseTask && !isReplayingLegacyExerciseHistory()) {
+        emitActionFeedback('warning', '本局已安排演练任务，重新开局后才能切换指挥席位。');
+        return;
+      }
       const firstUnitId = Object.values(s.units).find((u) => u.side === side)?.id ?? null;
       set({
         playerSide: side,
@@ -235,11 +266,16 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       });
     },
     setPlayMode: (mode: WargameStoreState['playMode']) => {
-      if (get().playMode === mode) return;
+      const s = get();
+      if ((mode !== 'command' && mode !== 'sandbox') || s.playMode === mode) return;
+      if (s.exerciseTask && !isReplayingLegacyExerciseHistory()) {
+        emitActionFeedback('warning', '本局已安排演练任务，重新开局后才能切换模式。');
+        return;
+      }
       set({
         playMode: mode, timeScale: 0, pendingRiskEngagement: null,
         exerciseTask: undefined,
-        selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide,
+        selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, interactionMode: 'select', activePerspective: s.playerSide,
       });
     },
     dismissRiskEngagement: () => set({ pendingRiskEngagement: null }),
@@ -417,9 +453,10 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
 
     importCatalogJson: (rawInput: unknown, mode: 'merge' | 'replace' = 'merge') => {
       try {
+        const s = get();
+        if (!isPristineOpening(s)) throw new Error(catalogEditBlocked);
         const parsed = typeof rawInput === 'string' ? JSON.parse(rawInput) : rawInput;
         assertCatalogOverlayShape(parsed);
-        const s = get();
         const prevOverlay = mode === 'merge' ? s.currentScenario.customCatalogOverlay : undefined;
         const mergeSection = <T>(
           a: Record<string, T> | undefined,
@@ -440,16 +477,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           propulsions: mergeSection(prevOverlay?.propulsions, parsed.propulsions),
           comms: mergeSection(prevOverlay?.comms, parsed.comms),
         };
-        const nextCatalog = resolveEquipmentCatalog(nextOverlay);
-        const integrity = validateCatalogIntegrity(nextCatalog);
-        if (!integrity.valid) {
-          const err = integrity.errors.slice(0, 3).join('；');
-          emitActionFeedback('error', `装备目录引用校验失败：${err}`);
-          return { ok: false, error: err };
-        }
-        for (const unit of Object.values(s.units)) {
-          resolveUnitConfiguration(nextCatalog, unit.platformId, unit.activeLoadoutId);
-        }
+        applyOpeningCatalog(s, nextOverlay);
         const summary = [
           parsed.platforms && `${Object.keys(parsed.platforms).length} 平台`,
           parsed.weapons && `${Object.keys(parsed.weapons).length} 武器`,
@@ -458,13 +486,6 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
         ]
           .filter(Boolean)
           .join(' / ') || '0 新增条目';
-        set({
-          catalog: nextCatalog,
-          currentScenario: {
-            ...s.currentScenario,
-            customCatalogOverlay: nextOverlay,
-          },
-        });
         emitActionFeedback('info', `已热加载装备目录 (${mode === 'merge' ? '合并' : '替换覆盖'})：${summary}`);
         return { ok: true, importedSummary: summary };
       } catch (error) {
@@ -475,34 +496,26 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
     },
 
     resetCatalogToDefault: () => {
-      const s = get();
-      const builtinMatch = BUILTIN_SCENARIOS.find((sc) => sc.id === s.currentScenario.id);
-      const baseOverlay = builtinMatch?.customCatalogOverlay;
-      const baseCatalog = resolveEquipmentCatalog(baseOverlay);
       try {
-        for (const unit of Object.values(s.units)) {
-          resolveUnitConfiguration(baseCatalog, unit.platformId, unit.activeLoadoutId);
-        }
+        const s = get();
+        const builtinMatch = BUILTIN_SCENARIOS.find((sc) => sc.id === s.currentScenario.id);
+        applyOpeningCatalog(s, builtinMatch?.customCatalogOverlay);
       } catch (error) {
-        const msg = error instanceof Error ? error.message : '当前战场存在依赖热加载目录的已部署单位';
-        emitActionFeedback('warning', `无法重置：当前战场仍有算子依赖外挂装备（${msg}）`);
+        const msg = error instanceof Error ? error.message : '想定与默认目录不兼容';
+        emitActionFeedback('warning', `无法重置装备目录：${msg}`);
         return { ok: false, error: msg };
       }
-      set({
-        catalog: baseCatalog,
-        currentScenario: {
-          ...s.currentScenario,
-          customCatalogOverlay: baseOverlay ? structuredClone(baseOverlay) : undefined,
-        },
-      });
       emitActionFeedback('info', '已重置为内置标准装备目录');
       return { ok: true };
     },
 
     loadScenario: (scenario: ScenarioDefinition, randomizeSpawns = false, seed?: number, campaignStart?: CampaignStageStart) => {
+      const applyingRecording = isApplyingBattleRecording();
+      if (get().replayPlayer && !applyingRecording) {
+        throw new Error('请先退出地图回放，再重新开局或载入存档。');
+      }
       const boot = createInitialStateFromScenario(scenario, randomizeSpawns, seed, campaignStart);
       const playerSide = campaignStart?.playerSide ?? 'RED';
-      const applyingRecording = isApplyingBattleRecording();
       if (!applyingRecording) {
         liveBattleBeforeReplay = undefined;
         cancelQueuedAutosave();

@@ -331,7 +331,6 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
       };
       return {
         environment: nextEnv,
-        currentScenario: { ...s.currentScenario, environment: nextEnv },
         logs: [log, ...s.logs].slice(0, 250),
       };
     }),
@@ -344,7 +343,7 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
           ...s.environment,
           landPolygons: s.environment.landPolygons.filter((p) => p.id !== polygonId),
         };
-        return { environment: nextEnv, currentScenario: { ...s.currentScenario, environment: nextEnv } };
+        return { environment: nextEnv };
       }
       if (kind === 'acoustic') {
         if (!s.environment.acousticZones.some((z) => z.id === polygonId)) return s;
@@ -352,7 +351,7 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
           ...s.environment,
           acousticZones: s.environment.acousticZones.filter((z) => z.id !== polygonId),
         };
-        return { environment: nextEnv, currentScenario: { ...s.currentScenario, environment: nextEnv } };
+        return { environment: nextEnv };
       }
       if (kind === 'weather') {
         const zones = s.environment.weatherZones ?? [];
@@ -361,7 +360,7 @@ export function createMissionAndBuilderSlice(set: StoreSet) {
           ...s.environment,
           weatherZones: zones.filter((z) => z.id !== polygonId),
         };
-        return { environment: nextEnv, currentScenario: { ...s.currentScenario, environment: nextEnv } };
+        return { environment: nextEnv };
       }
       return s;
     }),

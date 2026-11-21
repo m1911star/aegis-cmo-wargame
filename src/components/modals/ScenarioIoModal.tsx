@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { AlertCircle, Check, Download, FileJson, HardDrive, Play, Trash2, Upload } from 'lucide-react';
 import {
   exportCurrentStateAsScenarioJson,
@@ -7,15 +7,18 @@ import {
 import {
   BATTLE_RECORDING_VERSION,
   BATTLE_SAVE_VERSION,
+  EXERCISE_RECORDING_VERSION,
   MAX_BATTLE_SAVE_SLOTS,
   captureBattleRecording,
   captureBattleSave,
   deleteBattleSaveSlot,
+  isBattleRecordingVersion,
   listBattleSaveSlots,
   loadBattleFromSlot,
   replayBattleRecording,
   restoreBattleSave,
   saveBattleToSlot,
+  type BattleRecording,
   type SavedBattleSlot,
 } from '../../store/battleRecording';
 import { MAX_RECORDING_BYTES } from '../../store/replayKeyframes';
@@ -26,14 +29,21 @@ import { Input } from '../ui/input';
 import { Slider } from '../ui/slider';
 import { Textarea } from '../ui/textarea';
 
+const EXIT_REPLAY_HINT = '请先退出回放';
+
+// Header detection for the editor only. Replay validates the whole recording.
+function isRecordingCandidate(value: unknown): value is BattleRecording {
+  if (!value || typeof value !== 'object') return false;
+  const { version, untilTick, commands } = value as Partial<BattleRecording>;
+  return isBattleRecordingVersion(version) && typeof untilTick === 'number' && Number.isSafeInteger(untilTick) &&
+    untilTick >= 0 && untilTick <= 200_000 && Array.isArray(commands);
+}
+
 function recordingUntilTick(jsonText: string): number | undefined {
   try {
-    const value = JSON.parse(jsonText) as { version?: unknown; untilTick?: unknown };
-    return value.version === BATTLE_RECORDING_VERSION && Number.isSafeInteger(value.untilTick) && (value.untilTick as number) >= 0
-      ? value.untilTick as number : undefined;
-  } catch {
-    return undefined;
-  }
+    const value: unknown = JSON.parse(jsonText);
+    return isRecordingCandidate(value) ? value.untilTick : undefined;
+  } catch { return undefined; }
 }
 
 export const ScenarioIoModal: React.FC = () => {
@@ -49,35 +59,76 @@ export const ScenarioIoModal: React.FC = () => {
   const environment = useWargameStore((s) => s.environment);
   const loadScenario = useWargameStore((s) => s.loadScenario);
   const startReplayPlayer = useWargameStore((s) => s.startReplayPlayer);
+  const replayOpen = useWargameStore((s) => s.replayPlayer !== null);
+  const liveOnly = { disabled: replayOpen, title: replayOpen ? EXIT_REPLAY_HINT : undefined };
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [jsonText, setJsonText] = useState<string>('');
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [replayTick, setReplayTick] = useState(0);
-  const [fileRecording, setFileRecording] = useState<{ value: import('../../store/battleRecording').BattleRecording; label: string } | null>(null);
+  const [fileRecording, setFileRecording] = useState<{ value: BattleRecording; label: string } | null>(null);
   const [customSeedInput, setCustomSeedInput] = useState(String(seed));
   const [randomizeSpawns, setRandomizeSpawns] = useState(false);
   const [saveSlots, setSaveSlots] = useState<SavedBattleSlot[]>(() => listBattleSaveSlots());
   const [slotNameInput, setSlotNameInput] = useState('');
 
-  const displayedJson = jsonText || exportCurrentStateAsScenarioJson(currentScenario, units, {
-    groups, missions, events, objectives, referencePoints, environment,
-  });
-  const replayUntilTick = fileRecording?.value.untilTick ?? recordingUntilTick(displayedJson);
+  const showScenarioPreview = !jsonText && !fileRecording;
+  const preview = useMemo(() => {
+    if (!showScenarioPreview) return null;
+    try {
+      return { json: exportCurrentStateAsScenarioJson(currentScenario, units, {
+        groups, missions, events, objectives, referencePoints, environment,
+      }) };
+    } catch (error) {
+      return { error: `无法导出可重新开局的想定：${error instanceof Error ? error.message : '想定校验失败'}` };
+    }
+  }, [showScenarioPreview, currentScenario, units, groups, missions, events, objectives, referencePoints, environment]);
+  const displayedJson = fileRecording ? '' : jsonText || preview?.json || '';
+  const replayUntilTick = fileRecording?.value.untilTick ?? (jsonText ? recordingUntilTick(jsonText) : undefined);
   const readRecording = () => fileRecording?.value ?? JSON.parse(displayedJson);
   const selectedReplayTick = replayUntilTick === undefined ? 0 : Math.min(replayTick, replayUntilTick);
 
+  const transferJson = (): { json: string; suffix: string } => {
+    if (fileRecording) return { json: JSON.stringify(fileRecording.value), suffix: '.recording.json' };
+    if (preview?.json) return { json: preview.json, suffix: '_export.json' };
+    if (!displayedJson.trim()) throw new Error(preview?.error ?? '没有可导出的 JSON');
+    const parsed = JSON.parse(displayedJson);
+    if (parsed?.kind === 'aegis_battle_save') return { json: displayedJson, suffix: '.save.json' };
+    if (isRecordingCandidate(parsed)) return { json: displayedJson, suffix: '.recording.json' };
+    const result = validateAndParseScenarioJson(displayedJson);
+    if (!result.valid) throw new Error(result.error ?? '想定校验失败');
+    return { json: displayedJson, suffix: '_export.json' };
+  };
+
   const downloadJsonFile = () => {
     if (typeof document === 'undefined') return;
-    const blob = new Blob([displayedJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    const isBattleSave = displayedJson.includes('"aegis_battle_save"');
-    link.download = isBattleSave ? `${currentScenario.id}.save.json` : `${currentScenario.id}_export.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      const { json, suffix } = transferJson();
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${currentScenario.id}${suffix}`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setJsonError(null);
+    } catch (error) {
+      setJsonError(error instanceof Error ? error.message : '无法下载 JSON');
+    }
+  };
+
+  const copyJson = async () => {
+    try {
+      const { json } = transferJson();
+      if (!navigator.clipboard) throw new Error('无法访问剪贴板，请改用文件下载');
+      await navigator.clipboard.writeText(json);
+      setJsonError(null);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (error) {
+      setCopySuccess(false);
+      setJsonError(error instanceof Error ? error.message : '无法复制 JSON');
+    }
   };
 
   const downloadSaveSlotFile = (slot: SavedBattleSlot) => {
@@ -104,6 +155,7 @@ export const ScenarioIoModal: React.FC = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
     try {
       if (file.size > MAX_RECORDING_BYTES) {
@@ -112,7 +164,7 @@ export const ScenarioIoModal: React.FC = () => {
       }
       const content = await file.text();
       const parsed = JSON.parse(content);
-      if (parsed?.version === BATTLE_RECORDING_VERSION && Number.isSafeInteger(parsed.untilTick) && Array.isArray(parsed.commands)) {
+      if (isRecordingCandidate(parsed)) {
         setFileRecording({ value: parsed, label: file.name });
         setReplayTick(parsed.untilTick);
       } else {
@@ -126,6 +178,7 @@ export const ScenarioIoModal: React.FC = () => {
   };
 
   const applyCustomSeedRestart = () => {
+    if (useWargameStore.getState().replayPlayer) return;
     const parsedSeed = Number(customSeedInput);
     if (!Number.isSafeInteger(parsedSeed) || parsedSeed < 0 || parsedSeed > 0xffffffff) {
       setJsonError('种子必须为 0 ~ 4294967295 之间的整数');
@@ -200,7 +253,9 @@ export const ScenarioIoModal: React.FC = () => {
                     <Button
                       size="xs"
                       variant="default"
+                      {...liveOnly}
                       onClick={() => {
+                        if (useWargameStore.getState().replayPlayer) return;
                         try {
                           loadBattleFromSlot(slot.slotId);
                           setActiveModal('none');
@@ -282,7 +337,8 @@ export const ScenarioIoModal: React.FC = () => {
             setJsonError(null);
           }}>生成指令重放 JSON</Button>
           <Button size="sm" variant="outline" onClick={() => { void downloadRecording(); }}>下载指令录像</Button>
-          <Button size="sm" variant="outline" onClick={() => {
+          <Button size="sm" variant="outline" {...liveOnly} onClick={() => {
+            if (useWargameStore.getState().replayPlayer) return;
             try { replayBattleRecording(readRecording(), 60); setActiveModal('none'); }
             catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
           }}>加载重放到记录末尾</Button>
@@ -292,11 +348,12 @@ export const ScenarioIoModal: React.FC = () => {
             setJsonText(JSON.stringify(save, null, 2));
             setJsonError(null);
           }}>生成断点存档 JSON</Button>
-          <Button size="sm" variant="outline" onClick={() => {
+          <Button size="sm" variant="outline" {...liveOnly} onClick={() => {
+            if (useWargameStore.getState().replayPlayer) return;
             try { restoreBattleSave(JSON.parse(displayedJson)); setActiveModal('none'); }
             catch (error) { setJsonError(error instanceof Error ? error.message : '断点恢复失败'); }
           }}>恢复断点存档</Button>
-          <span className="text-[11px] text-muted-foreground">支持 Recording v{BATTLE_RECORDING_VERSION}（含关键帧快照加速）与断点存档 v{BATTLE_SAVE_VERSION}；版本不符或校验失败自动回滚。</span>
+          <span className="text-[11px] text-muted-foreground">支持 Recording v{BATTLE_RECORDING_VERSION}/v{EXERCISE_RECORDING_VERSION}（含关键帧快照加速）与断点存档 v1–v{BATTLE_SAVE_VERSION}；版本不符或校验失败不会替换当前战局。</span>
         </div>
 
         {replayUntilTick !== undefined && (
@@ -314,7 +371,8 @@ export const ScenarioIoModal: React.FC = () => {
               onChange={(event) => setReplayTick(Number(event.target.value))}
             />
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => {
+              <Button size="sm" variant="outline" {...liveOnly} onClick={() => {
+                if (useWargameStore.getState().replayPlayer) return;
                 try { replayBattleRecording(readRecording(), 60, selectedReplayTick); setActiveModal('none'); }
                 catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
               }}>
@@ -359,15 +417,15 @@ export const ScenarioIoModal: React.FC = () => {
             />
             <span>启用开局位置随机散布</span>
           </label>
-          <Button size="sm" variant="tactical" onClick={applyCustomSeedRestart}>
+          <Button size="sm" variant="tactical" {...liveOnly} onClick={applyCustomSeedRestart}>
             按此种子重新开局
           </Button>
         </div>
 
-        {jsonError && (
-          <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/50 text-rose-200 flex items-center gap-2">
+        {(jsonError || preview?.error) && (
+          <div role="alert" className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/50 text-rose-200 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{jsonError}</span>
+            <span>{jsonError || preview?.error}</span>
           </div>
         )}
       </div>
@@ -377,11 +435,8 @@ export const ScenarioIoModal: React.FC = () => {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
-              navigator.clipboard?.writeText(displayedJson);
-              setCopySuccess(true);
-              setTimeout(() => setCopySuccess(false), 2000);
-            }}
+            disabled={!displayedJson && !fileRecording}
+            onClick={() => { void copyJson(); }}
             className="text-cyan-300"
           >
             {copySuccess ? (
@@ -396,7 +451,7 @@ export const ScenarioIoModal: React.FC = () => {
               </>
             )}
           </Button>
-          <Button size="sm" variant="outline" onClick={downloadJsonFile} className="text-cyan-300">
+          <Button size="sm" variant="outline" disabled={!displayedJson && !fileRecording} onClick={downloadJsonFile} className="text-cyan-300">
             <Download className="w-3.5 h-3.5" />
             <span>下载文件</span>
           </Button>
@@ -419,7 +474,9 @@ export const ScenarioIoModal: React.FC = () => {
           </Button>
           <Button
             size="sm"
+            {...liveOnly}
             onClick={() => {
+              if (useWargameStore.getState().replayPlayer) return;
               const res = validateAndParseScenarioJson(displayedJson);
               if (!res.valid || !res.scenario) {
                 setJsonError(res.error || '想定格式校验失败');

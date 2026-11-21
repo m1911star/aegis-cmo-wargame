@@ -9,8 +9,36 @@ import { MapLayersTab } from './sidebar/MapLayersTab';
 import { MissionsTab } from './sidebar/MissionsTab';
 import { OrbatTreeTab } from './sidebar/OrbatTreeTab';
 
-export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSidebar({ onUnitDetails }: { onUnitDetails: () => void }) {
-  const [activeTab, setActiveTab] = useState<'orbat' | 'contacts' | 'missions' | 'layers'>('orbat');
+type SidebarProps = { open: boolean; onUnitDetails: () => void };
+type SidebarTab = 'orbat' | 'contacts' | 'missions' | 'layers';
+
+export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSidebar({ open, onUnitDetails }: SidebarProps) {
+  // Keep the lightweight preferences, but unmount the subscribed drawer contents when hidden.
+  const [activeTab, setActiveTab] = useState<SidebarTab>('orbat');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [objectivesExpanded, setObjectivesExpanded] = useState(false);
+
+  return open ? <SidebarContents
+    activeTab={activeTab}
+    setActiveTab={setActiveTab}
+    collapsedGroups={collapsedGroups}
+    setCollapsedGroups={setCollapsedGroups}
+    objectivesExpanded={objectivesExpanded}
+    setObjectivesExpanded={setObjectivesExpanded}
+    onUnitDetails={onUnitDetails}
+  /> : null;
+});
+
+function SidebarContents({ activeTab, setActiveTab, collapsedGroups, setCollapsedGroups,
+  objectivesExpanded, setObjectivesExpanded, onUnitDetails }: {
+  activeTab: SidebarTab;
+  setActiveTab: (tab: SidebarTab) => void;
+  collapsedGroups: Record<string, boolean>;
+  setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  objectivesExpanded: boolean;
+  setObjectivesExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+  onUnitDetails: () => void;
+}) {
   const contacts = useWargameStore((s) => s.contacts);
   const activePerspective = useWargameStore((s) => s.activePerspective);
 
@@ -39,6 +67,7 @@ export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSideb
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                aria-pressed={active}
                 className={cn(
                   'py-1.5 px-1 rounded-md flex flex-col items-center gap-1 text-[10px] font-medium cursor-pointer transition-all border border-transparent',
                   active
@@ -55,13 +84,13 @@ export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSideb
       </div>
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
-        <BattleObjectivesPanel />
+        <BattleObjectivesPanel expanded={objectivesExpanded} setExpanded={setObjectivesExpanded} />
         <ExerciseTaskPanel onUnitDetails={onUnitDetails} />
-        {activeTab === 'orbat' && <OrbatTreeTab />}
+        {activeTab === 'orbat' && <OrbatTreeTab collapsedGroups={collapsedGroups} setCollapsedGroups={setCollapsedGroups} />}
         {activeTab === 'contacts' && <ContactsListTab visibleContacts={visibleContacts} />}
         {activeTab === 'missions' && <MissionsTab />}
         {activeTab === 'layers' && <MapLayersTab />}
       </div>
     </aside>
   );
-});
+}

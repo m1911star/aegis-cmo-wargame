@@ -8,13 +8,15 @@ import {
   type CampaignStageStart, type CampaignState,
 } from '../scenarios/campaign';
 import type { BattleAarLedger, ScenarioDefinition } from '../types/wargame';
-import { array, boolean, id, invalid, number, object, oneOf, optional, record, text } from '../validation/schema';
+import { array, boolean, id, invalid, isRecord, number, object, oneOf, optional, record, text } from '../validation/schema';
 import { emitActionFeedback } from './actionFeedbackBus';
-import { compactReplayKeyframes, inflateReplayKeyframe, MAX_KEYFRAMES, type CompactKeyframe } from './replayKeyframes';
+import { checkBattleArchive, checkBattleSnapshot, copyCheckedBattleSnapshot, uint32 } from './battleSnapshotDecoder';
+import { checkKeyframeHistory, compactReplayKeyframes, inflateReplayKeyframe, MAX_KEYFRAMES, type CompactKeyframe } from './replayKeyframes';
 import { useWargameStore, type WargameStoreState } from './useWargameStore';
 
 export const BATTLE_RECORDING_VERSION = 2 as const;
-export const BATTLE_SAVE_VERSION = 2 as const;
+export const EXERCISE_RECORDING_VERSION = 3 as const;
+export const BATTLE_SAVE_VERSION = 3 as const;
 export { SNAPSHOT_INTERVAL_TICKS };
 export const RULESET_VERSION = '2026.12-ruleset-29';
 export const SCENARIO_SCHEMA_VERSION = 12;
@@ -31,13 +33,13 @@ export interface SavedBattleSlot {
   playerSide: 'RED' | 'BLUE' | 'NEUTRAL';
   tick: number;
   elapsedSec: number;
-  save: BattleSaveState;
+  save: Omit<BattleSaveState, 'version'> & { version: 1 | 2 | typeof BATTLE_SAVE_VERSION };
 }
 
 export type BattleSnapshot = ReturnType<typeof canonicalBattleState>;
 
 export interface BattleRecording {
-  version: typeof BATTLE_RECORDING_VERSION;
+  version: typeof BATTLE_RECORDING_VERSION | typeof EXERCISE_RECORDING_VERSION;
   rulesetVersion: string;
   catalogVersion: string;
   scenarioSchemaVersion: number;
@@ -48,6 +50,8 @@ export interface BattleRecording {
   campaignStart?: CampaignStageStart;
   snapshots?: (BattleSnapshot | CompactKeyframe)[];
   history?: BattleAarLedger;
+  // Only present when re-exporting an old session with the previous reset policy.
+  legacyExerciseResets?: true;
 }
 
 type CampaignCheckpoint = Pick<CampaignState, 'campaignId' | 'playerSide' | 'currentStageIndex' | 'finished' | 'carryover'>;
@@ -88,8 +92,10 @@ function digestJson(value: unknown): string {
 export function captureBattleRecording(): BattleRecording {
   const state = useWargameStore.getState();
   const keyframes = state.replaySnapshots.filter((frame) => frame.tick <= state.tick);
+  const hasTask = state.exerciseTask !== undefined || keyframes.some((frame) => frame.exerciseTask !== undefined) ||
+    state.commandHistory.some(({ action }) => exerciseCommands.has(action));
   return structuredClone({
-    version: BATTLE_RECORDING_VERSION,
+    version: hasTask ? EXERCISE_RECORDING_VERSION : BATTLE_RECORDING_VERSION,
     rulesetVersion: RULESET_VERSION,
     catalogVersion: state.catalog.version,
     scenarioSchemaVersion: SCENARIO_SCHEMA_VERSION,
@@ -99,6 +105,7 @@ export function captureBattleRecording(): BattleRecording {
     commands: state.commandHistory,
     campaignStart: state.campaignStageStart,
     ...(keyframes.length ? compactReplayKeyframes(keyframes) : {}),
+    ...(hasLegacyExerciseReset(state.commandHistory) && { legacyExerciseResets: true as const }),
   });
 }
 
@@ -137,7 +144,7 @@ export function prepareBattleSave(state: WargameStoreState): BattleSaveState {
     finished: state.campaignState.finished,
     carryover: state.campaignState.carryover,
   };
-  return {
+  const envelope: Omit<BattleSaveState, 'digest'> = {
     kind: 'aegis_battle_save',
     version: BATTLE_SAVE_VERSION,
     rulesetVersion: RULESET_VERSION,
@@ -149,8 +156,8 @@ export function prepareBattleSave(state: WargameStoreState): BattleSaveState {
     snapshot,
     campaign: campaign ?? undefined,
     campaignStart: state.campaignStageStart,
-    digest: digestJson({ snapshot, campaign: campaign ?? undefined, campaignStart: state.campaignStageStart }),
   };
+  return { ...envelope, digest: digestJson(envelope) };
 }
 
 export function captureShareableAarPackage() {
@@ -172,12 +179,28 @@ export function captureShareableAarPackage() {
   });
 }
 
-function validateCommandList(commands: RecordedCommand[], untilTick: number) {
+export function isBattleRecordingVersion(version: unknown): version is BattleRecording['version'] {
+  return version === BATTLE_RECORDING_VERSION || version === EXERCISE_RECORDING_VERSION;
+}
+
+const exerciseCommands = new Set(['planExerciseTask', 'reassignExerciseTask', 'setExerciseTaskPaused', 'stopExerciseTask']);
+const isSeatOrModeCommand = (action: string) => action === 'setPlayerSide' || action === 'setPlayMode';
+
+function hasLegacyExerciseReset(commands: readonly RecordedCommand[]): boolean {
+  let planned = false;
+  for (const { action } of commands) {
+    if (planned && isSeatOrModeCommand(action)) return true;
+    if (action === 'planExerciseTask') planned = true;
+  }
+  return false;
+}
+
+function validateCommandList(commands: RecordedCommand[], untilTick: number, path: string) {
   for (const [i, command] of commands.entries()) {
-    if (!COMMAND_ACTIONS.includes(command.action as typeof COMMAND_ACTIONS[number]) ||
+    if (!isRecord(command) || !COMMAND_ACTIONS.includes(command.action as typeof COMMAND_ACTIONS[number]) ||
         !Number.isSafeInteger(command.tick) || command.tick < 0 || command.tick > untilTick ||
         command.sequence !== i || !Array.isArray(command.args) ||
-        (i > 0 && command.tick < commands[i - 1].tick)) throw new Error('Invalid command sequence');
+        (i > 0 && command.tick < commands[i - 1].tick)) invalid(`${path}[${i}]`, 'invalid command sequence');
   }
 }
 
@@ -287,12 +310,12 @@ function readCampaignCheckpoint(value: CampaignCheckpoint | undefined, scenarioI
 }
 
 export function restoreBattleSave(input: unknown): BattleSnapshot {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+  if (!isRecord(input)) {
     throw new Error('Invalid battle save header');
   }
-  const save = input as Partial<Omit<BattleSaveState, 'version'> & { version: 1 | typeof BATTLE_SAVE_VERSION }>;
-  if (save.kind !== 'aegis_battle_save' || (save.version !== 1 && save.version !== BATTLE_SAVE_VERSION)) {
-    throw new Error(`Unsupported save version ${String(save.version ?? 'missing')}; expected v1 or v${BATTLE_SAVE_VERSION}`);
+  const save = input as Partial<SavedBattleSlot['save']>;
+  if (save.kind !== 'aegis_battle_save' || (save.version !== 1 && save.version !== 2 && save.version !== BATTLE_SAVE_VERSION)) {
+    throw new Error(`Unsupported save version ${String(save.version ?? 'missing')}; expected v1, v2 or v${BATTLE_SAVE_VERSION}`);
   }
   if (save.rulesetVersion !== RULESET_VERSION) {
     throw new Error(`Incompatible ruleset version ${String(save.rulesetVersion ?? 'missing')}; expected ${RULESET_VERSION}`);
@@ -300,51 +323,44 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
   if (save.scenarioSchemaVersion !== SCENARIO_SCHEMA_VERSION) {
     throw new Error(`Incompatible scenario schema version ${String(save.scenarioSchemaVersion ?? 'missing')}; expected ${SCENARIO_SCHEMA_VERSION}`);
   }
-  if (!Number.isSafeInteger(save.seed) || !Array.isArray(save.commandHistory) || !save.snapshot || typeof save.digest !== 'string') {
-    throw new Error('Invalid battle save payload');
-  }
-  if (!Number.isSafeInteger(save.snapshot.tick) || save.snapshot.tick < 0 || save.snapshot.tick > 200000) {
-    throw new Error('Invalid save snapshot tick');
-  }
-  if (save.snapshot.commandSequence !== save.commandHistory.length) {
-    throw new Error('Save command history length mismatch');
-  }
-  validateCommandList(save.commandHistory, save.snapshot.tick);
+  const { digest, ...envelope } = input;
+  text(digest, 'save.digest');
+  const { snapshot } = save;
+  const { campaign, campaignStart } = save.version === 1 ? {} : save;
+  const expectedDigest = save.version === BATTLE_SAVE_VERSION
+    ? digestJson(envelope)
+    : save.version === 2 ? digestJson({ snapshot, campaign, campaignStart }) : digestJson(snapshot ?? null);
+  if (expectedDigest !== digest) throw new Error('Battle save digest mismatch (corrupted or tampered state)');
+
+  uint32(save.seed, 'save.seed');
+  if (!Array.isArray(save.commandHistory)) invalid('save.commandHistory', 'expected an array');
   const compiled = compileScenario(save.scenario);
   if (save.catalogVersion !== compiled.catalog.version) {
     throw new Error(`Incompatible catalog version ${String(save.catalogVersion ?? 'missing')}; scenario resolves to ${compiled.catalog.version}`);
   }
-  const { snapshot: clonedSnapshot, campaign, campaignStart } = structuredClone({
-    snapshot: save.snapshot,
-    campaign: save.version === BATTLE_SAVE_VERSION ? save.campaign : undefined,
-    campaignStart: save.version === BATTLE_SAVE_VERSION ? save.campaignStart : undefined,
-  });
-  const expectedDigest = save.version === 1
-    ? computeCanonicalDigest(clonedSnapshot)
-    : digestJson({ snapshot: clonedSnapshot, campaign, campaignStart });
-  if (expectedDigest !== save.digest) {
-    throw new Error('Battle save digest mismatch (corrupted or tampered state)');
+  checkBattleSnapshot(snapshot, 'save.snapshot', compiled.scenario, false);
+  if (snapshot.commandSequence !== save.commandHistory.length) {
+    invalid('save.snapshot.commandSequence', 'save command history length mismatch');
   }
-  checkExerciseTaskSnapshot(clonedSnapshot, compiled.scenario, 'save.snapshot.exerciseTask');
-  const restoredCampaign = readCampaignCheckpoint(campaign, compiled.scenario.id, clonedSnapshot);
-  const start = readCampaignStart(campaignStart ?? (restoredCampaign && !restoredCampaign.finished ? restoredCampaign : undefined), compiled.scenario.id);
+  validateCommandList(save.commandHistory, snapshot.tick, 'save.commandHistory');
+  checkExerciseTaskSnapshot(snapshot, compiled.scenario, 'save.snapshot.exerciseTask');
+  const restoredCampaign = readCampaignCheckpoint(structuredClone(campaign), compiled.scenario.id, snapshot);
+  const start = readCampaignStart(structuredClone(campaignStart) ?? (restoredCampaign && !restoredCampaign.finished ? restoredCampaign : undefined), compiled.scenario.id);
   if (restoredCampaign && start && restoredCampaign.playerSide !== start.playerSide) {
     invalid('campaignStart', 'command seat does not match the campaign');
   }
+  const restored = copyCheckedBattleSnapshot(snapshot);
 
   const previous = useWargameStore.getState();
   try {
     useWargameStore.getState().loadScenario(compiled.scenario, false, save.seed);
     useWargameStore.setState({
-      ...clonedSnapshot,
+      ...restored,
       campaignState: restoredCampaign,
       campaignStageStart: start ? { playerSide: start.playerSide, carryover: start.carryover } : undefined,
-      pendingSortieOrders: clonedSnapshot.pendingSortieOrders ?? [],
-      pendingTotStrikeOrders: clonedSnapshot.pendingTotStrikeOrders ?? [],
-      objectiveHoldProgress: clonedSnapshot.objectiveHoldProgress ?? {},
       commandHistory: structuredClone(save.commandHistory),
-      replaySnapshots: [structuredClone(clonedSnapshot)],
-      activePerspective: clonedSnapshot.playerSide,
+      replaySnapshots: [restored],
+      activePerspective: restored.playerSide,
       timeScale: 0,
       pendingSimSeconds: 0,
       selectedUnitId: null,
@@ -369,9 +385,29 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
 }
 
 let replayApplicationDepth = 0;
+let replayingLegacyExerciseHistory = false;
 
 export function isApplyingBattleRecording(): boolean {
   return replayApplicationDepth > 0;
+}
+
+export function isReplayingLegacyExerciseHistory(): boolean {
+  return replayingLegacyExerciseHistory;
+}
+
+function applyRecordedCommand(recording: BattleRecording, command: RecordedCommand, state: WargameStoreState) {
+  const previousLegacyHistory = replayingLegacyExerciseHistory;
+  replayingLegacyExerciseHistory = recording.version === BATTLE_RECORDING_VERSION || recording.legacyExerciseResets === true;
+  try {
+    const action = state[command.action as typeof COMMAND_ACTIONS[number]] as (...args: unknown[]) => void;
+    // JSON encodes optional positional arguments as null.
+    action(...structuredClone(command.args).map((arg) => arg === null ? undefined : arg));
+  } finally {
+    replayingLegacyExerciseHistory = previousLegacyHistory;
+  }
+  const next = useWargameStore.getState();
+  if (next.commandSequence !== command.sequence + 1) throw new Error('Recorded command is incompatible with the current rules');
+  return next;
 }
 
 export function advanceReplayRecordingIncremental(
@@ -401,13 +437,7 @@ export function advanceReplayRecordingIncremental(
     while (true) {
       let state = useWargameStore.getState();
       while (recording.commands[index]?.tick === state.tick) {
-        const command = recording.commands[index++];
-        const action = state[command.action as (typeof COMMAND_ACTIONS)[number]] as (...args: unknown[]) => void;
-        action(...structuredClone(command.args).map((arg) => (arg === null ? undefined : arg)));
-        state = useWargameStore.getState();
-        if (state.commandSequence !== command.sequence + 1) {
-          throw new Error('Recorded command is incompatible with the current rules');
-        }
+        state = applyRecordedCommand(recording, recording.commands[index++], state);
       }
       if (state.tick >= targetTick) break;
       if (state.battleResult) throw new Error('Recording advances past the end of the battle');
@@ -436,13 +466,13 @@ export function advanceReplayRecordingIncremental(
 }
 
 export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick?: number) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+  if (!isRecord(input)) {
     throw new Error('Invalid recording header');
   }
   const recording = input as Partial<BattleRecording>;
-  if (recording.version !== BATTLE_RECORDING_VERSION) {
+  if (!isBattleRecordingVersion(recording.version)) {
     const received = recording.version === 1 ? 'legacy v1' : String(recording.version ?? 'missing');
-    throw new Error(`Unsupported recording version ${received}; expected v${BATTLE_RECORDING_VERSION}`);
+    throw new Error(`Unsupported recording version ${received}; expected v${BATTLE_RECORDING_VERSION} or v${EXERCISE_RECORDING_VERSION}`);
   }
   if (recording.rulesetVersion !== RULESET_VERSION) {
     throw new Error(`Incompatible ruleset version ${String(recording.rulesetVersion ?? 'missing')}; expected ${RULESET_VERSION}`);
@@ -450,8 +480,8 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
   if (recording.scenarioSchemaVersion !== SCENARIO_SCHEMA_VERSION) {
     throw new Error(`Incompatible scenario schema version ${String(recording.scenarioSchemaVersion ?? 'missing')}; expected ${SCENARIO_SCHEMA_VERSION}`);
   }
-  if (!Number.isSafeInteger(recording.seed) ||
-      !Number.isSafeInteger(recording.untilTick) || recording.untilTick! < 0 || recording.untilTick! > 200000 ||
+  uint32(recording.seed, 'recording.seed');
+  if (!Number.isSafeInteger(recording.untilTick) || recording.untilTick! < 0 || recording.untilTick! > 200000 ||
       !Array.isArray(recording.commands) || recording.commands.length > 10000 ||
       !Number.isSafeInteger(batchTicks) || batchTicks < 1) throw new Error('Invalid recording header');
   const replayUntilTick = targetTick ?? recording.untilTick!;
@@ -464,28 +494,41 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
   }
   const validRecording = recording as BattleRecording;
   const campaignStart = readCampaignStart(validRecording.campaignStart, compiled.scenario.id);
-  validateCommandList(validRecording.commands, validRecording.untilTick);
+  validateCommandList(validRecording.commands, validRecording.untilTick, 'recording.commands');
+  if (validRecording.legacyExerciseResets !== undefined &&
+      (validRecording.legacyExerciseResets !== true || validRecording.version !== EXERCISE_RECORDING_VERSION ||
+        !hasLegacyExerciseReset(validRecording.commands))) {
+    invalid('recording.legacyExerciseResets', 'invalid legacy exercise history marker');
+  }
+  if (validRecording.version === EXERCISE_RECORDING_VERSION && !validRecording.legacyExerciseResets &&
+      hasLegacyExerciseReset(validRecording.commands)) {
+    invalid('recording.commands', 'the seat or mode cannot change after an exercise task is planned');
+  }
 
   let bestSnapshot: BattleSnapshot | CompactKeyframe | undefined;
+  if (validRecording.history !== undefined) checkBattleArchive(validRecording.history, 'recording.history');
   if (validRecording.snapshots !== undefined && (!Array.isArray(validRecording.snapshots) || validRecording.snapshots.length > MAX_KEYFRAMES)) {
     throw new Error('Invalid recording snapshot count');
   }
   if (validRecording.snapshots?.length) {
     let prevSnapTick = -1;
-    for (const snap of validRecording.snapshots) {
-      if (!snap || typeof snap !== 'object' || !Number.isSafeInteger(snap.tick) ||
-          snap.tick < 0 || snap.tick > validRecording.untilTick || snap.tick <= prevSnapTick ||
-          !Number.isSafeInteger(snap.commandSequence) || snap.commandSequence < 0 ||
-          snap.commandSequence > validRecording.commands.length) {
-        throw new Error('Invalid recording snapshot metadata');
+    for (const [index, snap] of validRecording.snapshots.entries()) {
+      const path = `recording.snapshots[${index}]`;
+      checkBattleSnapshot(snap, path, compiled.scenario, isRecord(snap) && Object.hasOwn(snap, 'history'));
+      if (snap.tick > validRecording.untilTick || snap.tick <= prevSnapTick) {
+        invalid(`${path}.tick`, 'snapshots must be ascending within the recording');
+      }
+      if (snap.commandSequence > validRecording.commands.length) {
+        invalid(`${path}.commandSequence`, 'outside the recording command list');
       }
       if (snap.commandSequence > 0 && validRecording.commands[snap.commandSequence - 1].tick > snap.tick) {
-        throw new Error('Invalid recording snapshot command alignment');
+        invalid(`${path}.commandSequence`, 'misaligned with the recording snapshot tick');
       }
       if (snap.commandSequence < validRecording.commands.length && validRecording.commands[snap.commandSequence].tick < snap.tick) {
-        throw new Error('Invalid recording snapshot future command alignment');
+        invalid(`${path}.commandSequence`, 'misaligned with the next recorded command');
       }
-      checkExerciseTaskSnapshot(snap, compiled.scenario, 'recording.snapshot.exerciseTask');
+      if ('history' in snap) checkKeyframeHistory(snap, validRecording.history, `${path}.history`);
+      checkExerciseTaskSnapshot(snap, compiled.scenario, `${path}.exerciseTask`);
       prevSnapTick = snap.tick;
       if (snap.tick <= replayUntilTick) {
         bestSnapshot = snap;
@@ -503,12 +546,9 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
     useWargameStore.setState({ autoPause: { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false } });
     let index = 0;
     if (bestSnapshot && bestSnapshot.tick > 0) {
-      const restored = inflateReplayKeyframe(bestSnapshot, validRecording.history);
+      const restored = copyCheckedBattleSnapshot(inflateReplayKeyframe(bestSnapshot, validRecording.history));
       useWargameStore.setState({
         ...restored,
-        pendingSortieOrders: restored.pendingSortieOrders ?? [],
-        pendingTotStrikeOrders: restored.pendingTotStrikeOrders ?? [],
-        objectiveHoldProgress: restored.objectiveHoldProgress ?? {},
         activePerspective: restored.playerSide,
         commandHistory: structuredClone(validRecording.commands.slice(0, restored.commandSequence)),
         replaySnapshots: [restored],
@@ -518,12 +558,7 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
     while (true) {
       let state = useWargameStore.getState();
       while (validRecording.commands[index]?.tick === state.tick) {
-        const command = validRecording.commands[index++];
-        const action = state[command.action as typeof COMMAND_ACTIONS[number]] as (...args: unknown[]) => void;
-        // JSON encodes optional positional arguments as null.
-        action(...structuredClone(command.args).map((arg) => arg === null ? undefined : arg));
-        state = useWargameStore.getState();
-        if (state.commandSequence !== command.sequence + 1) throw new Error('Recorded command is incompatible with the current rules');
+        state = applyRecordedCommand(validRecording, validRecording.commands[index++], state);
       }
       if (state.tick >= replayUntilTick) break;
       if (state.battleResult) throw new Error('Recording advances past the end of the battle');

@@ -13,6 +13,7 @@ import {
   resolveUnitConfiguration,
 } from '../../engine/unitConfiguration';
 import { emitActionFeedback } from '../actionFeedbackBus';
+import { isApplyingBattleRecording } from '../battleRecording';
 import type {
   CombatLogEntry,
   Domain,
@@ -37,6 +38,11 @@ function routeLegsAllowed(unit: RuntimeUnit, waypoints: RouteLeg[], environment:
     from = waypoint.position;
   }
   return true;
+}
+
+function hasTemporaryNavigation(unit: RuntimeUnit): boolean {
+  return !!(unit.airRefuelState || unit.evasionState ||
+    (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0));
 }
 
 function getPlannedWaypoints(unit: RuntimeUnit): RouteLeg[] {
@@ -195,14 +201,9 @@ export function createCommandSlice(set: StoreSet) {
         const unit = s.units[unitId];
         if (!canCommandUnit(s, unit)) return s;
         const baseWaypoints = getPlannedWaypoints(unit);
-        const inManeuver = !!(
-          unit.airRefuelState ||
-          unit.evasionState ||
-          (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0)
-        );
         if (
           baseWaypoints.length === 0 &&
-          !inManeuver &&
+          !hasTemporaryNavigation(unit) &&
           unit.navigationMode === 'manual' &&
           unit.missionTargetId === undefined &&
           unit.formationLeaderId === undefined &&
@@ -288,14 +289,9 @@ export function createCommandSlice(set: StoreSet) {
           const unit = s.units[id];
           if (!canCommandUnit(s, unit)) continue;
           const baseWaypoints = getPlannedWaypoints(unit);
-          const inManeuver = !!(
-            unit.airRefuelState ||
-            unit.evasionState ||
-            (unit.baffleClearState && unit.baffleClearState.untilSimTime > 0)
-          );
           if (
             baseWaypoints.length === 0 &&
-            !inManeuver &&
+            !hasTemporaryNavigation(unit) &&
             unit.navigationMode === 'manual' &&
             unit.missionTargetId === undefined &&
             unit.formationLeaderId === undefined &&
@@ -314,6 +310,13 @@ export function createCommandSlice(set: StoreSet) {
       const members = Object.values(s.units).filter((unit) => unit.parentGroupId === groupId &&
         unit.hp > 0 && unit.status !== 'destroyed' && unit.status !== 'recovered').sort((a, b) => a.id.localeCompare(b.id));
       if (members.length === 0 || (s.playMode !== 'sandbox' && members.some((unit) => unit.side !== s.playerSide))) return s;
+      // Old recordings may contain these accepted commands. Keep their historical
+      // behavior, but don't let a live edit overwrite a route managed by the simulation.
+      const blockedMember = !isApplyingBattleRecording() && members.find(hasTemporaryNavigation);
+      if (blockedMember) {
+        emitActionFeedback('warning', `${blockedMember.callsign} 正在执行临时机动，编队未更改；请在机动结束后重试。`);
+        return s;
+      }
       if (!leaderUnitId) {
         if (!members.some((unit) => unit.navigationMode === 'formation' || unit.formationLeaderId)) return s;
         const units = { ...s.units };

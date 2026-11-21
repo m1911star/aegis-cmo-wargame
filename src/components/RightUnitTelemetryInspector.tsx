@@ -21,8 +21,20 @@ import { InspectorTacviewCard } from './tacview/InspectorTacviewCard';
 import { UnitWeaponsHangarPanel } from './inspector/UnitWeaponsHangarPanel';
 
 const EMPTY_MISSIONS: never[] = [];
+type InspectorSections = Record<'kinematics' | 'doctrine' | 'systems', boolean>;
 
-export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetryInspector() {
+export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetryInspector({ open }: { open: boolean }) {
+  const [selectedTankerId, setSelectedTankerId] = useState('');
+  const [sections, setSections] = useState<InspectorSections>({ kinematics: true, doctrine: true, systems: true });
+  return open ? <InspectorContents {...{ selectedTankerId, setSelectedTankerId, sections, setSections }} /> : null;
+});
+
+function InspectorContents({ selectedTankerId, setSelectedTankerId, sections, setSections }: {
+  selectedTankerId: string;
+  setSelectedTankerId: (id: string) => void;
+  sections: InspectorSections;
+  setSections: React.Dispatch<React.SetStateAction<InspectorSections>>;
+}) {
   const rawUnit = useWargameStore((state) =>
     state.selectedUnitId ? state.units[state.selectedUnitId] ?? null : null
   );
@@ -44,7 +56,6 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const deployCarriedPlatform = useWargameStore((s) => s.deployCarriedPlatform);
   const cancelUnitReturn = useWargameStore((s) => s.cancelUnitReturn);
   const launchCarrierAircraft = useWargameStore((s) => s.launchCarrierAircraft);
-  const [selectedTankerId, setSelectedTankerId] = useState('');
 
   const environment = useWargameStore((s) => s.environment);
   const playerSide = useWargameStore((s) => s.playerSide);
@@ -179,6 +190,13 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
   const totalAmmo = selectedUnit.mounts.reduce((sum, mount) => sum + mount.currentAmmo, 0);
   const readyHangarSlot = selectedUnit.hangar.find((slot) => slot.readyAirframes > 0 && slot.cooldownRemainingSec <= 0);
   const isDestroyed = selectedUnit.hp <= 0 || selectedUnit.status === 'destroyed';
+  const sectionProps = (key: keyof InspectorSections) => ({
+    open: sections[key],
+    onToggle: (event: React.ToggleEvent<HTMLDetailsElement>) => {
+      const expanded = event.currentTarget.open;
+      setSections((prev) => prev[key] === expanded ? prev : { ...prev, [key]: expanded });
+    },
+  });
 
   return (
     <aside className="z-20 w-full h-full flex flex-col overflow-hidden">
@@ -526,7 +544,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           )}
         </div>
 
-        <details open className="group bg-card/85 border border-border">
+        <details {...sectionProps('kinematics')} className="group bg-card/85 border border-border">
           <summary className="text-[11px] font-semibold text-foreground cursor-pointer list-none flex items-center justify-between py-0.5">
             <span>运动与航路控制</span>
             <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
@@ -543,7 +561,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           </div>
         </details>
 
-        <details open className="group bg-card/85 border border-border">
+        <details {...sectionProps('doctrine')} className="group bg-card/85 border border-border">
           <summary className="text-[11px] font-semibold text-foreground cursor-pointer list-none flex items-center justify-between py-0.5">
             <span>条令、EMCON 与 WRA</span>
             <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
@@ -557,7 +575,7 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
           </div>
         </details>
 
-        <details open className="group bg-card/85 border border-border">
+        <details {...sectionProps('systems')} className="group bg-card/85 border border-border">
           <summary className="text-[11px] font-semibold text-foreground cursor-pointer list-none flex items-center justify-between py-0.5">
             <span>传感器、弹药与机库出动</span>
             <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
@@ -573,4 +591,4 @@ export const RightUnitTelemetryInspector = React.memo(function RightUnitTelemetr
       </div>
     </aside>
   );
-});
+}

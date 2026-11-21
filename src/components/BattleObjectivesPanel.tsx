@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { evaluateAreaControlStatus, type AreaControlState } from '../engine/objectives';
@@ -51,8 +51,10 @@ function AreaControlDetails({ objective, status, ended }: {
   );
 }
 
-export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
-  const [expanded, setExpanded] = useState(false);
+export const BattleObjectivesPanel = memo(function BattleObjectivesPanel({ expanded, setExpanded }: {
+  expanded: boolean;
+  setExpanded: Dispatch<SetStateAction<boolean>>;
+}) {
   const scenario = useWargameStore((state) => state.currentScenario);
   const allObjectives = useWargameStore((state) => state.objectives);
   const side = useWargameStore((state) => state.playerSide);

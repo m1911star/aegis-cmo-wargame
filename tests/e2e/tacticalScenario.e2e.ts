@@ -1,6 +1,44 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import type { BattleSaveState } from '../../src/store/battleRecording';
+
+function readAutosaveCheckpoint(page: Page) {
+  return page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase | undefined>((resolve, reject) => {
+      const request = indexedDB.open('aegis-cmo-checkpoints');
+      // Observe the application's checkpoint; don't create the database ourselves.
+      request.onupgradeneeded = () => request.transaction?.abort();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => {
+        if (request.error?.name === 'AbortError') resolve(undefined);
+        else reject(request.error);
+      };
+    });
+    if (!db) return undefined;
+    try {
+      return await new Promise<BattleSaveState | undefined>((resolve, reject) => {
+        const request = db.transaction('checkpoints', 'readonly').objectStore('checkpoints').get('autosave');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      db.close();
+    }
+  });
+}
+
+async function waitForAutosaveCheckpoint(page: Page, tick: number) {
+  let checkpoint: BattleSaveState | undefined;
+  await expect.poll(async () => (checkpoint = await readAutosaveCheckpoint(page))).toMatchObject({
+    kind: 'aegis_battle_save',
+    digest: expect.stringMatching(/\S/),
+    snapshot: { tick },
+  });
+  return checkpoint;
+}
 
 test.beforeEach(async ({ page }) => {
+  // These workflow checks use the built-in offline map, not external tile availability.
+  await page.route('https://tiles.openfreemap.org/**', (route) => route.abort());
   await page.goto('/');
   await expect(page.getByText('AEGIS-CMO', { exact: true })).toBeVisible();
 });
@@ -84,7 +122,7 @@ test('edits scenario groups, objectives and area events in sandbox builder', asy
   await page.getByLabel('编组名称').fill('E2E 联合编组');
   await page.getByRole('button', { name: '保存编组' }).click();
   await page.getByLabel('目标标题').fill('E2E 主要目标');
-  await page.getByLabel('目标单位').selectOption('blue_ddg125_lucas');
+  await page.getByLabel('目标单位', { exact: true }).selectOption('blue_ddg125_lucas');
   await page.getByRole('button', { name: '添加主要目标' }).click();
   await expect(page.getByText('RED · E2E 主要目标', { exact: true })).toBeVisible();
   await page.getByLabel('事件参考点 RP-1 东海ADIZ北界点').check();
@@ -242,6 +280,7 @@ test('resumes a blue-side campaign checkpoint after reloading the browser', asyn
 
 test('restores the latest automatic checkpoint across a reload', async ({ page }) => {
   await page.getByRole('button', { name: '+5秒' }).click();
+  await waitForAutosaveCheckpoint(page, 20);
   await page.getByLabel('重置当前想定').click();
   await page.getByRole('button', { name: '取消' }).click();
   await page.getByLabel('选择战役想定').selectOption('interactive_command_tutorial');
@@ -254,13 +293,13 @@ test('restores the latest automatic checkpoint across a reload', async ({ page }
 
 test('requires confirmation before mid-battle reset and launches live map replay player', async ({ page }) => {
   await page.getByRole('button', { name: '+5秒' }).click();
+  const autosaveBefore = await waitForAutosaveCheckpoint(page, 20);
   await page.getByLabel('重置当前想定').click();
   await expect(page.getByRole('alertdialog', { name: '确认重置或切换想定' })).toBeVisible();
   await page.getByRole('button', { name: '取消' }).click();
 
   await page.getByRole('button', { name: '想定管理' }).click();
   await page.getByRole('button', { name: '生成指令重放 JSON' }).click();
-  const autosaveBefore = await page.evaluate(() => localStorage.getItem('aegis_cmo_autosave_v1'));
   await page.getByLabel('回放时间轴').fill('0');
   await page.getByRole('button', { name: '启动地图航迹回放播放器' }).click();
   const player = page.getByLabel('地图航迹回放播放器');
@@ -275,6 +314,7 @@ test('requires confirmation before mid-battle reset and launches live map replay
   await page.clock.runFor(1000);
   await expect(player).toContainText('Tick 4/20');
   await expect(player.getByText('已暂停')).toBeVisible();
+  expect(await readAutosaveCheckpoint(page)).toEqual(autosaveBefore);
   await expect(page.getByRole('button', { name: '开始推演' })).toHaveCount(0);
   await player.getByRole('button', { name: '+5s' }).press('Enter');
   await expect(player.getByText('已到末尾')).toBeVisible();
@@ -282,7 +322,7 @@ test('requires confirmation before mid-battle reset and launches live map replay
   await expect(player).toContainText('Tick 0/20');
   await player.getByRole('button', { name: '退出回放' }).press('Enter');
   await expect(page.getByText(/^种子 \d+ · Tick 20$/)).toBeAttached();
-  expect(await page.evaluate(() => localStorage.getItem('aegis_cmo_autosave_v1'))).toBe(autosaveBefore);
+  expect(await readAutosaveCheckpoint(page)).toEqual(autosaveBefore);
 });
 
 test('filters equipment catalog and triggers manual countermeasure from inspector', async ({ page }) => {
@@ -356,11 +396,18 @@ test('generates and launches a custom skirmish battle from theater and force pac
 });
 
 test('toggles 3D terrain extrusion, drags independent 3D air-sea viewport, and renders 3D replay in AAR', async ({ page }) => {
-  await page.getByLabel('选择战役想定').selectOption('op_east_sea_thunder_2027');
+  const scenario = page.getByLabel('选择战役想定', { exact: true });
+  await expect(scenario).toHaveValue('limited_information_exercise');
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  await scenario.selectOption('op_east_sea_thunder_2027');
+  await expect(scenario).toHaveValue('op_east_sea_thunder_2027');
+  const orderPanel = page.locator('#order-panel');
+  await expect(orderPanel.getByText('DRAGON-01', { exact: true })).toBeVisible();
 
   // 1. Toggle 3D terrain extrusion in MapLayersTab
-  await page.getByRole('button', { name: '图层' }).click();
-  const terrain3dSwitch = page.getByLabel('立体山脊遮蔽 (3D Pitch)');
+  await orderPanel.getByRole('button', { name: '包线图层', exact: true }).click();
+  await expect(orderPanel.getByText('地图显示设置', { exact: true })).toBeVisible();
+  const terrain3dSwitch = orderPanel.getByRole('switch', { name: '立体山脊遮蔽 (3D Pitch)', exact: true });
   await expect(terrain3dSwitch).toBeVisible();
   await terrain3dSwitch.click();
   await expect(terrain3dSwitch).toHaveAttribute('aria-checked', 'true');

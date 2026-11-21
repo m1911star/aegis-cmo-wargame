@@ -1509,5 +1509,7 @@ export function exportCurrentStateAsScenarioJson(
       (bonus) => !bonus.unitId || retainedIds.has(bonus.unitId)
     );
   }
-  return JSON.stringify(exported, null, 2);
+  // A scenario is a clean restart, not a checkpoint. Block dangling mission/event
+  // references and any other compile error instead of emitting an unloadable file.
+  return JSON.stringify(compileScenario(exported).scenario, null, 2);
 }

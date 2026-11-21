@@ -3,6 +3,7 @@ import type { ExerciseTask, ExerciseTaskCriterion } from '../../engine/exerciseT
 import { exerciseTaskOffer } from '../../scenarios/informationExercise';
 import type { RuntimeUnit } from '../../types/wargame';
 import { emitActionFeedback } from '../actionFeedbackBus';
+import { isReplayingLegacyExerciseHistory } from '../battleRecording';
 import type { StoreGet, StoreSet, WargameStoreState } from '../types';
 
 export function taskUnitEligible(state: WargameStoreState, criterion: ExerciseTaskCriterion, unit?: RuntimeUnit): unit is RuntimeUnit {
@@ -38,7 +39,12 @@ export function createExerciseTaskSlice(set: StoreSet, get: StoreGet) {
       const context = commandContext();
       if (!context) return;
       const { state, criterion, deadlineTick } = context;
-      if (state.exerciseTask) return warn('每局只能安排一项演练任务。');
+      // Older files may have cleared the task during a seat/mode change. Only
+      // replay of that recorded history may reproduce another plan in the run.
+      if (state.exerciseTask || (!isReplayingLegacyExerciseHistory() &&
+          state.commandHistory.some(({ action }) => action === 'planExerciseTask'))) {
+        return warn('每局只能安排一项演练任务。');
+      }
       if (!Number.isSafeInteger(opensAtTick) || !Number.isSafeInteger(closesAtTick) ||
           opensAtTick < state.tick || closesAtTick < opensAtTick || closesAtTick <= state.tick || closesAtTick > deadlineTick) {
         return warn('请选当前时刻或之后的有效窗口，结束不能超过演练时限。');

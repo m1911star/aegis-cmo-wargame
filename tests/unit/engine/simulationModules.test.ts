@@ -11,7 +11,7 @@ import { createAarLedger, recordAarTick } from '../../../src/engine/aar';
 import { evaluateBattleAssessment } from '../../../src/engine/simulation/battleAssessment';
 import { createRuntimeUnitFromPlacement } from '../../../src/engine/simulation/unitFactory';
 import { advanceSimulation, type SimulationWorldState } from '../../../src/engine/simulationEngine';
-import { SimulationWorkerClient, type WorkerLike } from '../../../src/engine/workerClient';
+import { SimulationWorkerClient, StaleSimulationBatchError, type WorkerLike } from '../../../src/engine/workerClient';
 import {
   handleSimulationWorkerRequest,
   type SimulationWorkerRequest,
@@ -310,7 +310,7 @@ describe('modular simulation boundaries', () => {
 
     // Mismatched epoch rejects cleanly
     activeMockWorker!.mode = 'stale_epoch';
-    await expect(client.runBatch(world, catalog, 1, pauses, 'RED', 6)).rejects.toThrow(/epoch/i);
+    await expect(client.runBatch(world, catalog, 1, pauses, 'RED', 6)).rejects.toBeInstanceOf(StaleSimulationBatchError);
 
     // Crash via onerror seamlessly falls back for in-flight batch AND spawns a fresh worker on next batch
     activeMockWorker!.mode = 'crash_onerror';
@@ -327,6 +327,35 @@ describe('modular simulation boundaries', () => {
     const fallbackPost = await client.runBatch(world, catalog, 1, pauses, 'RED', 8);
     expect(fallbackPost.nextState.tick).toBe(4);
     client.resetRecoveryState();
+    client.dispose();
+  });
+
+  test('a worker crash does not execute superseded or invalidated fallback batches', async () => {
+    let fallbackReads = 0;
+    const world: SimulationWorldState = {
+      simTime: 0,
+      units: {},
+      contacts: {},
+      weaponsInFlight: {},
+      explosions: [],
+      missions: [],
+      get score() { fallbackReads += 1; return emptyScore(); },
+    };
+    const pauses = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
+    const worker: WorkerLike = {
+      onmessage: null, onerror: null, terminate: () => {}, postMessage: () => {},
+    };
+    const client = new SimulationWorkerClient(() => worker);
+    let current = true;
+    const superseded = client.runBatch(world, catalog, 1, pauses, 'RED');
+    const invalidated = client.runBatch(world, catalog, 1, pauses, 'RED', undefined, () => current);
+    const outcomes = Promise.allSettled([superseded, invalidated]);
+    current = false;
+    worker.onerror!({} as ErrorEvent);
+    for (const outcome of await outcomes) {
+      expect(outcome).toMatchObject({ status: 'rejected', reason: expect.any(StaleSimulationBatchError) });
+    }
+    expect(fallbackReads).toBe(0);
     client.dispose();
   });
 
@@ -649,4 +678,3 @@ describe('modular simulation boundaries', () => {
     expect(ledger.events[0].altitudeM).toBe(14200);
   });
 });
-
