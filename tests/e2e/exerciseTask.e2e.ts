@@ -56,6 +56,21 @@ test('schedules next to objectives, reassigns after a wait, and replays the prec
   await expect(panel.getByRole('button', { name: '暂停任务' })).toBeDisabled();
 });
 
+test('starts a task at confirmation when no start time was entered', async ({ page }) => {
+  await page.goto('/');
+  const panel = page.getByRole('region', { name: '演练任务', exact: true });
+  await panel.getByRole('button', { name: '安排任务' }).click();
+  await panel.getByLabel('指定单位').selectOption({ label: 'RED-ONE' });
+  await page.getByRole('button', { name: '+5秒' }).click();
+  await panel.getByLabel('开始（秒）').fill('0');
+  await panel.getByRole('button', { name: '确认排程' }).click();
+  await expect(page.getByText('请选当前时刻或之后的有效窗口，结束不能超过演练时限。')).toBeVisible();
+  await panel.getByLabel('开始（秒）').clear();
+  await panel.getByRole('button', { name: '确认排程' }).click();
+  await expect(panel).toContainText('进行中');
+  await expect(panel).toContainText('00:05.00 至 15:00.00');
+});
+
 test('opens the compact inspector even if the assigned observer is already selected', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

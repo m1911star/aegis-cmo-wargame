@@ -55,15 +55,16 @@ function SeatExerciseTaskPanel({ criterion, deadlineTick, scenario, onUnitDetail
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-semibold">演练任务</h2>
         {!task && !draft && options.length > 0 && <Button size="xs" variant="outline" onClick={() => {
-          const { tick } = useWargameStore.getState();
-          setDraft({ unit: options.length === 1 ? options[0][0] : '', opens: String(tick * FIXED_DT_SEC), closes: String(deadlineTick * FIXED_DT_SEC) });
+          setDraft({ unit: options.length === 1 ? options[0][0] : '', opens: '', closes: String(deadlineTick * FIXED_DT_SEC) });
         }}>安排任务</Button>}
         {task && <span className={task.phase === 'completed' ? 'text-emerald-300' : 'text-cyan-300'}>{exerciseTaskPhase[task.phase]}</span>}
       </div>
       {!task && options.length === 0 && <p className="text-muted-foreground">本席位没有可用的任务单位。</p>}
       {!task && draft && <form className="space-y-2" onSubmit={(event) => {
         event.preventDefault();
-        useWargameStore.getState().planExerciseTask(draft.unit, Number(draft.opens) / FIXED_DT_SEC, Number(draft.closes) / FIXED_DT_SEC);
+        const state = useWargameStore.getState();
+        const opensAtTick = draft.opens === '' ? state.tick : Number(draft.opens) / FIXED_DT_SEC;
+        state.planExerciseTask(draft.unit, opensAtTick, Number(draft.closes) / FIXED_DT_SEC);
         if (useWargameStore.getState().exerciseTask) setDraft(undefined);
       }}>
         <p>{title} <span className="text-muted-foreground">· 不计分</span></p>
@@ -74,12 +75,12 @@ function SeatExerciseTaskPanel({ criterion, deadlineTick, scenario, onUnitDetail
           </select>
         </label>
         <div className="grid grid-cols-2 gap-2">
-          <label>开始（秒）<input className={fieldClass} required type="number" min="0" max={deadlineTick * FIXED_DT_SEC}
-            step={FIXED_DT_SEC} value={draft.opens} onChange={(e) => setDraft({ ...draft, opens: e.target.value })} /></label>
+          <label>开始（秒）<input className={fieldClass} type="number" min="0" max={deadlineTick * FIXED_DT_SEC}
+            placeholder="确认时" step={FIXED_DT_SEC} value={draft.opens} onChange={(e) => setDraft({ ...draft, opens: e.target.value })} /></label>
           <label>结束（秒）<input className={fieldClass} required type="number" min="0" max={deadlineTick * FIXED_DT_SEC}
             step={FIXED_DT_SEC} value={draft.closes} onChange={(e) => setDraft({ ...draft, closes: e.target.value })} /></label>
         </div>
-        <p className="text-muted-foreground">从演练开始计时，含结束时刻。</p>
+        <p className="text-muted-foreground">从演练开始计时，含结束时刻。开始留空则在确认时生效。</p>
         <div className="flex flex-wrap gap-1">
           <Button size="sm" type="submit" disabled={!Object.hasOwn(units, draft.unit)}>确认排程</Button>
           <Button size="sm" variant="ghost" onClick={() => setDraft(undefined)}>取消</Button>
