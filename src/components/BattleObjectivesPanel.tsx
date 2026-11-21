@@ -1,7 +1,8 @@
 import { memo, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-import { evaluateAreaControlStatus } from '../engine/objectives';
+import { evaluateAreaControlStatus, type AreaControlState } from '../engine/objectives';
+import type { ObjectiveProgress, ScenarioObjective } from '../types/wargame';
 import { useWargameStore } from '../store/useWargameStore';
 import { Progress } from './ui/progress';
 
@@ -12,14 +13,51 @@ const OUTCOME_LABELS = {
   draw: '未分胜负',
 };
 
+type VisibleStatus = ObjectiveProgress[string] | 'unconfirmed';
+
+const STATUS_LABELS: Record<VisibleStatus, string> = {
+  achieved: '已达成', failed: '未达成', pending: '进行中', unconfirmed: '待确认',
+};
+
+const CONTROL_LABELS: Record<AreaControlState, string> = {
+  uncontested: '己方稳固控制', suppressing: '优势兵力压制中 (0.5x)', contested: '敌我胶着争夺',
+  overwhelmed: '遭敌优势兵力压制', vacant: '待推进进驻',
+};
+
+function AreaControlDetails({ objective, status, ended }: {
+  objective: ScenarioObjective; status: VisibleStatus; ended: boolean;
+}) {
+  const area = useWargameStore(useShallow((s) => {
+    if (status === 'unconfirmed') {
+      const ownUnits = Object.fromEntries(Object.entries(s.units).filter(([, unit]) => unit.side === objective.side));
+      return { status, ownPresent: evaluateAreaControlStatus(objective, ownUnits).ownStrength > 0 } as const;
+    }
+    return { status, state: evaluateAreaControlStatus(objective, s.units).state, heldSec: s.objectiveHoldProgress[objective.id] ?? 0 } as const;
+  }));
+  const requiredSec = objective.holdDurationSec;
+  if (area.status === 'unconfirmed') {
+    return <> · {area.ownPresent ? '己方力量已进驻' : '己方力量未进驻'} · 占控未确认{requiredSec && ` · 需持续占控 ${requiredSec}s`}</>;
+  }
+  const label = CONTROL_LABELS[area.state];
+  if (!requiredSec) return ended ? null : <> · {label}</>;
+  const color = area.status === 'achieved' ? 'bg-emerald-400' : area.state === 'contested' ? 'bg-amber-400'
+    : area.state === 'overwhelmed' || area.state === 'vacant' ? 'bg-rose-400' : 'bg-cyan-400';
+  return (
+    <>
+      {!ended && ` · 持续占控 ${Math.floor(area.heldSec)}s/${requiredSec}s (${label})`}
+      <Progress value={area.status === 'achieved' ? 100 : Math.round(area.heldSec / requiredSec * 100)}
+        indicatorClassName={color} className="mt-1.5" />
+    </>
+  );
+}
+
 export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const [expanded, setExpanded] = useState(false);
   const scenario = useWargameStore((state) => state.currentScenario);
   const allObjectives = useWargameStore((state) => state.objectives);
-  const units = useWargameStore((state) => state.units);
   const side = useWargameStore((state) => state.playerSide);
-  const progress = useShallow ? useWargameStore(useShallow((state) => state.objectiveProgress)) : {};
-  const holdProgress = useShallow ? useWargameStore(useShallow((state) => state.objectiveHoldProgress)) : {};
+  const playMode = useWargameStore((state) => state.playMode);
+  const progress = useWargameStore(useShallow((state) => state.objectiveProgress));
   const result = useWargameStore((state) => state.battleResult);
   const campaignState = useWargameStore((state) => state.campaignState);
   const setActiveModal = useWargameStore((state) => state.setActiveModal);
@@ -27,18 +65,19 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
   const elapsedDisplaySec = useWargameStore((state) =>
     Math.ceil((state.simTime - state.startTime) / 1000)
   );
-  const objectives = useMemo(
-    () => allObjectives.filter((objective) => objective.side === side),
-    [allObjectives, side]
-  );
-  const achievedCount = objectives.filter((objective) => progress[objective.id] === 'achieved').length;
+  const reveal = playMode === 'sandbox' || !!result;
+  const objectives = useMemo(() => allObjectives.filter((objective) => objective.side === side).map((objective) => ({
+    objective,
+    status: !reveal && objective.type === 'control_area' ? 'unconfirmed' as const : progress[objective.id] ?? 'pending',
+  })), [allObjectives, side, progress, reveal]);
+  const achievedCount = objectives.filter(({ status }) => status === 'achieved').length;
   const outcome = result?.outcomes[side === 'BLUE' ? 'BLUE' : 'RED'];
   const remaining = Math.max(
     0,
     (scenario.victoryConditions?.durationSec ?? 0) - elapsedDisplaySec
   );
   const showDetails = expanded || !!result;
-  const nextRequired = !result && objectives.find((objective) => objective.required && progress[objective.id] !== 'achieved' && progress[objective.id] !== 'failed');
+  const nextRequired = objectives.find(({ objective, status }) => objective.required && (status === 'pending' || status === 'unconfirmed'));
 
   return (
     <section className="p-2.5 rounded-lg border border-border bg-card/90 text-xs space-y-2 shadow-xs" aria-label="任务目标">
@@ -58,7 +97,9 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
           </span>
         )}
       </button>
-      {!showDetails && nextRequired && <p className="text-[11px] text-muted-foreground">待完成主要目标 · {nextRequired.title}</p>}
+      {!showDetails && nextRequired && <p className="text-[11px] text-muted-foreground">
+        {nextRequired.status === 'unconfirmed' ? '待确认主要目标' : '待完成主要目标'} · {nextRequired.objective.title}
+      </p>}
       {showDetails && (
         <div className="space-y-2 pt-1">
           {!objectives.length && (
@@ -66,73 +107,19 @@ export const BattleObjectivesPanel = memo(function BattleObjectivesPanel() {
               本想定按时间与积分结算；目标型体验请选择「有限信息演练」。
             </p>
           )}
-          {objectives.map((objective) => {
-            let controlHint = '';
-            let holdPct: number | null = null;
-            let holdIndicatorClass = 'bg-cyan-400';
-            if (objective.type === 'control_area' && objective.areaPolygon && objective.areaPolygon.length >= 3) {
-              const status = evaluateAreaControlStatus(objective, units);
-              const stateLabel =
-                status.state === 'uncontested'
-                  ? '己方稳固控制'
-                  : status.state === 'suppressing'
-                    ? '优势兵力压制中 (0.5x)'
-                    : status.state === 'contested'
-                      ? '敌我胶着争夺'
-                      : status.state === 'overwhelmed'
-                        ? '遭敌优势兵力压制'
-                        : '待推进进驻';
-              if (objective.holdDurationSec && objective.holdDurationSec > 0) {
-                const heldSec = Math.floor(holdProgress[objective.id] ?? 0);
-                holdPct = Math.min(100, Math.round(((holdProgress[objective.id] ?? 0) / objective.holdDurationSec) * 100));
-                holdIndicatorClass =
-                  progress[objective.id] === 'achieved'
-                    ? 'bg-emerald-400'
-                    : status.state === 'contested'
-                      ? 'bg-amber-400'
-                      : status.state === 'overwhelmed' || status.state === 'vacant'
-                        ? 'bg-rose-400'
-                        : 'bg-cyan-400';
-                controlHint = !result
-                  ? ` · 持续占控 ${heldSec}s/${objective.holdDurationSec}s (${stateLabel})`
-                  : '';
-              } else if (!result) {
-                controlHint = ` · ${stateLabel}`;
-              }
-            }
-            return (
-              <div key={objective.id} className="border-t border-border pt-2">
-                <span
-                  className={
-                    progress[objective.id] === 'achieved'
-                      ? 'text-emerald-300 font-medium'
-                      : progress[objective.id] === 'failed'
-                        ? 'text-rose-300 font-medium'
-                        : 'text-foreground font-medium'
-                  }
-                >
-                  {progress[objective.id] === 'achieved'
-                    ? '已达成'
-                    : progress[objective.id] === 'failed'
-                      ? '未达成'
-                      : '进行中'}{' '}
-                  · {objective.title}
-                </span>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {objective.required ? '主要目标' : '次要目标'} · {objective.points} 分
-                  {objective.criticalFailure ? ' · 损失将终止任务' : ''}
-                  {controlHint}
-                </p>
-                {holdPct !== null && (
-                  <Progress
-                    value={progress[objective.id] === 'achieved' ? 100 : holdPct}
-                    indicatorClassName={holdIndicatorClass}
-                    className="mt-1.5"
-                  />
-                )}
+          {objectives.map(({ objective, status }) => (
+            <div key={objective.id} className="border-t border-border pt-2">
+              <span className={status === 'achieved' ? 'text-emerald-300 font-medium'
+                : status === 'failed' ? 'text-rose-300 font-medium' : 'text-foreground font-medium'}>
+                {STATUS_LABELS[status]} · {objective.title}
+              </span>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                {objective.required ? '主要目标' : '次要目标'} · {objective.points} 分
+                {objective.criticalFailure ? ' · 损失将终止任务' : ''}
+                {objective.type === 'control_area' && <AreaControlDetails objective={objective} status={status} ended={!!result} />}
               </div>
-            );
-          })}
+            </div>
+          ))}
           {result && (
             <div className="space-y-2 pt-1">
               <p className="text-[11px] text-muted-foreground">

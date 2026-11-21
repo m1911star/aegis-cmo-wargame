@@ -11,6 +11,7 @@ This implementation is a lightweight game model, not a validated model of real e
 - `playerSide` defines command authority; `activePerspective` is only an observation view. `playMode: sandbox` explicitly grants editor authority. GOD view alone does not grant commands.
 - Unit, mission, hangar and loadout actions enforce command authority in the store, not only in buttons. Spawning requires sandbox mode. Runtime loadout changes remain an editor feature.
 - Ordinary enemy selection resolves to a contact owned by the player's side. Detection logs contain `contactId`, not a selectable hostile runtime unit. Enemy command logs and exact damage reports are withheld until debrief; own-platform losses remain available.
+- In command mode, area objectives show only whether eligible friendly units are present and how long the scenario requires them to hold. The control state, hold clock, and resolution stay hidden until debrief, regardless of map view. Sandbox shows the exact state.
 - Observed enemy missiles use the same radar observation model as interception. Revealing a missile does not reveal its historical trajectory back to launch.
 - This is a local single-player sandbox. The client holds world truth; these boundaries prevent gameplay/UI leaks, not inspection through developer tools or a hostile network client.
 

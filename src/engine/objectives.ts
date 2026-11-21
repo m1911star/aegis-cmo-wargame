@@ -112,6 +112,10 @@ export function resolveWithdrawalAreas(
   }
 }
 
+export function objectiveResolutionLogId(objectiveId: string, simTime: number): string {
+  return `objective_${objectiveId}_${simTime}`;
+}
+
 export function evaluateObjectives(
   objectives: ScenarioObjective[], previous: ObjectiveProgress, units: Record<string, RuntimeUnit>,
   contacts: Record<string, TacticalContact>, score: ScoreLedger, simTime: number, startTime: number,
@@ -167,7 +171,7 @@ export function evaluateObjectives(
       if (objective.side === 'RED') score.redScore += objective.points;
       else score.blueScore += objective.points;
     }
-    if (achieved || failed) logs.push({ id: `objective_${objective.id}_${simTime}`, simTime,
+    if (achieved || failed) logs.push({ id: objectiveResolutionLogId(objective.id, simTime), simTime,
       side: objective.side, category: 'EVENT', severity: failed ? 'warning' : 'info',
       title: `${achieved ? '目标达成' : '目标未达成'}：${objective.title}`,
       message: achieved ? `任务奖励 ${objective.points} 分。` : '按该目标的必需性和失败规则结算，不以单次战损统一判负。' });

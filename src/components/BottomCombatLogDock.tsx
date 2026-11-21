@@ -77,6 +77,7 @@ export const BottomCombatLogDock: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [filterCat, setFilterCat] = useState<CombatLogCategory | 'ALL'>('ALL');
   const allLogs = useWargameStore((s) => s.logs);
+  const objectives = useWargameStore((s) => s.objectives);
   const playerSide = useWargameStore((s) => s.playerSide);
   const playMode = useWargameStore((s) => s.playMode);
   const battleResult = useWargameStore((s) => s.battleResult);
@@ -91,7 +92,7 @@ export const BottomCombatLogDock: React.FC = () => {
     return n;
   });
   const reveal = playMode === 'sandbox' || !!battleResult;
-  const logs = useMemo(() => visibleLogs(allLogs, playerSide, reveal), [allLogs, playerSide, reveal]);
+  const logs = useMemo(() => visibleLogs(allLogs, playerSide, reveal, objectives), [allLogs, playerSide, reveal, objectives]);
   const filteredLogs = useMemo(
     () => (isExpanded ? (filterCat === 'ALL' ? logs : logs.filter((l) => l.category === filterCat)) : []),
     [isExpanded, filterCat, logs]

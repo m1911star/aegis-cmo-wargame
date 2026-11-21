@@ -20,7 +20,7 @@ import { INFORMATION_EXERCISE } from '../../src/scenarios/informationExercise';
 import { BUILTIN_SCENARIOS, SCENARIO_BASHI_CHANNEL_BLOCKADE as bashi, SCENARIO_DEEP_SEA_CARRIER_HUNT as deep, SCENARIO_EAST_SEA_THUNDER as east, exportCurrentStateAsScenarioJson, instantiateScenarioUnits } from '../../src/scenarios/builtinScenarios';
 import { useWargameStore as store } from '../../src/store/useWargameStore';
 import { BATTLE_RECORDING_VERSION, RULESET_VERSION, SCENARIO_SCHEMA_VERSION, captureBattleRecording, canonicalBattleState, replayBattleRecording } from '../../src/store/battleRecording';
-import type { InitialUnitPlacement, RuntimeUnit, ScenarioDefinition, ScenarioObjective, TacticalContact, TacticalMission, UnitDoctrine, WeaponInFlight, WeaponSpec } from '../../src/types/wargame';
+import type { CombatLogEntry, InitialUnitPlacement, RuntimeUnit, ScenarioDefinition, ScenarioObjective, TacticalContact, TacticalMission, UnitDoctrine, WeaponInFlight, WeaponSpec } from '../../src/types/wargame';
 
 const pausesOff = { onNewContact: false, onMissileDetected: false, onUnitHitOrDestroyed: false };
 const score = () => ({ redLosses: 0, blueLosses: 0, redMissilesFired: 0, blueMissilesFired: 0,
@@ -113,7 +113,15 @@ describe('Command authority and preparation', () => {
     s.selectLogEntry(log.id);
     expect(store.getState().selectedContactId).toBe(log.contactId!);
     expect(store.getState().selectedUnitId === null || store.getState().units[store.getState().selectedUnitId!].side === 'RED').toBe(true);
-    expect(visibleLogs(s.logs, 'RED', false).every((l) => l.side !== 'BLUE')).toBe(true);
+    expect(visibleLogs(s.logs, 'RED', false, s.objectives).every((l) => l.side !== 'BLUE')).toBe(true);
+  });
+
+  test('live logs hide the area resolution but keep another objective with the same title', () => {
+    const area: ScenarioObjective = { id: 'relay_zone', side: 'BLUE', type: 'control_area', title: 'Handoff', unitIds: [], required: true, points: 50 };
+    const observation: ScenarioObjective = { ...area, id: 'relay_zone_marker', type: 'observe', unitIds: ['marker'] };
+    const areaLog: CombatLogEntry = { id: 'objective_relay_zone_5000', simTime: 5000, side: 'BLUE', category: 'EVENT', severity: 'info', title: 'Handoff complete', message: '' };
+    const observationLog = { ...areaLog, id: 'objective_relay_zone_marker_5000' };
+    expect(visibleLogs([areaLog, observationLog], 'BLUE', false, [area, observation])).toEqual([observationLog]);
   });
 
   test('risk authorization consumes ammo once; HOLD and AOU do not bypass cooldown', () => {

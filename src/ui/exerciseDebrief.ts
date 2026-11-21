@@ -1,4 +1,5 @@
 import type { AarEventRecord, CombatLogEntry, ObjectiveProgress, ScenarioObjective } from '../types/wargame';
+import { objectiveResolutionLogId } from '../engine/objectives';
 
 type RecordedMoment = { label: string; simTime: number };
 
@@ -22,7 +23,7 @@ export function projectExerciseDebrief(side: ScenarioObjective['side'], objectiv
   return objectives.filter((goal) => goal.side === side && goal.required).map((goal) => {
     const status = progress[goal.id] ?? 'pending';
     const achieved = status === 'achieved' && logs.find((log) => log.side === side && log.category === 'EVENT' &&
-      log.id === `objective_${goal.id}_${log.simTime}`);
+      log.id === objectiveResolutionLogId(goal.id, log.simTime));
     const moment = achieved ? { label: '目标达成记录', simTime: achieved.simTime } : relatedMoment(goal, events);
     return { id: goal.id, title: goal.title, status, moment };
   });

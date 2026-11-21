@@ -1,4 +1,5 @@
-import type { CombatLogEntry, PlayMode, RuntimeUnit, SideId, TacticalContact } from '../types/wargame';
+import type { CombatLogEntry, PlayMode, RuntimeUnit, ScenarioObjective, SideId, TacticalContact } from '../types/wargame';
+import { objectiveResolutionLogId } from './objectives';
 import { isActiveUnit } from './unitCapabilities';
 
 export interface CommandContext {
@@ -12,8 +13,11 @@ export function canCommandUnit(context: CommandContext, unit?: RuntimeUnit): uni
     (context.playMode === 'sandbox' || unit.side === context.playerSide);
 }
 
-export function visibleLogs(logs: CombatLogEntry[], side: SideId, sandbox: boolean) {
-  return sandbox ? logs : logs.filter((log) => log.side === side || log.side === 'SYSTEM');
+export function visibleLogs(logs: CombatLogEntry[], side: SideId, reveal: boolean, objectives: readonly ScenarioObjective[]) {
+  if (reveal) return logs;
+  const areaGoals = objectives.filter((goal) => goal.type === 'control_area' && goal.side === side);
+  return logs.filter((log) => (log.side === side || log.side === 'SYSTEM') &&
+    !(log.category === 'EVENT' && areaGoals.some((goal) => log.id === objectiveResolutionLogId(goal.id, log.simTime))));
 }
 
 export function contactForUnit(contacts: Record<string, TacticalContact>, side: SideId, unitId: string) {
