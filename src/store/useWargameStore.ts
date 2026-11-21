@@ -4,6 +4,7 @@ import { recordAarTick } from '../engine/aar';
 import { COMMAND_ACTIONS } from '../engine/determinism';
 import { isApplyingBattleRecording } from './battleRecording';
 import { createCommandSlice } from './slices/commandSlice';
+import { createExerciseTaskSlice } from './slices/exerciseTaskSlice';
 import { createMissionAndBuilderSlice } from './slices/missionAndBuilderSlice';
 import { createScenarioSlice, extractSimulationWorldState } from './slices/scenarioSlice';
 import type { WargameStoreState } from './types';
@@ -24,6 +25,7 @@ export const useWargameStore = create<WargameStoreState>()(
     const state: WargameStoreState = {
       ...createScenarioSlice(set, get),
       ...createCommandSlice(set),
+      ...createExerciseTaskSlice(set, get),
       ...createMissionAndBuilderSlice(set),
     };
     for (const name of COMMAND_ACTIONS) {

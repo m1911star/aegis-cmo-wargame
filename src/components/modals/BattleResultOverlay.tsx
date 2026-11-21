@@ -3,6 +3,8 @@ import { Award, ChartColumn, Compass, RotateCcw } from 'lucide-react';
 import { evaluateBattleAssessment } from '../../engine/simulation/battleAssessment';
 import { INFORMATION_EXERCISE } from '../../scenarios/informationExercise';
 import { exerciseClock, projectExerciseDebrief } from '../../ui/exerciseDebrief';
+import { exerciseTaskClock, exerciseTaskEndReason, exerciseTaskPhase, exerciseTaskTitle } from '../../ui/exerciseTask';
+import { captureBattleRecording } from '../../store/battleRecording';
 import { useWargameStore } from '../../store/useWargameStore';
 import { Button } from '../ui/button';
 import { ModalFooter, ModalHeader, ModalShell } from '../ui/dialog';
@@ -20,6 +22,12 @@ interface Props {
 
 export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const battleResult = useWargameStore((s) => s.battleResult);
+  const exerciseTask = useWargameStore((s) => s.exerciseTask);
+  const taskCallsign = useWargameStore((s) => {
+    if (!s.exerciseTask || s.exerciseTask.criterion.side !== s.playerSide) return;
+    const unit = s.units[s.exerciseTask.assignedUnitId];
+    return unit?.side === s.playerSide ? unit.callsign : undefined;
+  });
   const score = useWargameStore((s) => s.score);
   const currentScenario = useWargameStore((s) => s.currentScenario);
   const playerSide = useWargameStore((s) => s.playerSide);
@@ -38,6 +46,8 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const side = playerSide === 'BLUE' ? 'BLUE' : 'RED';
   const shortExercise = currentScenario.id === INFORMATION_EXERCISE.id && playMode === 'command' && !campaignState;
   const debrief = shortExercise ? projectExerciseDebrief(side, objectives, objectiveProgress, logs, events) : [];
+  const task = shortExercise && exerciseTask?.criterion.side === side ? exerciseTask : undefined;
+  const taskEnd = task?.end;
   const outcome = battleResult.outcomes[side];
   const scoreSummary = shortExercise
     ? `积分：红方 ${score.redScore} · 蓝方 ${score.blueScore}`
@@ -81,6 +91,14 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
             )}
             <div className="text-cyan-300">{scoreSummary}</div>
           </div>
+
+          {task && taskEnd && <section aria-label="演练任务记录" className="space-y-1.5 rounded-lg border border-border bg-muted/35 p-3.5">
+            <p className="font-semibold">演练任务 · {exerciseTaskPhase[task.phase]} · {exerciseTaskTitle[task.criterion.kind]}{taskCallsign && ` · ${taskCallsign}`}</p>
+            <p className="text-muted-foreground">{exerciseTaskClock(taskEnd.tick)} · {exerciseTaskEndReason[taskEnd.reason]}</p>
+            <Button size="sm" variant="outline" onClick={() => {
+              useWargameStore.getState().startReplayPlayer(captureBattleRecording(), taskEnd.tick);
+            }}>回放任务记录</Button>
+          </section>}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3.5 rounded-lg bg-rose-500/8 border border-rose-500/25 space-y-1">

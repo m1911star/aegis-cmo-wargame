@@ -3,12 +3,13 @@ import { Compass, Crosshair, Layers, Radar } from 'lucide-react';
 import { useWargameStore } from '../store/useWargameStore';
 import { cn } from '../lib/utils';
 import { BattleObjectivesPanel } from './BattleObjectivesPanel';
+import { ExerciseTaskPanel } from './ExerciseTaskPanel';
 import { ContactsListTab } from './sidebar/ContactsListTab';
 import { MapLayersTab } from './sidebar/MapLayersTab';
 import { MissionsTab } from './sidebar/MissionsTab';
 import { OrbatTreeTab } from './sidebar/OrbatTreeTab';
 
-export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSidebar() {
+export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSidebar({ onUnitDetails }: { onUnitDetails: () => void }) {
   const [activeTab, setActiveTab] = useState<'orbat' | 'contacts' | 'missions' | 'layers'>('orbat');
   const contacts = useWargameStore((s) => s.contacts);
   const activePerspective = useWargameStore((s) => s.activePerspective);
@@ -55,6 +56,7 @@ export const LeftOrbatMissionSidebar = React.memo(function LeftOrbatMissionSideb
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
         <BattleObjectivesPanel />
+        <ExerciseTaskPanel onUnitDetails={onUnitDetails} />
         {activeTab === 'orbat' && <OrbatTreeTab />}
         {activeTab === 'contacts' && <ContactsListTab visibleContacts={visibleContacts} />}
         {activeTab === 'missions' && <MissionsTab />}

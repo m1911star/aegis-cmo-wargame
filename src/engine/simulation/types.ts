@@ -20,7 +20,10 @@ import type {
   WeaponInFlight,
 } from '../../types/wargame';
 
+import type { ExerciseTask } from '../exerciseTask';
+
 export interface SimulationWorldState {
+  exerciseTask?: ExerciseTask;
   tick?: number;
   rngState?: number;
   objectives?: ScenarioObjective[];

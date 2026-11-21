@@ -1,10 +1,17 @@
-import type { ScenarioDefinition } from '../types/wargame';
+import { FIXED_DT_SEC } from '../engine/determinism';
+import { isPointInCompiledPolygon } from '../engine/environment';
+import type { ExerciseTaskCriterion } from '../engine/exerciseTask';
+import type { ScenarioDefinition, SideId } from '../types/wargame';
 import { MASTER_EQUIPMENT_CATALOG } from '../catalog/equipmentCatalog';
 
 const catalog = MASTER_EQUIPMENT_CATALOG;
 const redHandoff: [number, number] = [123.31, 25.32];
 const blueHandoff: [number, number] = [124.70, 25];
 const exerciseMinutes = 15;
+const observeObjectiveId = 'red_primary';
+const observe = { kind: 'observe_marker', side: 'RED', markerUnitId: 'exercise_blue_target' } as const satisfies ExerciseTaskCriterion;
+const handoff = { kind: 'friendly_handoff', side: 'BLUE', objectiveId: 'blue_primary', unitId: observe.markerUnitId,
+  referencePointId: 'exercise_blue_handoff' } as const satisfies ExerciseTaskCriterion;
 function handoffArea([lon, lat]: [number, number], margin: number): [number, number][] {
   return [[lon - margin, lat - margin], [lon + margin, lat - margin],
     [lon + margin, lat + margin], [lon - margin, lat + margin]];
@@ -41,7 +48,7 @@ export const INFORMATION_EXERCISE: ScenarioDefinition = {
       doctrine: { roe: 'hold', emconRadar: false }, assignedMissionId: 'exercise_red_observe' },
     { id: 'exercise_red_reserve', name: '红方预备舰', callsign: 'RED-TWO', side: 'RED', platformId: 'type052d_destroyer', parentGroupId: 'exercise_red',
       position: [123.35, 24.9], heading: 90, speedKts: 10, doctrine: { roe: 'tight', emconRadar: false } },
-    { id: 'exercise_blue_target', name: '蓝方演习标志船', callsign: 'BLUE-TARGET', side: 'BLUE', platformId: 'exercise_target', parentGroupId: 'exercise_blue',
+    { id: handoff.unitId, name: '蓝方演习标志船', callsign: 'BLUE-TARGET', side: 'BLUE', platformId: 'exercise_target', parentGroupId: 'exercise_blue',
       position: [124.65, 25], heading: 0, speedKts: 15, waypoints: [[124.65, 25.3]], doctrine: { roe: 'hold', emconRadar: false } },
     { id: 'exercise_blue_guard', name: '蓝方保护舰', callsign: 'BLUE-GUARD', side: 'BLUE', platformId: 'arleigh_burke_flt3', parentGroupId: 'exercise_blue',
       position: [124.5, 25.05], heading: 0, speedKts: 15, waypoints: [[124.5, 25.3]], doctrine: { roe: 'tight', emconRadar: true } },
@@ -57,7 +64,7 @@ export const INFORMATION_EXERCISE: ScenarioDefinition = {
   ],
   referencePoints: [
     { id: 'exercise_red_handoff', side: 'RED', name: '观察机交接点', position: redHandoff, locked: true },
-    { id: 'exercise_blue_handoff', side: 'BLUE', name: '标志船交接点', position: blueHandoff, locked: true },
+    { id: handoff.referencePointId, side: 'BLUE', name: '标志船交接点', position: blueHandoff, locked: true },
   ],
   events: [{ id: 'exercise_midpoint', name: '演练过半', description: '半程时提醒玩家核对目标，不揭示对方状态。',
     trigger: { type: 'TIME_ELAPSED', elapsedSec: exerciseMinutes * 30 },
@@ -66,11 +73,27 @@ export const INFORMATION_EXERCISE: ScenarioDefinition = {
   }],
   victoryConditions: { durationSec: exerciseMinutes * 60, tacticalVictoryThreshold: 100, decisiveVictoryThreshold: 300 },
   objectives: [
-    { id: 'red_primary', side: 'RED', title: '取得演习标志船的接触', type: 'observe', unitIds: ['exercise_blue_target'], required: true, points: 100 },
+    { id: observeObjectiveId, side: 'RED', title: '取得演习标志船的接触', type: 'observe', unitIds: [observe.markerUnitId], required: true, points: 100 },
     { id: 'red_return', side: 'RED', title: '让观察机抵达交接点', type: 'withdraw', unitIds: ['exercise_red_scout'], required: false, points: 40,
       withdrawAreaPolygon: handoffArea(redHandoff, 0.015), withdrawUnitDomains: ['air'] },
-    { id: 'blue_primary', side: 'BLUE', title: '让标志船抵达交接点', type: 'withdraw', unitIds: ['exercise_blue_target'], required: true, points: 100,
+    { id: handoff.objectiveId, side: 'BLUE', title: '让标志船抵达交接点', type: 'withdraw', unitIds: [handoff.unitId], required: true, points: 100,
       withdrawAreaPolygon: handoffArea(blueHandoff, 0.009), withdrawUnitDomains: ['surface'] },
     { id: 'blue_preserve', side: 'BLUE', title: '保全观察机', type: 'preserve', unitIds: ['exercise_blue_scout'], required: false, points: 40 },
   ],
 };
+
+export function exerciseTaskOffer(scenario: ScenarioDefinition, side: SideId, objectives = scenario.objectives) {
+  if (scenario.id !== INFORMATION_EXERCISE.id || !scenario.victoryConditions) return;
+  const deadlineTick = Math.min(200000, Math.ceil(scenario.victoryConditions.durationSec / FIXED_DT_SEC));
+  if (side === 'RED' && objectives?.some((o) => o.id === observeObjectiveId && o.side === side &&
+      o.type === 'observe' && o.unitIds.length === 1 && o.unitIds[0] === observe.markerUnitId)) {
+    return { criterion: observe, deadlineTick };
+  }
+  if (side === 'BLUE') {
+    const area = objectives?.find((o) => o.id === handoff.objectiveId && o.side === side && o.type === 'withdraw' &&
+      (!o.withdrawUnitDomains || o.withdrawUnitDomains.includes('surface')) && o.unitIds.length === 1 &&
+      o.unitIds[0] === handoff.unitId)?.withdrawAreaPolygon;
+    const point = scenario.referencePoints.find((rp) => rp.id === handoff.referencePointId && rp.side === side && rp.locked);
+    if (area && point && isPointInCompiledPolygon(point.position, area)) return { criterion: handoff, deadlineTick };
+  }
+}

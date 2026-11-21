@@ -11,7 +11,8 @@ export const COMMAND_ACTIONS = ['setPlayerSide', 'setPlayMode', 'appendUnitWaypo
   'assignUnitGroup', 'upsertObjective', 'deleteObjective', 'upsertEnvironmentPolygon', 'deleteEnvironmentPolygon',
   'createAreaEventFromReferencePoints', 'deleteScenarioEvent',
   'executeManualEngage', 'scheduleTotStrike', 'addReferencePoint',
-  'removeReferencePoint', 'startSpawnUnitOnMap', 'startForcePackageSpawnOnMap', 'spawnUnitAtCoordinate'] as const;
+  'removeReferencePoint', 'startSpawnUnitOnMap', 'startForcePackageSpawnOnMap', 'spawnUnitAtCoordinate',
+  'planExerciseTask', 'reassignExerciseTask', 'setExerciseTaskPaused', 'stopExerciseTask'] as const;
 
 export function createRandomStream(initialState: number) {
   let state = initialState >>> 0;

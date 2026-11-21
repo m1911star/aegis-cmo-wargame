@@ -66,6 +66,11 @@ export default function App() {
     setPanels((current) => ({ order: !isNarrowWorkspace() && current.order, inspector: true }));
   }, []);
 
+  const openFocusedInspector = useCallback(() => {
+    focusInspector.current = true;
+    openInspector();
+  }, [openInspector]);
+
   useEffect(() => useWargameStore.subscribe(
     (s) => [s.selectedContactId ?? s.selectedUnitId, s.playerSide] as const,
     ([selection, side], [, previousSide]) => {
@@ -259,7 +264,7 @@ export default function App() {
       {/* 中间主体区：100%全屏 WebGL 态势地图为底，左右侧栏以半透明悬浮抽屉展开 */}
       <div className="workspace">
         <div id="order-panel" className="workspace-pane order-pane" hidden={!panels.order}>
-          <LeftOrbatMissionSidebar />
+          <LeftOrbatMissionSidebar onUnitDetails={openFocusedInspector} />
         </div>
         <main className="workspace-map-stage" data-left-open={panels.order} data-right-open={panels.inspector}>
           <TacticalMapCanvas leftOpen={panels.order} rightOpen={panels.inspector} />
@@ -267,10 +272,7 @@ export default function App() {
           {showOpening && !(compact && (panels.order || panels.inspector)) && (
             <FirstExerciseCard
               onDismiss={() => setDismissedOpening(openingScenario)}
-              onContactOpened={() => {
-                focusInspector.current = true;
-                openInspector();
-              }}
+              onContactOpened={openFocusedInspector}
             />
           )}
         </main>

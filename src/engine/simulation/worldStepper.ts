@@ -1,6 +1,7 @@
 import { createAarLedger, recordAarTick } from '../aar';
 import { processPendingSortieOrders } from '../carrierOperations';
 import { createRandomStream, DEFAULT_SEED, FIXED_DT_SEC } from '../determinism';
+import { advanceExerciseTask, hasExerciseHandoffReceipt } from '../exerciseTask';
 import { deriveMissionAssignments } from '../missions';
 import { computeContactsOnly } from '../sensors';
 import type {
@@ -290,6 +291,8 @@ function stepWorkingWorldInPlace(
     triggerPause,
   });
 
+  const task = world.exerciseTask;
+  const hadReceipt = !!task && hasExerciseHandoffReceipt(task, units[task.assignedUnitId]);
   const objectiveEvaluation = resolveEventsAndObjectives({
     events,
     pendingSortieOrders,
@@ -315,6 +318,10 @@ function stepWorkingWorldInPlace(
   }
   logs.push(...objectiveEvaluation.logs);
   const nextTick = (world.tick ?? 0) + 1;
+  if (task && !task.end) {
+    const received = !hadReceipt && hasExerciseHandoffReceipt(task, units[task.assignedUnitId]);
+    world.exerciseTask = advanceExerciseTask(task, nextTick, nextSimTime, contacts, received, !!objectiveEvaluation.battleResult);
+  }
   recordAarTick(aar, nextTick, nextSimTime, units, logs, !!objectiveEvaluation.battleResult);
 
   world.startTime = startTime;

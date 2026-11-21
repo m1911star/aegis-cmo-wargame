@@ -74,6 +74,10 @@ In the fictional fifteen-minute exercise, Red earns its primary objective by obs
 
 At Tick 0 the opening card shows only the command seat’s goal and contact estimate. The exercise debrief pairs the objective status with a recorded moment when available; related events are not proof of completion. Same-condition retry starts a fresh battle at the original seed and command seat. These are tested rules, not a claim about human balance or replay value.
 
+The **演练任务** panel beside the objectives offers one optional plan for the current command seat. On compact screens, open **编制** to find it. Enter start and end times in elapsed simulation seconds. Both boundary ticks count. Red can reassign the observer without changing the window. Only a fresh marker report from the assigned unit counts, not a retained contact or another unit's report. Blue uses the marker vessel and the existing withdrawal receipt. **规划交接航线** replaces its current route with a waypoint at the existing friendly handoff. No route changes automatically.
+
+Pausing the task pauses acceptance, not simulation or movement. The window still closes on time. If Blue receives the one-time handoff receipt before the window opens or while the task is paused, the task stops at the receipt tick without treating it as completion. The original objective still counts it. Task results do not affect scoring or victory. A seat switch, a mode change, or a scenario reset clears the plan. Saves and recordings retain it. The debrief shows the recorded task time separately from the primary objective and can open read-only map replay at that tick.
+
 ## Determinism and recordings
 
 - The application accumulates measured elapsed time multiplied by playback speed. Only fixed 0.25-second ticks advance the model; delayed frames do not enlarge or skip ticks.

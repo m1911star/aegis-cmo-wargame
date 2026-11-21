@@ -1,5 +1,6 @@
 import type { StoreApi } from 'zustand';
 import type { RecordedCommand } from '../engine/determinism';
+import type { ExerciseTask } from '../engine/exerciseTask';
 import type { FireControlSolution } from '../engine/fireControl';
 import type { SimulationStepResult } from '../engine/simulationEngine';
 import type { BasemapMode } from '../map/basemaps';
@@ -158,6 +159,11 @@ export interface WargameStoreState {
   objectiveProgress: ObjectiveProgress;
   objectiveHoldProgress: ObjectiveHoldProgress;
   battleResult?: BattleResult;
+  exerciseTask?: ExerciseTask;
+  planExerciseTask: (assignedUnitId: string, opensAtTick: number, closesAtTick: number) => void;
+  reassignExerciseTask: (assignedUnitId: string) => void;
+  setExerciseTaskPaused: (paused: boolean) => void;
+  stopExerciseTask: () => void;
   creditedDamage: Record<string, number>;
   detectedMissileIds: string[];
   aar: BattleAarLedger;

@@ -1,12 +1,14 @@
 import { COMMAND_ACTIONS, FIXED_DT_SEC, SNAPSHOT_INTERVAL_TICKS, type RecordedCommand } from '../engine/determinism';
 import { summarizeAar } from '../engine/aar';
+import { hasExerciseHandoffReceipt } from '../engine/exerciseTask';
 import { compileScenario } from '../scenarios/compileScenario';
+import { exerciseTaskOffer } from '../scenarios/informationExercise';
 import {
   BUILTIN_CAMPAIGN_WESTPAC, CAMPAIGN_RESUPPLY_OPTIONS, MAX_CAMPAIGN_SUPPLY_POINTS, MIN_AIRBASE_INTEGRITY_PCT,
   type CampaignStageStart, type CampaignState,
 } from '../scenarios/campaign';
 import type { BattleAarLedger, ScenarioDefinition } from '../types/wargame';
-import { array, boolean, invalid, number, object, oneOf, optional, record, text } from '../validation/schema';
+import { array, boolean, id, invalid, number, object, oneOf, optional, record, text } from '../validation/schema';
 import { emitActionFeedback } from './actionFeedbackBus';
 import { compactReplayKeyframes, inflateReplayKeyframe, MAX_KEYFRAMES, type CompactKeyframe } from './replayKeyframes';
 import { useWargameStore, type WargameStoreState } from './useWargameStore';
@@ -115,6 +117,7 @@ function battleSnapshotFields(state: WargameStoreState) {
     environment: state.environment, score: state.score,
     objectiveProgress: state.objectiveProgress,
     objectiveHoldProgress: state.objectiveHoldProgress,
+    ...(state.exerciseTask && { exerciseTask: state.exerciseTask }),
     battleResult: state.battleResult,
     creditedDamage: state.creditedDamage, detectedMissileIds: state.detectedMissileIds, aar: state.aar,
     playerSide: state.playerSide, playMode: state.playMode, referencePoints: state.referencePoints,
@@ -175,6 +178,52 @@ function validateCommandList(commands: RecordedCommand[], untilTick: number) {
         !Number.isSafeInteger(command.tick) || command.tick < 0 || command.tick > untilTick ||
         command.sequence !== i || !Array.isArray(command.args) ||
         (i > 0 && command.tick < commands[i - 1].tick)) throw new Error('Invalid command sequence');
+  }
+}
+
+function checkExerciseTaskSnapshot(snapshot: BattleSnapshot | CompactKeyframe, scenario: ScenarioDefinition, path: string) {
+  const task = snapshot.exerciseTask;
+  if (task === undefined) return;
+  if (!Array.isArray(snapshot.objectives) || snapshot.playMode !== 'command') invalid(path, 'invalid exercise task context');
+  const offer = exerciseTaskOffer(scenario, snapshot.playerSide, snapshot.objectives);
+  if (!offer) invalid(path, 'exercise task does not belong to this seat');
+  const tick = number(0, offer.deadlineTick, true);
+  object({
+    criterion: object(Object.fromEntries(Object.entries(offer.criterion).map(([key, value]) => [key, oneOf([value])]))),
+    phase: oneOf(['scheduled', 'running', 'paused', 'completed', 'stopped']),
+    assignedUnitId: id,
+    opensAtTick: tick,
+    closesAtTick: tick,
+    reassignedAtTick: optional(number(0, snapshot.tick, true)),
+  })(task, path);
+  const unit = snapshot.units?.[task.assignedUnitId];
+  if (!unit || unit.side !== offer.criterion.side ||
+      (offer.criterion.kind === 'friendly_handoff' && (unit.id !== offer.criterion.unitId || unit.domain !== 'surface' ||
+        task.reassignedAtTick !== undefined || !Array.isArray(unit.completedWithdrawalObjectiveIds)))) {
+    invalid(`${path}.assignedUnitId`, 'invalid friendly assignment');
+  }
+  if (task.opensAtTick > task.closesAtTick) invalid(path, 'invalid exercise task window');
+  const endPath = `${path}.end`;
+  if (task.phase === 'completed' || task.phase === 'stopped') {
+    const reasons = task.phase === 'completed'
+      ? offer.criterion.kind === 'observe_marker' ? ['marker_report'] : ['handoff_receipt']
+      : ['cancelled', 'window_closed', 'exercise_ended', ...(offer.criterion.kind === 'friendly_handoff'
+        ? ['handoff_before_open', 'handoff_while_paused'] : [])];
+    object({ tick: number(0, Math.min(task.closesAtTick, snapshot.tick), true), reason: oneOf(reasons) })(task.end, endPath);
+    const end = task.end;
+    if (end.reason === 'marker_report') id(end.contactId, `${endPath}.contactId`);
+    if ((task.phase === 'completed' && end.tick < task.opensAtTick) ||
+        (end.reason === 'window_closed' && end.tick !== task.closesAtTick) ||
+        (end.reason === 'handoff_before_open' && end.tick >= task.opensAtTick) ||
+        (end.reason === 'handoff_while_paused' && end.tick < task.opensAtTick) ||
+        (task.reassignedAtTick !== undefined && task.reassignedAtTick > end.tick) ||
+        (['handoff_receipt', 'handoff_before_open', 'handoff_while_paused'].includes(end.reason) && !hasExerciseHandoffReceipt(task, unit))) {
+      invalid(endPath, 'inconsistent task evidence');
+    }
+  } else if (task.end !== undefined || snapshot.battleResult || hasExerciseHandoffReceipt(task, unit) || snapshot.tick >= task.closesAtTick ||
+      (task.phase === 'scheduled' && snapshot.tick >= task.opensAtTick) ||
+      (task.phase === 'running' && snapshot.tick < task.opensAtTick)) {
+    invalid(path, 'inconsistent active task');
   }
 }
 
@@ -276,6 +325,7 @@ export function restoreBattleSave(input: unknown): BattleSnapshot {
   if (expectedDigest !== save.digest) {
     throw new Error('Battle save digest mismatch (corrupted or tampered state)');
   }
+  checkExerciseTaskSnapshot(clonedSnapshot, compiled.scenario, 'save.snapshot.exerciseTask');
   const restoredCampaign = readCampaignCheckpoint(campaign, compiled.scenario.id, clonedSnapshot);
   const start = readCampaignStart(campaignStart ?? (restoredCampaign && !restoredCampaign.finished ? restoredCampaign : undefined), compiled.scenario.id);
   if (restoredCampaign && start && restoredCampaign.playerSide !== start.playerSide) {
@@ -435,6 +485,7 @@ export function replayBattleRecording(input: unknown, batchTicks = 1, targetTick
       if (snap.commandSequence < validRecording.commands.length && validRecording.commands[snap.commandSequence].tick < snap.tick) {
         throw new Error('Invalid recording snapshot future command alignment');
       }
+      checkExerciseTaskSnapshot(snap, compiled.scenario, 'recording.snapshot.exerciseTask');
       prevSnapTick = snap.tick;
       if (snap.tick <= replayUntilTick) {
         bestSnapshot = snap;

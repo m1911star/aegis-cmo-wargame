@@ -158,6 +158,7 @@ export function extractSimulationWorldState(s: WargameStoreState): SimulationWor
     objectives: s.objectives,
     objectiveProgress: s.objectiveProgress,
     objectiveHoldProgress: s.objectiveHoldProgress,
+    ...(s.exerciseTask && { exerciseTask: s.exerciseTask }),
     creditedDamage: s.creditedDamage,
     detectedMissileIds: s.detectedMissileIds,
     aar: s.aar,
@@ -226,6 +227,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       const firstUnitId = Object.values(s.units).find((u) => u.side === side)?.id ?? null;
       set({
         playerSide: side,
+        exerciseTask: undefined,
         activePerspective: side,
         selectedContactId: null,
         selectedUnitId: firstUnitId,
@@ -236,6 +238,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
       if (get().playMode === mode) return;
       set({
         playMode: mode, timeScale: 0, pendingRiskEngagement: null,
+        exerciseTask: undefined,
         selectedUnitId: null, selectedUnitIds: [], selectedContactId: null, interactionMode: 'select', activePerspective: get().playerSide,
       });
     },
@@ -514,7 +517,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           replayPlayer: applyingRecording ? state.replayPlayer : null,
           seed: boot.seed, rngState: boot.rngState, tick: 0, pendingSimSeconds: 0,
           commandSequence: 0, commandHistory: [], replaySnapshots: [], objectiveProgress: {}, objectiveHoldProgress: {}, battleResult: undefined,
-          creditedDamage: {}, detectedMissileIds: [], aar: boot.aar, pendingRiskEngagement: null,
+          exerciseTask: undefined, creditedDamage: {}, detectedMissileIds: [], aar: boot.aar, pendingRiskEngagement: null,
           pendingSpawnConfig: null, pendingForcePackageConfig: null, pendingPolygonDraft: null,
           pendingWeaponIdForEngage: null, pendingStrikeWaypoints: [],
           currentScenario: boot.scenario,
@@ -802,6 +805,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
             score: result.nextState.score,
             objectiveProgress: result.nextState.objectiveProgress ?? {},
             objectiveHoldProgress: result.nextState.objectiveHoldProgress ?? {},
+            ...(result.nextState.exerciseTask && { exerciseTask: result.nextState.exerciseTask }),
             battleResult: result.nextState.battleResult,
             creditedDamage: result.nextState.creditedDamage ?? {},
             detectedMissileIds: result.nextState.detectedMissileIds ?? [],
@@ -821,6 +825,7 @@ export function createScenarioSlice(set: StoreSet, get: StoreGet) {
           replaySnapshots,
           objectiveProgress: result.nextState.objectiveProgress ?? {},
           objectiveHoldProgress: result.nextState.objectiveHoldProgress ?? {},
+          exerciseTask: result.nextState.exerciseTask,
           objectives: result.nextState.objectives ?? prev.objectives,
           battleResult: result.nextState.battleResult,
           creditedDamage: result.nextState.creditedDamage ?? {},
