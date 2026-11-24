@@ -33,10 +33,12 @@ test('replay cannot reset or replace the paused original battle', async ({ page 
   await expect(confirm).toBeHidden();
   await expect(page.getByRole('button', { name: '战役模式' })).toBeDisabled();
   await expect(page.getByRole('button', { name: '遭遇战' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '指挥模式' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '想定编辑' })).toBeDisabled();
 
   await manage.click();
   await dialog.getByRole('button', { name: '生成指令重放 JSON' }).click();
-  for (const name of ['读档', '加载重放到记录末尾', '恢复断点存档', /跳转至 Tick/, '按此种子重新开局', '校验并热加载此想定']) {
+  for (const name of ['新建断点存档槽', '读档', '覆盖', '生成断点存档 JSON', '加载重放到记录末尾', '恢复断点存档', /跳转至 Tick/, '按此种子重新开局', '校验并热加载此想定']) {
     await expect(dialog.getByRole('button', { name })).toBeDisabled();
   }
   await expect(launch).toBeEnabled();

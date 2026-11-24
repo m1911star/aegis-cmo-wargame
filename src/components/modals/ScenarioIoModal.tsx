@@ -217,7 +217,9 @@ export const ScenarioIoModal: React.FC = () => {
             <Button
               size="sm"
               variant="success"
+              {...liveOnly}
               onClick={() => {
+                if (useWargameStore.getState().replayPlayer) return;
                 try {
                   saveBattleToSlot(slotNameInput);
                   setSaveSlots(listBattleSaveSlots());
@@ -269,7 +271,9 @@ export const ScenarioIoModal: React.FC = () => {
                     <Button
                       size="xs"
                       variant="outline"
+                      {...liveOnly}
                       onClick={() => {
+                        if (useWargameStore.getState().replayPlayer) return;
                         try {
                           saveBattleToSlot(slot.label, slot.slotId);
                           setSaveSlots(listBattleSaveSlots());
@@ -342,7 +346,8 @@ export const ScenarioIoModal: React.FC = () => {
             try { replayBattleRecording(readRecording(), 60); setActiveModal('none'); }
             catch (error) { setJsonError(error instanceof Error ? error.message : '重放失败'); }
           }}>加载重放到记录末尾</Button>
-          <Button size="sm" variant="outline" onClick={() => {
+          <Button size="sm" variant="outline" {...liveOnly} onClick={() => {
+            if (useWargameStore.getState().replayPlayer) return;
             const save = captureBattleSave();
             setFileRecording(null);
             setJsonText(JSON.stringify(save, null, 2));

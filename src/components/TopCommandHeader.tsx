@@ -177,18 +177,18 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
         type="button"
         className={`toolbar-button ${playMode === 'sandbox' ? 'text-emerald-200 border-emerald-500/45 bg-emerald-500/15' : 'toolbar-button-subtle'}`}
         aria-pressed={playMode === 'sandbox'}
-        disabled={exerciseTaskConfirmed}
-        title={exerciseTaskConfirmed ? RESTART_TO_CHANGE_HINT : '沙盒模式可编辑双方；与观察视角独立'}
-        onClick={() => setPlayMode(playMode === 'command' ? 'sandbox' : 'command')}
+        disabled={replayOpen || exerciseTaskConfirmed}
+        title={replayOpen ? EXIT_REPLAY_HINT : exerciseTaskConfirmed ? RESTART_TO_CHANGE_HINT : '沙盒模式可编辑双方；与观察视角独立'}
+        onClick={() => { if (!useWargameStore.getState().replayPlayer) setPlayMode(playMode === 'command' ? 'sandbox' : 'command'); }}
       >
         {playMode === 'sandbox' ? '沙盒模式' : '指挥模式'}
       </button>
       <button
         type="button"
-        disabled={playMode !== 'sandbox'}
-        onClick={() => setActiveModal('builder')}
-        title={playMode === 'sandbox' ? '打开可视化想定编辑器' : '切换至沙盒模式后可编辑想定'}
-        className={`toolbar-button ${playMode === 'sandbox' ? 'text-emerald-200 border-emerald-500/35 bg-emerald-500/10 hover:bg-emerald-500/20' : 'toolbar-button-subtle opacity-40 cursor-not-allowed'}`}
+        disabled={replayOpen || playMode !== 'sandbox'}
+        onClick={() => { if (!useWargameStore.getState().replayPlayer) setActiveModal('builder'); }}
+        title={replayOpen ? EXIT_REPLAY_HINT : playMode === 'sandbox' ? '打开可视化想定编辑器' : '切换至沙盒模式后可编辑想定'}
+        className={`toolbar-button ${playMode === 'sandbox' && !replayOpen ? 'text-emerald-200 border-emerald-500/35 bg-emerald-500/10 hover:bg-emerald-500/20' : 'toolbar-button-subtle opacity-40 cursor-not-allowed'}`}
       >
         <PencilRuler /><span>想定编辑</span>
       </button>
@@ -210,9 +210,10 @@ export const TopCommandHeader = React.memo(function TopCommandHeader({
       {playMode === 'sandbox' && (
         <button
           type="button"
-          onClick={() => setActiveModal('unit_spawner')}
+          disabled={replayOpen}
+          onClick={() => { if (!useWargameStore.getState().replayPlayer) setActiveModal('unit_spawner'); }}
           className="toolbar-button toolbar-button-subtle text-emerald-300 border-emerald-500/30 hover:border-emerald-400/50 hover:bg-emerald-500/10"
-          title="向当前战场实时投放新兵力"
+          title={replayOpen ? EXIT_REPLAY_HINT : '向当前战场实时投放新兵力'}
         >
           <PlusCircle /><span>兵力投放</span>
         </button>

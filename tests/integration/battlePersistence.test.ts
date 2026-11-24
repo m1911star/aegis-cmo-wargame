@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { exportCurrentStateAsScenarioJson, validateAndParseScenarioJson } from '../../src/scenarios/builtinScenarios';
 import { INFORMATION_EXERCISE } from '../../src/scenarios/informationExercise';
 import { canonicalBattleState, captureBattleRecording, captureBattleSave, computeCanonicalDigest, replayBattleRecording,
-  restoreBattleSave, type BattleSaveState, type BattleSnapshot } from '../../src/store/battleRecording';
+  restoreBattleSave, saveBattleToSlot, type BattleSaveState, type BattleSnapshot } from '../../src/store/battleRecording';
 import { useWargameStore as store } from '../../src/store/useWargameStore';
 import type { MissionDefinition, ScenarioDefinition, ScenarioEventAction } from '../../src/types/wargame';
 
@@ -221,17 +221,28 @@ test('catalog import and reset reject running, partially advanced, commanded, re
   state().exitReplayPlayer();
 });
 
-test('rejects replacing the opening during map replay without losing the live checkpoint', () => {
+test('rejects replacing the opening or overwriting saves during map replay without losing the live checkpoint', () => {
   begin();
   state().stepSingleTick(5);
   const save = captureBattleSave();
   const recording = captureBattleRecording();
+  const storage = new Map<string, string>();
+  const memStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value); },
+  };
+  const liveSlot = saveBattleToSlot('Live slot', undefined, memStorage);
+  const rawBefore = storage.get('aegis_cmo_save_slots_v1');
+
   state().startReplayPlayer(recording, 0);
   const playback = state();
   expect(playback.replayPlayer?.currentTick).toBe(0);
   expect(() => playback.resetScenario()).toThrow('请先退出地图回放');
   expect(() => playback.loadScenario(scenario)).toThrow('请先退出地图回放');
   expect(() => restoreBattleSave(save)).toThrow('请先退出地图回放');
+  expect(() => captureBattleSave()).toThrow('请先退出地图回放');
+  expect(() => saveBattleToSlot('Replay frame', liveSlot.slotId, memStorage)).toThrow('请先退出地图回放');
+  expect(storage.get('aegis_cmo_save_slots_v1')).toBe(rawBefore);
   expect(state()).toBe(playback);
   playback.exitReplayPlayer();
   expect(canonicalBattleState()).toEqual(save.snapshot);

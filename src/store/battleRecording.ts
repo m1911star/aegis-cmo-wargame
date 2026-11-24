@@ -132,7 +132,11 @@ function battleSnapshotFields(state: WargameStoreState) {
 }
 
 export function captureBattleSave(): BattleSaveState {
-  return structuredClone(prepareBattleSave(useWargameStore.getState()));
+  const state = useWargameStore.getState();
+  if (state.replayPlayer) {
+    throw new Error('请先退出地图回放，再保存断点存档。');
+  }
+  return structuredClone(prepareBattleSave(state));
 }
 
 export function prepareBattleSave(state: WargameStoreState): BattleSaveState {

@@ -38,6 +38,7 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
   const logs = useWargameStore((s) => s.logs);
   const events = useWargameStore((s) => s.aar.events);
   const startTime = useWargameStore((s) => s.startTime);
+  const replayOpen = useWargameStore((s) => s.replayPlayer !== null);
   const setActiveModal = useWargameStore((s) => s.setActiveModal);
   const resetScenario = useWargameStore((s) => s.resetScenario);
   const retryExercise = useWargameStore((s) => s.retryExercise);
@@ -145,13 +146,20 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
             <ChartColumn className="w-3.5 h-3.5" /><span>查看完整复盘 (AAR)</span>
           </Button>
           {shortExercise && (
-            <Button onClick={() => { if (retryExercise()) onDismiss(); }}>
+            <Button
+              disabled={replayOpen}
+              title={replayOpen ? '请先退出回放' : undefined}
+              onClick={() => { if (!useWargameStore.getState().replayPlayer && retryExercise()) onDismiss(); }}
+            >
               <RotateCcw className="w-3.5 h-3.5" /><span>同条件再试</span>
             </Button>
           )}
           <Button
             variant="outline"
+            disabled={replayOpen}
+            title={replayOpen ? '请先退出回放' : undefined}
             onClick={() => {
+              if (useWargameStore.getState().replayPlayer) return;
               onDismiss();
               resetScenario(true);
             }}
@@ -161,7 +169,10 @@ export const BattleResultOverlay: React.FC<Props> = ({ onDismiss }) => {
           </Button>
           {campaignState && !campaignState.finished && (
             <Button
+              disabled={replayOpen}
+              title={replayOpen ? '请先退出回放' : undefined}
               onClick={() => {
+                if (useWargameStore.getState().replayPlayer) return;
                 onDismiss();
                 setActiveModal('campaign');
               }}
